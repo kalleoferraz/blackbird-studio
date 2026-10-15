@@ -1,0 +1,593 @@
+<title>Blackbird Palette</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: a single dark reading column. Palette explorer first, then the same colors used in a mock Redaction View and in components, then a contrast matrix. The page is dark by design, as the identity is. */
+:root{
+  color-scheme:dark;
+  --background:#0E0B10; --panel:#1B1517; --raised:#261D1F; --border:#3A2E30;
+  --text:#EDE4DC; --text-2:#B5A89F; --muted:#7D716B;
+  --primary:#EF9B0B; --green:#9EA663; --alert:#D94711; --alert-text:#F26A3D; --danger:#F0503C;
+  --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--background);color:var(--text);font:15px/1.55 var(--sans);
+  padding-block:32px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:48px}
+h1{font-size:34px;line-height:1.1;margin:0 0 8px;font-weight:600;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:20px;margin:0 0 6px;font-weight:600;text-wrap:balance}
+h3{font-size:12px;margin:0 0 10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:var(--text-2)}
+p{margin:0}
+.lede{color:var(--text-2);max-width:62ch}
+.meta{font:12px var(--mono);color:var(--muted);margin-bottom:14px;letter-spacing:.02em}
+.sec-head{margin-bottom:18px}
+.sec-head p{color:var(--text-2);max-width:68ch}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+/* swatches */
+.groups{display:flex;flex-direction:column;gap:22px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.sw{all:unset;box-sizing:border-box;cursor:pointer;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--panel)}
+.sw:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.sw .chip{height:64px;border-bottom:1px solid var(--border)}
+.sw .lbl{padding:8px 10px 9px;display:flex;flex-direction:column;gap:1px}
+.sw .nm{font-size:13px;font-weight:500}
+.sw .hx{font:12px var(--mono);color:var(--text-2)}
+.sw[aria-pressed="true"]{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
+.detail{margin-top:26px;display:grid;grid-template-columns:minmax(0,280px) minmax(0,1fr);gap:24px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:20px}
+.big{border-radius:6px;border:1px solid var(--border);min-height:200px;padding:16px;display:flex;flex-direction:column;justify-content:space-between}
+.big .aa{font-size:56px;font-weight:600;line-height:1}
+.big .sm{font-size:13px}
+.d-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin-bottom:4px}
+.d-title b{font-size:20px;font-weight:600}
+.d-title code,.vals code{font:13px var(--mono);color:var(--text-2)}
+.vals{display:flex;flex-wrap:wrap;gap:6px 16px;margin:6px 0 12px}
+.use{color:var(--text-2);margin-bottom:16px;max-width:60ch}
+.copy{background:var(--raised);border:1px solid var(--border);border-radius:5px;padding:5px 10px;cursor:pointer;font-size:13px}
+.copy:hover{border-color:var(--text-2)}
+.rows{display:grid;gap:6px}
+.row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;padding:8px 10px;border-radius:5px;background:var(--background);border:1px solid var(--border);font-size:13px}
+.row .r{font:13px var(--mono)}
+.badge{font:11px var(--mono);padding:2px 7px;border-radius:99px;border:1px solid;white-space:nowrap}
+.b-aa{color:var(--green);border-color:color-mix(in srgb,var(--green) 55%,transparent)}
+.b-ui{color:var(--primary);border-color:color-mix(in srgb,var(--primary) 55%,transparent)}
+.b-no{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 55%,transparent)}
+.b-na{color:var(--muted);border-color:var(--border)}
+
+/* proportion */
+.prop{display:flex;height:56px;border-radius:6px;overflow:hidden;border:1px solid var(--border)}
+.prop div{display:flex;align-items:flex-end;padding:8px 10px;font:12px var(--mono)}
+.prop-legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px;color:var(--text-2);font-size:13px}
+.prop-legend b{color:var(--text);font-weight:500}
+
+/* tabs */
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.tab{background:transparent;border:1px solid var(--border);border-radius:5px;padding:6px 12px;cursor:pointer;color:var(--text-2)}
+.tab[aria-selected="true"]{background:var(--raised);color:var(--text);border-color:var(--primary)}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-bottom:12px;color:var(--text-2);font-size:13px}
+.toolbar label{display:flex;gap:8px;align-items:center;cursor:pointer}
+.toolbar input{accent-color:var(--primary);width:16px;height:16px}
+.readout{font:12px var(--mono);color:var(--text-2);min-height:20px;flex:1 1 280px}
+.readout i{font-style:normal;color:var(--primary)}
+.scroll{overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:var(--background)}
+.note{font-size:13px;color:var(--text-2);margin-top:12px;max-width:80ch}
+
+/* mock redaction view */
+.mock{min-width:900px;display:grid;grid-template-columns:200px minmax(0,1fr) 250px;grid-template-rows:46px auto auto;font-size:13px;background:var(--background)}
+.xray [data-label]{outline:1px dashed color-mix(in srgb,var(--primary) 55%,transparent);outline-offset:-1px}
+.mock [data-label].hl{outline:2px solid var(--primary)!important;outline-offset:-2px}
+.top{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:0 14px;background:var(--panel);border-bottom:1px solid var(--border)}
+.top .logo{width:22px;height:22px;border-radius:50% 50% 50% 4px;background:var(--primary);flex:none}
+.top .ttl{font-weight:600}
+.top .crumb{color:var(--text-2)}
+.top .sp{flex:1}
+.dirty{display:flex;align-items:center;gap:7px;color:var(--alert-text);font-size:12px}
+.dirty svg{width:14px;height:14px}
+.btn{border:1px solid transparent;border-radius:5px;padding:6px 12px;font-weight:500;font-size:13px;cursor:default;display:inline-flex;align-items:center;gap:7px;line-height:1.2}
+.btn-p{background:var(--primary);color:var(--background)}
+.btn-s{background:var(--raised);border-color:var(--border);color:var(--text)}
+.btn-g{background:transparent;color:var(--text-2)}
+.btn-d{background:var(--danger);color:var(--background)}
+.btn-o{background:transparent;border-color:var(--danger);color:var(--danger)}
+.btn[disabled]{background:var(--panel);color:var(--muted);border-color:var(--border)}
+.side{background:var(--panel);border-right:1px solid var(--border);padding:12px 8px;display:flex;flex-direction:column;gap:3px}
+.side h4{margin:10px 8px 4px;font:500 11px var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.side h4:first-child{margin-top:0}
+.node{padding:5px 8px;border-radius:4px;color:var(--text-2);display:flex;gap:8px;align-items:center}
+.node.ch{color:var(--text)}
+.node.sub{margin-left:14px}
+.node.act{background:var(--raised);color:var(--text);box-shadow:inset 2px 0 0 var(--primary)}
+.node .dot{width:8px;height:8px;border-radius:50%;flex:none}
+.node .ix{font:11px var(--mono);color:var(--muted)}
+.ed{background:var(--background);padding:18px 24px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.ed .hd{color:var(--muted);font:12px var(--mono);margin-bottom:8px}
+.cuep{display:grid;grid-template-columns:104px minmax(0,1fr);gap:12px;padding:8px 10px;border-radius:5px;border-left:3px solid var(--lane);position:relative}
+.cuep .tag{font:11px var(--mono);color:var(--text-2);display:flex;flex-direction:column;gap:1px}
+.cuep .tag b{font-weight:500;color:var(--lane)}
+.cuep p{color:var(--text);font-size:14.5px;line-height:1.6}
+.cuep.sel{background:var(--raised)}
+.cuep.sel::after{content:"";position:absolute;inset:0;border:1px solid var(--primary);border-radius:5px;pointer-events:none}
+.cuep.sfx p{color:var(--text-2);font-style:italic}
+.notes{background:var(--panel);border-left:1px solid var(--border);padding:12px;display:flex;flex-direction:column;gap:10px}
+.notes h4{margin:0;font:500 11px var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.nt{background:var(--raised);border:1px solid var(--border);border-radius:6px;padding:9px 10px;display:flex;flex-direction:column;gap:5px}
+.nt .h{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-2)}
+.chipt{font:500 10.5px var(--mono);padding:1px 6px;border-radius:99px;border:1px solid;letter-spacing:.02em}
+.t-comment{color:var(--text-2);border-color:var(--border)}
+.t-ref{color:var(--green);border-color:color-mix(in srgb,var(--green) 55%,transparent)}
+.t-task{color:var(--primary);border-color:color-mix(in srgb,var(--primary) 55%,transparent)}
+.nt p{font-size:13px}
+.nt.reply{margin-left:14px;background:var(--panel)}
+.check{width:14px;height:14px;border:1.5px solid var(--text-2);border-radius:3px;display:inline-block;flex:none}
+.check.on{background:var(--green);border-color:var(--green);position:relative}
+.check.on::after{content:"";position:absolute;left:3.5px;top:0;width:4px;height:8px;border:solid var(--background);border-width:0 2px 2px 0;transform:rotate(45deg)}
+.tl{grid-column:1/-1;border-top:1px solid var(--border);background:var(--panel)}
+.tl-bar{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border)}
+.tl-bar .tm{font:13px var(--mono);color:var(--text)}
+.tl-bar .tm span{color:var(--muted)}
+.rec{display:inline-flex;align-items:center;gap:7px}
+.rec i{width:9px;height:9px;border-radius:50%;background:var(--background);display:inline-block}
+.tl-body{display:grid;grid-template-columns:130px minmax(0,1fr)}
+.lanes-h{border-right:1px solid var(--border)}
+.lh{height:44px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--border);color:var(--text)}
+.lh .dot{width:9px;height:9px;border-radius:2px}
+.lh small{color:var(--muted);font:11px var(--mono);margin-left:auto}
+.ruler{height:26px;position:relative;border-bottom:1px solid var(--border);color:var(--muted);font:11px var(--mono)}
+.ruler span{position:absolute;top:6px;transform:translateX(3px)}
+.ruler span::before{content:"";position:absolute;left:-3px;top:-6px;height:22px;border-left:1px solid var(--border)}
+.seg{position:absolute;top:0;height:100%;border-left:1px dashed var(--muted);pointer-events:none}
+.seglab{position:absolute;top:6px;font:11px var(--mono);color:var(--text-2);transform:translateX(5px)}
+.tracks{position:relative}
+.track{height:44px;position:relative;border-bottom:1px solid var(--border);background:var(--background)}
+.cue{position:absolute;top:5px;bottom:5px;border-radius:4px;overflow:hidden;background:color-mix(in srgb,var(--lane) 20%,var(--background));border:1px solid color-mix(in srgb,var(--lane) 70%,transparent);border-top:3px solid var(--lane)}
+.cue .nm{position:absolute;left:6px;top:1px;font-size:11px;color:var(--text);white-space:nowrap;z-index:2;text-shadow:0 0 4px var(--background),0 0 2px var(--background)}
+.cue svg{position:absolute;left:0;bottom:0;width:100%;height:68%}
+.cue.sel{box-shadow:0 0 0 2px var(--primary)}
+.phead{position:absolute;top:0;bottom:0;width:0;border-left:2px solid var(--primary);z-index:5;pointer-events:none}
+.phead::before{content:"";position:absolute;top:0;left:-7px;border:6px solid transparent;border-top:8px solid var(--primary);border-bottom:0}
+.lg{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 14px;border-top:1px solid var(--border);font-size:12px;color:var(--text-2)}
+.lg i{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:5px}
+
+/* components tab */
+.comp{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;padding:16px;background:var(--background);border:1px solid var(--border);border-radius:8px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.line{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--text-2)}
+.inp{background:var(--background);border:1px solid var(--border);border-radius:5px;padding:7px 10px;color:var(--text);font-size:13px}
+.inp.f{border-color:var(--primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 30%,transparent)}
+.inp.e{border-color:var(--danger)}
+.help{font-size:12px;display:flex;gap:6px;align-items:center}
+.help svg{width:14px;height:14px;flex:none}
+.alertbox{display:flex;gap:10px;padding:10px 12px;border-radius:6px;border:1px solid;font-size:13px;align-items:flex-start}
+.alertbox svg{width:16px;height:16px;flex:none;margin-top:2px}
+.alertbox b{font-weight:500;display:block;color:var(--text)}
+.alertbox span{color:var(--text-2)}
+.a-ok{border-color:color-mix(in srgb,var(--green) 55%,transparent);background:color-mix(in srgb,var(--green) 12%,var(--panel))}
+.a-ok svg{color:var(--green)}
+.a-warn{border-color:color-mix(in srgb,var(--alert) 65%,transparent);background:color-mix(in srgb,var(--alert) 14%,var(--panel))}
+.a-warn svg{color:var(--alert-text)}
+.a-err{border-color:color-mix(in srgb,var(--danger) 65%,transparent);background:color-mix(in srgb,var(--danger) 14%,var(--panel))}
+.a-err svg{color:var(--danger)}
+.file{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--background);font-size:13px}
+.file svg{width:16px;height:16px}
+.file code{font:12px var(--mono);color:var(--text-2);overflow-wrap:anywhere}
+.st{font:11px var(--mono);white-space:nowrap}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--primary);animation:sp 1s linear infinite;display:inline-block}
+@keyframes sp{to{transform:rotate(360deg)}}
+.pulse{animation:pl 1.4s ease-in-out infinite}
+@keyframes pl{50%{opacity:.35}}
+.stripe{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--primary) 22%,transparent) 0 8px,transparent 8px 16px)}
+@media (prefers-reduced-motion:reduce){.spin,.pulse{animation:none}}
+.vstage{display:grid;gap:8px}
+.vs{display:flex;align-items:center;gap:10px;font-size:13px;padding:7px 10px;border-radius:6px;background:var(--background);border:1px solid var(--border)}
+.vs svg{width:14px;height:14px}
+.vs small{margin-left:auto;font:11px var(--mono);color:var(--muted)}
+
+/* matrix */
+.tw{overflow-x:auto;border:1px solid var(--border);border-radius:8px}
+table{border-collapse:collapse;width:100%;min-width:620px;font-size:13px}
+th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+th{font:500 11px var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--text-2);background:var(--panel)}
+tr:last-child td{border-bottom:0}
+td .cell{display:flex;gap:10px;align-items:center}
+td .cell .r{font:13px var(--mono);min-width:44px}
+td .sample{display:inline-block;padding:2px 8px;border-radius:4px;font-weight:500}
+.keyrow{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:12px;font-size:12px;color:var(--text-2);align-items:center}
+footer{color:var(--muted);font-size:12.5px;border-top:1px solid var(--border);padding-top:16px;max-width:80ch}
+@media (max-width:720px){.detail{grid-template-columns:minmax(0,1fr)}.big{min-height:120px}h1{font-size:28px}}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-warn" viewBox="0 0 16 16"><path d="M8 1.6 15 14H1L8 1.6Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6v4M8 11.6v.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+  <symbol id="i-err" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m5.6 5.6 4.8 4.8M10.4 5.6l-4.8 4.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+  <symbol id="i-ok" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m5 8.2 2.1 2.1L11 6.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-file" viewBox="0 0 16 16"><path d="M3.5 1.5h6l3 3v10h-9v-13Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M9.5 1.5v3h3" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5V8l2.4 1.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+</svg>
+
+<div class="wrap">
+
+<header>
+  <div class="meta">REDACTION STUDIO · IDENTITY COLORS · DRAFT V1 · 15 OCT 2026</div>
+  <h1>Blackbird Palette</h1>
+  <p class="lede">Twelve colors taken from a blackbird: dark brown-plum feathers, a yolk-yellow beak, a green meadow behind it. Pick any swatch to read its values and contrast, then see the same colors working inside a Redaction View.</p>
+</header>
+
+<section aria-labelledby="h-pal">
+  <div class="sec-head">
+    <h2 id="h-pal">Colors by role</h2>
+    <p>Colors are named by what they do, never by how they look. Select a swatch for details.</p>
+  </div>
+  <div class="groups" id="groups"></div>
+  <div class="detail" id="detail" aria-live="polite"></div>
+</section>
+
+<section aria-labelledby="h-prop">
+  <div class="sec-head">
+    <h2 id="h-prop">How much of each</h2>
+    <p>Dark surfaces carry most of the screen. Yolk stays rare so that it always means "this is active" or "do this".</p>
+  </div>
+  <div class="prop" id="prop" role="img" aria-label="Proportion bar: about 60 percent background, 30 percent panels, 10 percent accents"></div>
+  <div class="prop-legend">
+    <div><b>About 60%: background.</b> App canvas and the empty space of every timeline lane.</div>
+    <div><b>About 30%: panels.</b> Sidebar, editor frame, notes, menus and dialogs, one step lighter for each layer.</div>
+    <div><b>About 10%: accents.</b> Yolk for actions, selection and the playhead; green for success and played audio; orange for alerts.</div>
+  </div>
+</section>
+
+<section aria-labelledby="h-ctx">
+  <div class="sec-head">
+    <h2 id="h-ctx">In context</h2>
+    <p>The palette values are agreed. How roles map onto screens and states below is a proposal to react to. Lane colors are placeholders, because that palette is still to be designed.</p>
+  </div>
+  <div class="tabs" role="tablist" aria-label="Context views">
+    <button class="tab" role="tab" id="t-view" aria-selected="true" aria-controls="p-view">Redaction View</button>
+    <button class="tab" role="tab" id="t-comp" aria-selected="false" aria-controls="p-comp">Components and states</button>
+  </div>
+
+  <div id="p-view" role="tabpanel" aria-labelledby="t-view">
+    <div class="toolbar">
+      <label><input type="checkbox" id="xray"> Show color roles</label>
+      <span class="readout" id="readout">Hover over the mock to see which role each part uses.</span>
+    </div>
+    <div class="scroll" id="scroll">
+      <div class="mock" id="mock">
+        <div class="top" data-label="Top bar" data-bg="panel" data-fg="text">
+          <span class="logo" data-label="Brand mark" data-bg="primary"></span>
+          <span class="ttl">Blackbird</span>
+          <span class="crumb" data-label="Breadcrumb" data-bg="panel" data-fg="text-2">Chapter 01 · The Window · Scene 01</span>
+          <span class="sp"></span>
+          <span class="dirty" data-label="Unpushed changes" data-bg="panel" data-fg="alert-text"><svg><use href="#i-clock"/></svg>Unpushed changes · 12 min</span>
+          <span class="btn btn-p" data-label="Primary button" data-bg="primary" data-fg="background">Push version</span>
+        </div>
+
+        <aside class="side" data-label="Sidebar" data-bg="panel" data-fg="text-2">
+          <h4>Chapters</h4>
+          <div class="node ch" data-label="Chapter row" data-bg="panel" data-fg="text"><span class="ix">00A</span>Prologue</div>
+          <div class="node ch" data-label="Chapter row" data-bg="panel" data-fg="text"><span class="ix">01</span>The Window</div>
+          <div class="node sub act" data-label="Active scene" data-bg="raised" data-fg="text" data-extra="marker: primary"><span class="ix">01</span>Cold kettle</div>
+          <div class="node sub" data-label="Scene row" data-bg="panel" data-fg="text-2"><span class="ix">02</span>Dark falls</div>
+          <div class="node ch" data-label="Chapter row" data-bg="panel" data-fg="text"><span class="ix">02</span>The Road</div>
+          <h4>Characters</h4>
+          <div class="node" data-label="Character row" data-bg="panel" data-fg="text-2"><span class="dot" style="background:#C8A15A"></span>Narrator</div>
+          <div class="node" data-label="Character row" data-bg="panel" data-fg="text-2"><span class="dot" style="background:#7C8FA6"></span>Mara</div>
+          <div class="node" data-label="Character row" data-bg="panel" data-fg="text-2"><span class="dot" style="background:#9A8FB0"></span>Wind</div>
+          <h4>Library</h4>
+          <div class="node" data-label="Library row" data-bg="panel" data-fg="text-2"><svg width="14" height="14"><use href="#i-file"/></svg>sounds / wind</div>
+        </aside>
+
+        <main class="ed" data-label="Editor" data-bg="background" data-fg="text">
+          <div class="hd">SCENE 01 · SAMPLE TEXT</div>
+          <div class="cuep sel" style="--lane:#C8A15A" data-label="Selected cue" data-bg="raised" data-fg="text" data-extra="outline: primary">
+            <div class="tag"><b>Narrator</b>00:03 · 8.4 s</div>
+            <p>The kettle had gone cold an hour ago, and still Mara did not move from the window.</p>
+          </div>
+          <div class="cuep" style="--lane:#7C8FA6" data-label="Cue" data-bg="background" data-fg="text">
+            <div class="tag"><b>Mara</b>00:13 · 4.1 s</div>
+            <p>You said you would be back before dark.</p>
+          </div>
+          <div class="cuep sfx" style="--lane:#9A8FB0" data-label="Sound effect cue" data-bg="background" data-fg="text-2">
+            <div class="tag"><b>Wind</b>00:02 · 14 s</div>
+            <p>Wind through a loose shutter</p>
+          </div>
+          <div class="cuep" style="--lane:#C8A15A" data-label="Cue" data-bg="background" data-fg="text">
+            <div class="tag"><b>Narrator</b>00:23 · 10 s</div>
+            <p>Outside, the road ran empty to the hills, grey on grey, and the last light was going out of it.</p>
+          </div>
+        </main>
+
+        <aside class="notes" data-label="Notes panel" data-bg="panel" data-fg="text">
+          <h4>Notes on this cue</h4>
+          <div class="nt" data-label="Note card" data-bg="raised" data-fg="text">
+            <div class="h"><span class="chipt t-comment" data-label="Comment tag" data-bg="raised" data-fg="text-2">comment</span>Kalleo · 10:42</div>
+            <p>Slower here. Let the pause after "window" breathe.</p>
+          </div>
+          <div class="nt reply" data-label="Reply card" data-bg="panel" data-fg="text">
+            <div class="h"><span class="chipt t-comment" data-label="Comment tag" data-bg="panel" data-fg="text-2">comment</span>Kalleo · 10:51</div>
+            <p>Re-record with a longer room tone.</p>
+          </div>
+          <div class="nt" data-label="Reference card" data-bg="raised" data-fg="text">
+            <div class="h"><span class="chipt t-ref" data-label="Reference tag" data-bg="raised" data-fg="green">reference</span>Wind-03</div>
+            <p>Shutter recording, field library, take 3.</p>
+          </div>
+          <div class="nt" data-label="Task card" data-bg="raised" data-fg="text">
+            <div class="h"><span class="chipt t-task" data-label="Task tag" data-bg="raised" data-fg="primary">task</span><span class="check" data-label="Open checkbox" data-bg="raised" data-fg="text-2"></span>open</div>
+            <p>Replace the placeholder wind with the field recording.</p>
+          </div>
+          <div class="nt" data-label="Task card, done" data-bg="raised" data-fg="text-2">
+            <div class="h"><span class="chipt t-task" data-label="Task tag" data-bg="raised" data-fg="primary">task</span><span class="check on" data-label="Done checkbox" data-bg="green"></span>done</div>
+            <p>Trim breath at the start of the line.</p>
+          </div>
+        </aside>
+
+        <section class="tl" data-label="Timeline panel" data-bg="panel" data-fg="text">
+          <div class="tl-bar" data-label="Transport bar" data-bg="panel" data-fg="text">
+            <span class="btn btn-s" data-label="Secondary button" data-bg="raised" data-fg="text">Play</span>
+            <span class="btn btn-d rec" data-label="Record button" data-bg="danger" data-fg="background"><i class="pulse"></i>Record</span>
+            <span class="tm" data-label="Time readout" data-bg="panel" data-fg="text">00:14.4 <span>/ 00:40.0</span></span>
+            <span class="btn btn-g" data-label="Ghost button" data-bg="panel" data-fg="text-2">Fit cue to clip</span>
+          </div>
+          <div class="tl-body">
+            <div class="lanes-h" data-label="Lane headers" data-bg="panel" data-fg="text">
+              <div class="lh" style="height:26px;color:var(--muted);font:11px var(--mono)" data-label="Ruler label" data-bg="panel" data-fg="muted">SEGMENTS</div>
+              <div class="lh"><span class="dot" style="background:#C8A15A"></span>Narrator<small>M</small></div>
+              <div class="lh"><span class="dot" style="background:#7C8FA6"></span>Mara<small>M</small></div>
+              <div class="lh"><span class="dot" style="background:#9A8FB0"></span>Wind<small>M</small></div>
+              <div class="lh" style="border-bottom:0"><span class="dot" style="background:#6FA39B"></span>Music<small>M</small></div>
+            </div>
+            <div class="tracks" id="tracks">
+              <div class="ruler" data-label="Time ruler" data-bg="panel" data-fg="muted" id="ruler"></div>
+              <div class="track" data-label="Lane track" data-bg="background">
+                <div class="cue sel" data-start="3" data-len="27" style="--lane:#C8A15A;left:3%;width:27%" data-label="Selected cue with waveform" data-bg="background" data-extra="outline: primary · played: green"><span class="nm">The kettle had gone cold</span></div>
+                <div class="cue" data-start="58" data-len="26" style="--lane:#C8A15A;left:58%;width:26%" data-label="Cue with waveform" data-bg="background"><span class="nm">Outside, the road ran empty</span></div>
+              </div>
+              <div class="track" data-label="Lane track" data-bg="background">
+                <div class="cue" data-start="32" data-len="14" style="--lane:#7C8FA6;left:32%;width:14%" data-label="Cue with waveform" data-bg="background"><span class="nm">You said you would</span></div>
+                <div class="cue" data-start="86" data-len="10" style="--lane:#7C8FA6;left:86%;width:10%" data-label="Cue with waveform" data-bg="background"><span class="nm">Mara</span></div>
+              </div>
+              <div class="track" data-label="Lane track" data-bg="background">
+                <div class="cue" data-start="5" data-len="36" style="--lane:#9A8FB0;left:5%;width:36%" data-label="Cue with waveform" data-bg="background"><span class="nm">Wind through a loose shutter</span></div>
+              </div>
+              <div class="track" style="border-bottom:0" data-label="Lane track" data-bg="background">
+                <div class="cue" data-start="10" data-len="86" style="--lane:#6FA39B;left:10%;width:86%" data-label="Cue with waveform" data-bg="background"><span class="nm">Strings, slow</span></div>
+              </div>
+              <div class="phead" id="phead" style="left:36%" data-label="Playhead" data-bg="primary"></div>
+            </div>
+          </div>
+          <div class="lg" data-label="Legend" data-bg="panel" data-fg="text-2">
+            <span><i style="background:#C8A15A"></i>Narrator</span><span><i style="background:#7C8FA6"></i>Mara</span><span><i style="background:#9A8FB0"></i>Wind</span><span><i style="background:#6FA39B"></i>Music</span>
+            <span style="margin-left:auto;color:var(--muted)">Lane colors are placeholders, not part of v1. Played audio uses green, the playhead uses yolk.</span>
+          </div>
+        </section>
+      </div>
+    </div>
+    <p class="note">The sample text is invented. The layout follows the Redaction View in the Project Bible: chapters and scenes on the left, the text with its cues in the middle, notes on the right, and the scene's timeline of lanes, segments and cues below.</p>
+  </div>
+
+  <div id="p-comp" role="tabpanel" aria-labelledby="t-comp" hidden>
+    <div class="comp">
+      <div class="card">
+        <h3>Buttons</h3>
+        <div class="line">
+          <span class="btn btn-p">Push version</span>
+          <span class="btn btn-s">Upload audio</span>
+          <span class="btn btn-g">Cancel</span>
+        </div>
+        <div class="line">
+          <span class="btn btn-d">Delete permanently</span>
+          <span class="btn btn-o">Discard take</span>
+          <button class="btn" disabled>Push version</button>
+        </div>
+        <p class="note" style="margin:0">Yolk is the one primary action on a screen. Danger is only for destructive actions and recording. Disabled uses muted text on a panel.</p>
+      </div>
+
+      <div class="card">
+        <h3>Inputs</h3>
+        <div class="field">Scene title<span class="inp">Cold kettle</span></div>
+        <div class="field">Scene title, focused<span class="inp f">Cold kettle</span></div>
+        <div class="field">Reference key<span class="inp e">Wind 03 (final)</span>
+          <span class="help" style="color:var(--danger)"><svg><use href="#i-err"/></svg>Use at most 24 characters and no spaces.</span></div>
+      </div>
+
+      <div class="card">
+        <h3>Messages</h3>
+        <div class="alertbox a-ok"><svg><use href="#i-ok"/></svg><div><b>Version pushed</b><span>Snapshot saved to the repository.</span></div></div>
+        <div class="alertbox a-warn"><svg><use href="#i-warn"/></svg><div><b>Unpushed changes for 3 hours</b><span>A long gap shows up as one large jump in the history.</span></div></div>
+        <div class="alertbox a-err"><svg><use href="#i-err"/></svg><div><b>Upload failed</b><span>The file is over 100 MiB. Choose a shorter recording.</span></div></div>
+        <p class="note" style="margin:0">Each message pairs its color with an icon and a title, so none relies on color alone.</p>
+      </div>
+
+      <div class="card">
+        <h3>Library file states</h3>
+        <div class="file"><svg style="color:var(--green)"><use href="#i-ok"/></svg><code>storyline/01 - TheWindow/01.0003 - Narrator - Thekettle (1).wav</code><span class="st" style="color:var(--green)">ready</span></div>
+        <div class="file"><span class="spin" role="img" aria-label="Encoding"></span><code>storyline/01 - TheWindow/01.0013 - Mara - Yousaid (1).wav</code><span class="st" style="color:var(--primary)">encoding</span></div>
+        <div class="file"><svg style="color:var(--alert-text)"><use href="#i-warn"/></svg><code>sounds/wind/shutter-03.wav</code><span class="st" style="color:var(--alert-text)">changed</span></div>
+        <div class="file"><svg style="color:var(--danger)"><use href="#i-err"/></svg><code>sounds/wind/gust-02.wav</code><span class="st" style="color:var(--danger)">missing</span></div>
+        <div class="file stripe" style="min-height:34px"><span></span><code>Loading stripe on a new cue</code><span></span></div>
+      </div>
+
+      <div class="card">
+        <h3>Unpushed changes, over time</h3>
+        <div class="vstage">
+          <div class="vs"><svg style="color:var(--green)"><use href="#i-ok"/></svg>Just pushed<small>accent-green</small></div>
+          <div class="vs"><svg style="color:var(--text-2)"><use href="#i-clock"/></svg><span style="color:var(--text-2)">Unpushed · 12 min</span><small>text-secondary</small></div>
+          <div class="vs"><svg style="color:var(--alert-text)"><use href="#i-clock"/></svg><span style="color:var(--alert-text)">Unpushed · 3 h</span><small>alert-text</small></div>
+        </div>
+        <p class="note" style="margin:0">A proposal: the indicator stays calm at first and turns orange as the gap grows. The thresholds are not decided.</p>
+      </div>
+
+      <div class="card">
+        <h3>Note types and recording</h3>
+        <div class="line">
+          <span class="chipt t-comment">comment</span>
+          <span class="chipt t-ref">reference</span>
+          <span class="chipt t-task">task</span>
+        </div>
+        <div class="line"><span class="check"></span> Open task <span class="check on" style="margin-left:10px"></span> Done task</div>
+        <div class="line"><span class="btn btn-d rec"><i class="pulse"></i>Recording 00:07</span></div>
+        <p class="note" style="margin:0">Tags separate note types by color and by label. The recording button reuses danger, with a pulsing dot that stops when reduced motion is on.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="h-mat">
+  <div class="sec-head">
+    <h2 id="h-mat">Contrast matrix</h2>
+    <p>Ratios are computed in this page from the hex values above. WCAG AA needs 4.5:1 for normal text and 3:1 for large text and interface parts.</p>
+  </div>
+  <div class="tw"><table id="matrix"></table></div>
+  <div class="keyrow"><span class="badge b-aa">AA</span>4.5:1 or more <span class="badge b-ui">Large / UI</span>3:1 to 4.5:1, so icons, fills and large text only <span class="badge b-no">Fail</span>under 3:1</div>
+  <h3 style="margin-top:28px">Text on a filled color</h3>
+  <div class="tw"><table id="onfill"></table></div>
+</section>
+
+<footer>
+  Typography on this page is a placeholder and not part of the identity. The base colors come from a photo of a blackbird, with the dark navy swatch dropped and the neutrals rebuilt toward brown. The reddish orange for danger is the one color not taken from the photo.
+</footer>
+</div>
+
+<script>
+(function(){
+  var T=[
+    {g:'Surfaces',k:'background',n:'background',h:'#0E0B10',u:'App canvas and the empty space of every timeline lane.'},
+    {g:'Surfaces',k:'panel',n:'panel',h:'#1B1517',u:'Sidebar, editor frame, notes, timeline frame.'},
+    {g:'Surfaces',k:'raised',n:'raised',h:'#261D1F',u:'Cards, menus, dialogs and the selected row. One step lighter for each layer, since shadows do not show on dark.'},
+    {g:'Surfaces',k:'border',n:'border',h:'#3A2E30',u:'Dividers and outlines.'},
+    {g:'Text',k:'text',n:'text',h:'#EDE4DC',u:'Main text.'},
+    {g:'Text',k:'text-2',n:'text-secondary',h:'#B5A89F',u:'Labels, hints and secondary text.'},
+    {g:'Text',k:'muted',n:'text-muted',h:'#7D716B',u:'Disabled and decorative text only. It does not reach 4.5:1 on panels.'},
+    {g:'Brand',k:'primary',n:'primary (yolk)',h:'#EF9B0B',u:'The main action, the active state, the selection outline and the playhead.'},
+    {g:'Accent',k:'green',n:'accent-green',h:'#9EA663',u:'Success, ready, the played part of a waveform, done tasks and reference notes.'},
+    {g:'Alerts',k:'alert',n:'alert',h:'#D94711',u:'Attention fills and icons, such as a changed file. Too dark for small text on panels.'},
+    {g:'Alerts',k:'alert-text',n:'alert-text',h:'#F26A3D',u:'Attention text and links, such as the unpushed-changes indicator.'},
+    {g:'Alerts',k:'danger',n:'danger',h:'#F0503C',u:'Errors, destructive actions and recording. The one color not taken from the photo.'}
+  ];
+  var byK={};T.forEach(function(t){byK[t.k]=t});
+  function rgb(h){h=h.replace('#','');return [0,2,4].map(function(i){return parseInt(h.substr(i,2),16)})}
+  function lum(h){var c=rgb(h).map(function(v){v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)});return .2126*c[0]+.7152*c[1]+.0722*c[2]}
+  function cr(a,b){var x=lum(a),y=lum(b);if(x<y){var t=x;x=y;y=t}return (x+.05)/(y+.05)}
+  function hsl(h){var c=rgb(h).map(function(v){return v/255}),mx=Math.max.apply(0,c),mn=Math.min.apply(0,c),l=(mx+mn)/2,s=0,hh=0,d=mx-mn;
+    if(d){s=d/(1-Math.abs(2*l-1));if(mx===c[0])hh=((c[1]-c[2])/d)%6;else if(mx===c[1])hh=(c[2]-c[0])/d+2;else hh=(c[0]-c[1])/d+4;hh*=60;if(hh<0)hh+=360}
+    return Math.round(hh)+'°, '+Math.round(s*100)+'%, '+Math.round(l*100)+'%'}
+  function badge(r,kind){
+    if(kind==='na')return '<span class="badge b-na">n/a</span>';
+    return r>=4.5?'<span class="badge b-aa">AA</span>':(r>=3?'<span class="badge b-ui">Large / UI</span>':'<span class="badge b-no">Fail</span>')}
+  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+  var ink=byK.background.h, surfaces=['background','panel','raised'];
+
+  /* swatches */
+  var groups=document.getElementById('groups'),order=[],gm={};
+  T.forEach(function(t){if(!gm[t.g]){gm[t.g]=[];order.push(t.g)}gm[t.g].push(t)});
+  order.forEach(function(g){
+    var wrap=document.createElement('div');
+    wrap.innerHTML='<h3>'+g+'</h3><div class="grid"></div>';
+    var grid=wrap.querySelector('.grid');
+    gm[g].forEach(function(t){
+      var b=document.createElement('button');b.className='sw';b.type='button';b.id='sw-'+t.k;b.setAttribute('aria-pressed','false');
+      b.innerHTML='<span class="chip" style="background:'+t.h+'"></span><span class="lbl"><span class="nm">'+esc(t.n)+'</span><span class="hx">'+t.h+'</span></span>';
+      b.addEventListener('click',function(){select(t.k)});
+      grid.appendChild(b)});
+    groups.appendChild(wrap)});
+
+  var detail=document.getElementById('detail');
+  function select(k){
+    var t=byK[k];
+    T.forEach(function(x){document.getElementById('sw-'+x.k).setAttribute('aria-pressed',x.k===k?'true':'false')});
+    var fg=cr(ink,t.h)>=cr(byK.text.h,t.h)?ink:byK.text.h;
+    var rows=surfaces.map(function(s){
+      if(s===k)return '<div class="row"><span>on '+byK[s].n+'</span><span class="r">same color</span>'+badge(0,'na')+'</div>';
+      var r=cr(t.h,byK[s].h);
+      return '<div class="row"><span>as text or icon on '+byK[s].n+'</span><span class="r">'+r.toFixed(2)+':1</span>'+badge(r)+'</div>'}).join('');
+    var ri=cr(ink,t.h), rt=cr(byK.text.h,t.h);
+    rows+='<div class="row"><span>background color as text on this fill</span><span class="r">'+ri.toFixed(2)+':1</span>'+badge(ri)+'</div>';
+    rows+='<div class="row"><span>text color as text on this fill</span><span class="r">'+rt.toFixed(2)+':1</span>'+badge(rt)+'</div>';
+    detail.innerHTML=
+      '<div class="big" style="background:'+t.h+';color:'+fg+'"><span class="aa">Aa</span><span class="sm">'+esc(t.n)+' · '+t.h+'</span></div>'+
+      '<div><div class="d-title"><b>'+esc(t.n)+'</b><code>--'+t.k+'</code></div>'+
+      '<div class="vals"><code>'+t.h+'</code><code>RGB '+rgb(t.h).join(', ')+'</code><code>HSL '+hsl(t.h)+'</code></div>'+
+      '<p class="use">'+esc(t.u)+'</p>'+
+      '<p style="margin-bottom:14px"><button class="copy" type="button" id="copybtn">Copy '+t.h+'</button> <span id="copymsg" class="note" style="margin:0 0 0 8px"></span></p>'+
+      '<div class="rows">'+rows+'</div></div>';
+    document.getElementById('copybtn').addEventListener('click',function(){copyHex(t.h)});
+  }
+  function copyHex(h){
+    var m=document.getElementById('copymsg');
+    function ok(){m.textContent='Copied '+h}
+    function fall(){
+      var ta=document.createElement('textarea');ta.value=h;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();
+      try{document.execCommand('copy')?ok():m.textContent='Select and copy: '+h}catch(e){m.textContent='Select and copy: '+h}
+      document.body.removeChild(ta)}
+    try{navigator.clipboard.writeText(h).then(ok,fall)}catch(e){fall()}}
+  select('primary');
+
+  /* proportion */
+  var p=document.getElementById('prop');
+  p.innerHTML=
+    '<div style="flex:60;background:'+byK.background.h+';color:'+byK.text.h+'">background 60%</div>'+
+    '<div style="flex:30;background:'+byK.panel.h+';color:'+byK.text.h+'">panels 30%</div>'+
+    '<div style="flex:5;background:'+byK.primary.h+'"></div><div style="flex:2.5;background:'+byK.green.h+'"></div><div style="flex:2.5;background:'+byK.alert.h+'"></div>';
+
+  /* tabs */
+  var tabs=[['t-view','p-view'],['t-comp','p-comp']];
+  tabs.forEach(function(pair){
+    document.getElementById(pair[0]).addEventListener('click',function(){
+      tabs.forEach(function(q){
+        var on=q[0]===pair[0];
+        document.getElementById(q[0]).setAttribute('aria-selected',on?'true':'false');
+        document.getElementById(q[1]).hidden=!on})})});
+
+  /* mock: ruler, waveforms */
+  var ruler=document.getElementById('ruler'),rh='';
+  for(var i=0;i<=10;i++){var s=i*4,lab='0:'+(s<10?'0':'')+s;rh+='<span style="left:'+(i*10)+'%">'+lab+'</span>'}
+  rh+='<div class="seg" style="left:0"></div><span class="seglab" style="left:0">01</span><div class="seg" style="left:55%"></div><span class="seglab" style="left:55%">02</span>';
+  ruler.innerHTML=rh;
+  var head=36;
+  function rnd(seed){var x=Math.sin(seed*9301+49297)*233280;return x-Math.floor(x)}
+  var ci=0;
+  document.querySelectorAll('#tracks .cue').forEach(function(c){
+    ci++;var st=+c.dataset.start,len=+c.dataset.len,n=Math.max(18,Math.round(len*2.4)),w=100/n,svg='';
+    for(var j=0;j<n;j++){
+      var env=Math.sin(Math.PI*(j+.5)/n),v=.25+.75*rnd(ci*131+j)*(.55+.45*env);
+      var gx=st+(j/n)*len,played=gx<head,h=Math.max(4,v*100);
+      svg+='<rect x="'+(j*w+w*.18).toFixed(2)+'" y="'+((100-h)/2).toFixed(2)+'" width="'+(w*.64).toFixed(2)+'" height="'+h.toFixed(2)+'" fill="'+(played?'var(--green)':'var(--lane)')+'"/>'}
+    var el=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    el.setAttribute('viewBox','0 0 100 100');el.setAttribute('preserveAspectRatio','none');el.setAttribute('aria-hidden','true');el.innerHTML=svg;
+    c.appendChild(el)});
+
+  /* x-ray */
+  var mock=document.getElementById('mock'),ro=document.getElementById('readout'),last=null;
+  document.getElementById('xray').addEventListener('change',function(e){mock.classList.toggle('xray',e.target.checked)});
+  function tok(k){var t=byK[k];return t?'<i>'+esc(t.n)+'</i> '+t.h:esc(k)}
+  mock.addEventListener('mouseover',function(e){
+    var el=e.target.closest('[data-label]');if(!el||!mock.contains(el))return;
+    if(last)last.classList.remove('hl');el.classList.add('hl');last=el;
+    var parts=[esc(el.dataset.label)];
+    if(el.dataset.bg)parts.push('fill '+tok(el.dataset.bg));
+    if(el.dataset.fg)parts.push('text '+tok(el.dataset.fg));
+    if(el.dataset.extra)parts.push(esc(el.dataset.extra));
+    ro.innerHTML=parts.join(' · ')});
+  mock.addEventListener('mouseleave',function(){if(last)last.classList.remove('hl');last=null;ro.textContent='Hover over the mock to see which role each part uses.'});
+
+  /* matrix */
+  var rowsK=['text','text-2','muted','primary','green','alert','alert-text','danger'];
+  var mt='<thead><tr><th>Color as text or icon</th>'+surfaces.map(function(s){return '<th>on '+byK[s].n+' '+byK[s].h+'</th>'}).join('')+'</tr></thead><tbody>';
+  rowsK.forEach(function(k){
+    var t=byK[k];
+    mt+='<tr><td><div class="cell"><span class="sample" style="background:'+byK.panel.h+';color:'+t.h+';border:1px solid '+byK.border.h+'">Aa</span>'+esc(t.n)+' <span style="color:var(--muted);font:12px var(--mono)">'+t.h+'</span></div></td>'+
+      surfaces.map(function(s){var r=cr(t.h,byK[s].h);return '<td><div class="cell"><span class="r">'+r.toFixed(2)+'</span>'+badge(r)+'</div></td>'}).join('')+'</tr>'});
+  document.getElementById('matrix').innerHTML=mt+'</tbody>';
+  var fills=['primary','green','alert','danger'];
+  var of='<thead><tr><th>Fill</th><th>Background color as text</th><th>Text color as text</th></tr></thead><tbody>';
+  fills.forEach(function(k){
+    var t=byK[k],a=cr(ink,t.h),b=cr(byK.text.h,t.h);
+    of+='<tr><td><div class="cell"><span class="sample" style="background:'+t.h+';color:'+ink+'">Aa</span>'+esc(t.n)+'</div></td>'+
+      '<td><div class="cell"><span class="r">'+a.toFixed(2)+'</span>'+badge(a)+'</div></td>'+
+      '<td><div class="cell"><span class="r">'+b.toFixed(2)+'</span>'+badge(b)+'</div></td></tr>'});
+  document.getElementById('onfill').innerHTML=of+'</tbody>';
+})();
+</script>

@@ -1,6 +1,6 @@
 # Redaction Studio — Project Bible
 
-Sep 30, 2026 · @Kalleo · Updated Oct 15, 2026, 17:55 (Berlin)
+Sep 30, 2026 · @Kalleo · Updated Oct 15, 2026, 19:05 (Berlin)
 
 ## 1. Vision and users
 
@@ -340,6 +340,7 @@ Decisions are listed newest first. Add a row whenever a decision changes; never 
 
 | Decision | Reason |
 | --- | --- |
+| Identity palette v1 (section 12): warm brown-plum neutrals, yolk yellow `#EF9B0B` as the primary, green `#9EA663` as the accent, orange `#D94711` for alerts and reddish orange `#F0503C` for danger, derived from a blackbird photo; the dark navy swatch (`#030226`) is dropped. The reference page `docs/blackbird-palette.html` shows the palette in context | The owner wants a very dark interface with brown-toned panels and a yolk-yellow highlight like the blackbird's beak. The navy and plum swatches are nearly the same lightness (1.22:1) and could not separate surfaces, so the neutrals were rebuilt toward brown. Orange alone is under 4.5:1 for small text, so it has a lighter text variant. `danger` is the one color not taken from the photo |
 | The first migration (`drizzle/0000_init.sql`, 13 tables) is generated from the schema and applied by the app at startup under an advisory lock. Snapshot reads use `readConsistent` in `src/db/read.ts`, without `accessMode: 'read only'` because Drizzle 0.45 emits `consistent snapshot read only` without the comma MySQL requires. scrypt cost is N=65536, r=8, p=1 | Found by checking the SQL Drizzle sends with a stub connection before the first host run; the cost was accepted by the owner on 2026-10-15 |
 | Account management lives in the app: the admin (`ADMIN_EMAIL`) creates users with generated temporary passwords, resets passwords, disables users and sets memberships in an Accounts screen; the first admin and a lock-out recovery come from the environment variables `ADMIN_PASSWORD` and `RESET_ADMIN_PASSWORD`. The session cookie carries a password stamp, so a password change or reset ends older sessions; `user` gains `disabled_at` and `must_change_password` (migration 0001) | The host has no shell and the owner has read-only database access, so a reset script cannot run anywhere. Tested end to end (54 API checks and a browser run) against a local MariaDB 10.11, not yet on the host |
 | Database spike passed 18 of 18 on the host (Percona Server 8.4.7). Confirmed: the cue to clip cascade together with `SET NULL` on `cue.clip_id` works, so the foreign key stays; project deletion is the ordered app routine (one statement fails on the `RESTRICT` clip to asset key); positions shift with `ORDER BY position DESC` under the unique index; several NULL `ref_key` values are allowed and keys and asset paths are unique case- and accent-insensitively; a consistent-snapshot read stays stable; no triggers are possible, so every rule lives in app code; scrypt at N=65536 costs about 174 ms | Measured on the real host instead of assumed; every fallback in the design turned out unnecessary except the ordered delete, which was already planned |
@@ -474,3 +475,53 @@ The owner is a former developer and project manager with 16 years of experience,
 - **Where the work happens.** Planning and decisions happen in chats of this Project. Code changes happen in Claude Code, in the local clone of the code repo, with the owner's own git login. The canonical Bible lives in the code repo at `docs/PROJECT_BIBLE.md`, and the copy in the Project files is replaced whenever it changes.
 - **Secrets.** Tokens, passwords and service-account files never go into chats or the repo. They live in the host's environment settings and in the local `.env`. GitHub tokens are fine-grained and limited to the one repo they need.
 - **Language.** The owner writes mostly in Brazilian Portuguese but may switch to English. Reply in the language used; keep code, identifiers and this document in English.
+
+## 12. Visual identity
+
+Status: draft v1 (2026-10-15), agreed in the UI/UX Design chat. The look is a very dark interface with panels in dark brown-toned grays, yolk-yellow highlights like a blackbird's beak, and light green and orange as accents. The base colors come from a photo of a blackbird (palette made with Adobe Color). Lane and character colors are a separate palette, still to be designed.
+
+**Reference page.** `docs/blackbird-palette.html` is a self-contained page (open it in a browser) with the swatches, their values and contrast, the proportions, a mock Redaction View with a "show color roles" view, component states and a contrast matrix. It is generated from the tokens below; when a value changes, change this section and the page together. The page uses a placeholder typeface that is not part of the identity.
+
+**Principles**
+
+- Colors are named by role (design tokens), never used as raw hex values in components, so a later light theme is a change of the token layer.
+- Roughly 60% background, 30% panels and supporting surfaces, 10% accents; yolk leads.
+- Text pairs meet WCAG AA (4.5:1 for normal text, 3:1 for large text and UI parts), except the muted text, which is for disabled and decorative use only.
+- Color never carries meaning alone: alerts and errors also carry an icon and a label.
+
+**Tokens (draft v1)**
+
+| Group | Role | Hex | Use | Contrast on `panel` |
+| --- | --- | --- | --- | --- |
+| Surfaces | `background` | `#0E0B10` | App canvas, timeline lanes | n/a |
+| | `panel` | `#1B1517` | Sidebar, editor, panels | n/a |
+| | `raised` | `#261D1F` | Cards, menus, dialogs | n/a |
+| | `border` | `#3A2E30` | Dividers and outlines | n/a |
+| Text | `text` | `#EDE4DC` | Main text | 14.4:1 |
+| | `text-secondary` | `#B5A89F` | Labels and hints | 7.8:1 |
+| | `text-muted` | `#7D716B` | Disabled and decorative only | 3.8:1 |
+| Brand | `primary` (yolk) | `#EF9B0B` | Main actions, active state, playhead | 8.0:1 |
+| Accent | `accent-green` | `#9EA663` | Success, ready, secondary accent, played waveform | 6.9:1 |
+| Alerts | `alert` | `#D94711` | Attention fills and icons (a changed file, unpushed changes) | 4.2:1 |
+| | `alert-text` | `#F26A3D` | Attention text and links | 5.9:1 |
+| | `danger` | `#F0503C` | Errors, destructive actions, recording | 5.1:1 |
+
+Text on a yolk, green or `danger` fill uses `#0E0B10` (8.7:1, 7.5:1 and 5.5:1). On `alert` it is 4.5:1, so use bold or large text there. The contrast ratios were computed, not yet checked in a real screen.
+
+**Role mapping (proposal, not yet confirmed).** The palette values are agreed; how they map onto the interface was shown in the reference page and is still open to change.
+
+- `primary`: the one main action per screen, the active scene, the selection outline, the playhead and the open-task tag.
+- `accent-green`: success and ready, the played part of a waveform, done tasks and reference notes.
+- `alert` and `alert-text`: attention, such as a changed file and the unpushed-changes indicator, which stays calm at first and turns `alert-text` as the gap grows (thresholds not decided).
+- `danger`: errors, destructive actions and recording.
+- Comment notes use `text-secondary`; the type is told apart by tag label as well as color.
+
+**Open points**
+
+- [ ] Confirm or change the role mapping above.
+- [ ] Lane and character colors: 8 to 12 distinguishable colors at matching lightness, derived from these hues, checked for color-blind readability on the lane background.
+- [ ] Other states not yet colored: cue states (hover, selected, has alternatives), waveform and played portion, note types (comment, reference, task), the read-only banner.
+- [ ] Hue closeness of `alert`, `danger` and `primary`: check on real screens; icons and labels carry the difference.
+- [ ] Light theme: not planned for v1; tokens keep it possible.
+- [ ] Typography, spacing and component styles. The reference page uses IBM Plex Sans and IBM Plex Mono only as placeholders.
+- [ ] Info color: the palette has none (no neutral "information" state); decide whether one is needed.
