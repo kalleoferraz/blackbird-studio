@@ -1,5 +1,4 @@
 import Fastify, { type FastifyInstance } from 'fastify';
-import { registerSpikeDb } from './spike-db.js';
 
 export function buildApp(): FastifyInstance {
   const app = Fastify({ logger: true });
@@ -13,9 +12,6 @@ export function buildApp(): FastifyInstance {
     uptimeSeconds: Math.round(process.uptime()),
     time: new Date().toISOString(),
   }));
-
-  // Temporary: database spike (needs SPIKE_TOKEN, otherwise the route is a 404). Remove before real data.
-  registerSpikeDb(app);
 
   return app;
 }

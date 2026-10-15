@@ -1,8 +1,9 @@
 /**
  * Redaction Studio: Drizzle schema (MySQL).
  *
- * Mirrors the "Physical schema" section of docs/PROJECT_BIBLE.md. Draft for review:
- * nothing here has run against the host's database yet (see the database spike in the Bible).
+ * Mirrors the "Physical schema" section of docs/PROJECT_BIBLE.md. The key types, collations and
+ * delete rules were checked on the host's database in the 2026-10-15 spike (see the Bible); the
+ * migration itself has not been applied there yet.
  *
  * Conventions
  * - Ids are app-generated ULIDs: CHAR(26) ascii_bin, same type on every foreign key column.

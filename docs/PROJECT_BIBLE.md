@@ -1,6 +1,6 @@
 # Redaction Studio — Project Bible
 
-Sep 30, 2026 · @Kalleo · Updated Oct 15, 2026, 13:12 (Berlin)
+Sep 30, 2026 · @Kalleo · Updated Oct 15, 2026, 13:30 (Berlin)
 
 ## 1. Vision and users
 
@@ -435,7 +435,7 @@ The Drive spike (listing a folder and uploading a small file with a service acco
 - [ ] Does `/private` survive a Preview update, a redeploy and 24 hours? Write a marker before each step and check it afterwards.
 - [ ] Dependency-change test: add or remove a dev dependency, update Preview, and check whether the local-disk and `/private` markers survive.
 - [ ] Ask GoDaddy support: is `/private` persistent storage, what is its quota, and is it backed up? Are database backups available?
-- [ ] Spike cleanup before real data: remove the `/spike/*` routes (including `/spike/db-schema` in `src/server/spike-db.ts`, and the `SPIKE_TOKEN` import in `app.ts`), the `spike_ping` table, the spike secrets and the test markers on local disk and `/private`.
+- [ ] Spike cleanup before real data: remove the `/spike/*` routes (the `/spike/db-schema` route and `SPIKE_TOKEN` were removed from the code on 2026-10-15; delete `SPIKE_TOKEN` from the host's environment), the `spike_ping` table, the spike secrets and the test markers on local disk and `/private`.
 - [ ] Do the app's own File Manager and Database view allow export of files and of MySQL? (owner to check) Note: the database view does not run arbitrary SQL.
 - [ ] Preview apps are removed after 30 days (GoDaddy FAQ). What happens to their `/private` files? The database is shared with Published, so it is expected to survive; unconfirmed.
 - [x] Database spike, run 2026-10-15 (18 of 18 passed, results in the decision log and section 4). **Still to check:** the drizzle-kit migration applied under an advisory lock (`GET_LOCK` itself works), the consistent-snapshot read through Drizzle and not only mysql2, and the choice of the scrypt cost.
