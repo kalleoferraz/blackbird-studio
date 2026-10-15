@@ -1,6 +1,6 @@
 # Redaction Studio — Project Bible
 
-Sep 30, 2026 · @Kalleo · Updated Oct 15, 2026, 13:30 (Berlin)
+Sep 30, 2026 · @Kalleo · Updated Oct 15, 2026, 13:40 (Berlin)
 
 ## 1. Vision and users
 
@@ -72,7 +72,7 @@ The app runs on GoDaddy Node.js Hosting (a beta app platform with a Preview app 
 **Migrations.** The host offers no SSH and no SQL access from its web interface, so migrations run from the app at startup, using Drizzle's programmatic migrator.
 
 - The generated SQL files are committed to the repo and must reach the host (not git-ignored; the path must resolve under both `tsx` and `dist/`).
-- The run is wrapped in a MySQL advisory lock (`GET_LOCK`), so Preview and Published booting together cannot apply the same migration twice. Whether Drizzle's migrator locks by itself is unverified.
+- The run is wrapped in a MySQL advisory lock (`GET_LOCK`), so Preview and Published booting together cannot apply the same migration twice. The lock is taken in `src/db/migrate.ts` (`GET_LOCK` with a 60 s wait, one dedicated connection) and the migrator runs inside it, so it does not matter whether Drizzle locks by itself. The app calls it from `src/server/index.ts` before listening, and skips it only when `DB_HOST` is unset (a local run without `.env`). The first migration is `drizzle/0000_init.sql`. MySQL DDL autocommits, so if that first run fails halfway the tables created so far stay and the migration is not recorded: drop those tables by hand before retrying.
 - Migrations are **additive only** (new tables, nullable columns, indexes). Renames and drops happen in two steps, with the removal in a later publish. MySQL DDL is not transactional, so each migration is one small change (or safe to re-run).
 - A failed migration stops startup, so the deploy is reported unhealthy.
 - Preview and Published share one database (stated by GoDaddy's Hosted Database page): a migration applied by Preview is live for Published, and republishing older code runs it against the newer schema. Additive-only migrations are what keep the live app working in that gap.
@@ -338,6 +338,7 @@ Decisions are listed newest first. Add a row whenever a decision changes; never 
 
 | Decision | Reason |
 | --- | --- |
+| The first migration (`drizzle/0000_init.sql`, 13 tables) is generated from the schema and applied by the app at startup under an advisory lock. Snapshot reads use `readConsistent` in `src/db/read.ts`, without `accessMode: 'read only'` because Drizzle 0.45 emits `consistent snapshot read only` without the comma MySQL requires. scrypt cost is N=65536, r=8, p=1 | Found by checking the SQL Drizzle sends with a stub connection before the first host run; the cost was accepted by the owner on 2026-10-15 |
 | Database spike passed 18 of 18 on the host (Percona Server 8.4.7). Confirmed: the cue to clip cascade together with `SET NULL` on `cue.clip_id` works, so the foreign key stays; project deletion is the ordered app routine (one statement fails on the `RESTRICT` clip to asset key); positions shift with `ORDER BY position DESC` under the unique index; several NULL `ref_key` values are allowed and keys and asset paths are unique case- and accent-insensitively; a consistent-snapshot read stays stable; no triggers are possible, so every rule lives in app code; scrypt at N=65536 costs about 174 ms | Measured on the real host instead of assumed; every fallback in the design turned out unnecessary except the ordered delete, which was already planned |
 | The app is named **Redaction Studio** (formerly Audiobook Studio), a tool for any kind of media project (audiobook, textbook, film, series, podcast), not only audiobooks | The owner started it to produce an audiobook, and the possibility of other media made it a tool for all of them |
 | Notes can be written on any level: the media project, a chapter, a scene, a segment, a cue or an asset, and on other notes (the replies form a chat thread). The text is Markdown. Every note stores its project; a root note stores no other target (the media project itself) or exactly one foreign key to its chapter, scene, segment, cue or asset (checked by the app); a reply stores its root note and, optionally, the note it answers (the thread is flat). Notes cascade from the project, from their target and from their root note; a note with replies is tombstoned instead of deleted; `note.author` is `SET NULL`. Supersedes "comments on cues only" | Foreign keys and cascades keep integrity, which one polymorphic id column could not; the project column lets one query load every note and reference; the root note makes a thread one query; tombstones keep other people's replies |
@@ -438,7 +439,7 @@ The Drive spike (listing a folder and uploading a small file with a service acco
 - [ ] Spike cleanup before real data: remove the `/spike/*` routes (the `/spike/db-schema` route and `SPIKE_TOKEN` were removed from the code on 2026-10-15; delete `SPIKE_TOKEN` from the host's environment), the `spike_ping` table, the spike secrets and the test markers on local disk and `/private`.
 - [ ] Do the app's own File Manager and Database view allow export of files and of MySQL? (owner to check) Note: the database view does not run arbitrary SQL.
 - [ ] Preview apps are removed after 30 days (GoDaddy FAQ). What happens to their `/private` files? The database is shared with Published, so it is expected to survive; unconfirmed.
-- [x] Database spike, run 2026-10-15 (18 of 18 passed, results in the decision log and section 4). **Still to check:** the drizzle-kit migration applied under an advisory lock (`GET_LOCK` itself works), the consistent-snapshot read through Drizzle and not only mysql2, and the choice of the scrypt cost.
+- [x] Database spike, run 2026-10-15 (18 of 18 passed, results in the decision log and section 4). Still to confirm on the host after the first deploy: the log line "Database migrations are up to date", the 13 tables in the database, and a real `readConsistent` call once the first snapshot push exists.
 - [ ] Outgoing email from the host, for password reset. Until then the owner resets passwords by script.
 - [ ] Notes: whether the generated References and Tasks lists are also compiled to files (such as `references.md`) in the snapshot repo, whether tasks later need an assignee or a due date (decided: not for now), and whether a user can later hold several roles (decided: one role per membership for now; a `user_roles` table is the later refactor).
 - [ ] Snapshot repo layout for the new model: folder and file names inside the repo, where characters are saved, and whether sound-effect titles appear in `script.md`.
