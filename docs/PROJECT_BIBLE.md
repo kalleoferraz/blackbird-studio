@@ -1,34 +1,37 @@
-# Audiobook Studio — Project Bible
+# Redaction Studio — Project Bible
 
-Sep 30, 2026 · @Kalleo · Updated Oct 13, 2026
+Sep 30, 2026 · @Kalleo · Updated Oct 15, 2026, 12:15 (Berlin)
 
 ## 1. Vision and users
 
-Audiobook Studio is a hosted web app where an author writes, records and organizes a multi-character audiobook in one place, with a DAW-style timeline for every section and a provable, incremental history of the written text.
+Redaction Studio is a hosted web app where an author writes, records and organizes a media project (an audiobook, textbook, film, series or podcast) in one place, with a DAW-style timeline for every scene and a provable, incremental history of the written text.
 
-- **Primary user (today):** the owner, a former developer and project manager producing a multi-character fiction audiobook with free, open-source tools.
-- **Later users:** other authors and narrators, invited per book, each with a role.
+- **Primary user (today):** the owner, a former developer and project manager. The tool began as the owner's own way to produce a multi-character fiction audiobook with free, open-source tools; the possibility of supporting several kinds of media (textbook, audiobook, film, series, podcast) made it a tool for all of them.
+- **Later users:** other authors and narrators, invited per media project, each with a role.
 - **Core problem:** text, recordings, sound effects, music and translations live in scattered folders and tools, with no structure linking a line of text to its audio.
-- **Product principle:** the text is the spine. Every take, effect and translation attaches to a stable segment of the story.
+- **Product principle:** the text is the spine. Every clip, effect and translation attaches to a stable cue of the story.
 
 ## 2. v1 scope and not-now list
 
-v1 delivers login, books, a text editor with structure, a basic multi-track timeline, a file library and saved versions. Everything else waits.
+v1 delivers login, media projects, a text editor with structure, a basic multi-lane timeline, a file library and saved versions. Everything else waits.
 
 **In v1**
 
-- **Accounts:** login, a list of books per user, roles per book (author, narrator, translator) stored from day one even if only "owner" is used at first.
-- **Redaction View:** the book is divided into chapters, sections and segments. Each section reads like a DAW timeline, where every layer (track) is a character's speech, a sound effect or a music track. Audio can be recorded in the browser or assigned from the library.
-- **Timeline basics:** multiple tracks, draggable and trimmable clips, waveform display, play and seek, record into a segment.
-- **Library:** per book, a set of files (audio, pictures, anything) stored on the server behind `BlobStore`. Audio is uploaded as a 24-bit WAV master; the server derives an MP3 playback copy. The player plays the MP3; the download button delivers the WAV. While a new file uploads and encodes, its fragment shows a loading indicator.
-- **Versions:** a manual "push version" action that commits the text to a public GitHub repo, plus an "unpushed changes" indicator showing the time since the last push. Text is saved to MySQL immediately on every change.
+- **Accounts:** login, a list of media projects per user, roles per media project (author, narrator, translator) stored from day one even if only "owner" is used at first.
+- **Redaction View:** the media project is divided into chapters and scenes. Each scene is divided into segments (time boxes) and reads like a DAW timeline, where every lane is a logical organizer (a character, a kind of sound effect, a music line) and holds cues. Audio can be recorded in the browser or assigned from the library.
+- **Timeline basics:** multiple lanes, draggable and resizable cues, clips with offset, length and gain, waveform display, play and seek, record into a cue. Fades and looping are stored on the clip but have no interface in v1.
+- **Characters and notes:** project-level characters (name, default colour, picture, description, files) that lanes can link to, and notes on any level with reply threads and reference flags.
+- **Library:** per media project, a folder tree of files (audio, pictures, anything) on the server behind `BlobStore`, with an asset record per file (hash, no duplicates per media project). Audio is uploaded as a 24-bit WAV master; the server derives an MP3 playback copy beside it. The player plays the MP3; the download button delivers the WAV. While a new file uploads and encodes, its cue shows a loading indicator.
+- **Versions:** a manual "push version" action that commits the text to a public GitHub repo, plus an "unpushed changes" indicator showing the time since the last push. Text is saved to MySQL when the user leaves the text field.
+- **One editor per media project:** a media project can be open in only one tab or device at a time. Opening it elsewhere closes the editor in the older one (see section 4).
 
 **Not now**
 
 - Translation view, integrated LLM, text-to-speech, speech-to-speech, audio compiler (see section 7).
 - Google Drive as audio storage (see section 7). v1 stores files on the server.
+- Appendixes (the media project model leaves room for them), video clips and a common library shared between media projects (see section 7).
 - Automatic (timer-based) pushes to GitHub. The push is one function, so a timer can call it later.
-- Effects, automation and crossfades on the timeline.
+- Effects, automation and crossfades on the timeline, and interface controls for fades and looping (the clip fields already exist).
 - Live multi-user editing and websockets.
 - Typed-versus-pasted tracking and an edit-event log for provenance.
 - Audio versioning as proof of authorship (only the text is proven).
@@ -36,13 +39,13 @@ v1 delivers login, books, a text editor with structure, a basic multi-track time
 
 ## 3. Architecture principles
 
-The database holds live working state, Git holds text snapshots, and server-side blob storage holds immutable audio, so no single store has to do everything.
+The database holds live working state, Git holds text snapshots, and server-side storage holds immutable audio, so no single store has to do everything.
 
-1. **The timeline is a description, not audio.** Each section's timeline is JSON (tracks, clips, offsets, trims, gain) that references audio files by ID and hash. Moving or trimming a clip never touches the audio.
-2. **Audio blobs are immutable and addressed by content hash.** New recordings are new blobs, never overwrites. Blobs referenced by any past version are never deleted.
-3. **Stable segment IDs from day one.** Every segment keeps a permanent ID that survives text edits. Takes, comments and translations attach to that ID. IDs are generated by the app (UUID or ULID), never by the database, because MySQL has no `RETURNING`.
-4. **Database as live state, Git as snapshots.** Edits go to MySQL immediately. Git receives commits only when the owner presses "push version" (a later timer may call the same function).
-5. **Storage behind adapters.** `BlobStore` (put, get, stat, delete) and `VersionStore` (snapshot, list, readAt) are interfaces. The first implementations are server disk (`LocalDiskBlobStore`) and GitHub. Google Drive is a later `BlobStore`, not an assumption.
+1. **The timeline is a description, not audio.** A scene's lanes, cues and clips (starts, lengths, offsets, gain, fades, loops) reference audio by asset ID. Moving, resizing or trimming never touches the audio. All times and lengths are integer milliseconds. Live state is stored in relational tables; JSON files exist only in the snapshot repo (see section 6).
+2. **Assets are immutable.** An asset is never updated: a new version is a new asset, and a new clip. Each asset has a stable ID and a hash of its audio, unique per media project. Deleting an asset under `storyline` happens only on the author's explicit confirmation and is permanent (see section 6), so past versions keep their manifest entry but the audio may be gone.
+3. **Stable cue IDs from day one.** Every cue keeps a permanent ID that survives text edits and moves. The cue holds the text, and clips, notes and translations attach to that ID. IDs are generated by the app (ULID, `CHAR(26)`), never by the database, because MySQL has no `RETURNING`.
+4. **Database as live state, Git as snapshots.** Edits go to MySQL when the user leaves the text field. Git receives commits only when the owner presses "push version" (a later timer may call the same function).
+5. **Storage behind adapters.** `BlobStore` (put, get, stat, move, delete) and `VersionStore` (snapshot, list, readAt) are interfaces. The first implementations are server disk (`LocalDiskBlobStore`) and GitHub. Google Drive is a later `BlobStore`, not an assumption.
 6. **The client never sees credentials.** All storage and GitHub access is configured and performed by the backend, using one central account.
 
 ## 4. Stack and hosting
@@ -57,14 +60,14 @@ The app runs on GoDaddy Node.js Hosting (a beta app platform with a Preview app 
 | Server | Fastify | Thin API, stateless where possible |
 | Database | Managed MySQL | Driver `mysql2`; **Drizzle** for the schema, queries and migrations; avoid ORMs with native binaries. `drizzle-orm` in `dependencies`, `drizzle-kit` in `devDependencies`. Short-lived connections per request, closed in a `finally` block (the host's recommended pattern) |
 | Frontend | Static SPA, **React** (built with Vite) | Built locally or in CI, served by the same app |
-| Audio storage | Server disk behind `BlobStore` (`LocalDiskBlobStore`) | Root path must be configurable. Working assumption (owner, 2026-10-13): `/private` (shared network volume) is durable until GoDaddy support says otherwise. Local disk was lost once in the spike. Google Drive is a later adapter |
+| Audio storage | Server disk behind `BlobStore` (`LocalDiskBlobStore`) | Root path must be configurable. One root shared by Preview and Published, with no per-environment prefix (see section 6). Working assumption (owner, 2026-10-13): `/private` (shared network volume) is durable until GoDaddy support says otherwise. Local disk was lost once in the spike. Google Drive is a later adapter |
 | Audio processing | Pure JS or WebAssembly MP3 encoder in a worker thread | No native binaries on the host. Runs in the web app process. See section 6 |
 | Text versions | GitHub REST API (Octokit) | Commits created through the API, no `git` binary on the server assumed |
 | Secrets | Host Secrets settings, plus a local `.env` | The host injects `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` and `DB_PASSWORD`. Names starting with `GITHUB_` are reserved (the host rejected `GITHUB_TOKEN`); use `SNAPSHOT_REPO_TOKEN` and `SNAPSHOT_REPO`. Never pasted into chats or committed |
 
 **Two repos, two jobs.** The *code repo* deploys the app. The *snapshot repo* receives text versions at runtime. They must stay separate so snapshot commits never trigger a redeploy.
 
-**Code layout.** A single package, not a monorepo: `src/server` (Fastify API), `src/web` (SPA, later) and `src/shared` (timeline types). ES modules with TypeScript `NodeNext` (imports in source carry the `.js` extension). `npm run build` compiles to `dist/`, and `npm start` runs `node dist/server/index.js`. **Observed on the host:** the Preview log shows the app started with `npm run dev` (`tsx watch src/server/index.ts`), not with build and start; whether Published does the same is unconfirmed. The port is read from the `PORT` environment variable. Spike routes (`/spike/*`) are token-guarded and are removed once the spike is done.
+**Code layout.** A single package, not a monorepo: `src/server` (Fastify API), `src/web` (SPA, later) and `src/shared` (timeline types and the clip playback rule). ES modules with TypeScript `NodeNext` (imports in source carry the `.js` extension). `npm run build` compiles to `dist/`, and `npm start` runs `node dist/server/index.js`. **Observed on the host:** the Preview log shows the app started with `npm run dev` (`tsx watch src/server/index.ts`), not with build and start; whether Published does the same is unconfirmed. The port is read from the `PORT` environment variable. Spike routes (`/spike/*`) are token-guarded and are removed once the spike is done.
 
 **Migrations.** The host offers no SSH and no SQL access from its web interface, so migrations run from the app at startup, using Drizzle's programmatic migrator.
 
@@ -73,7 +76,7 @@ The app runs on GoDaddy Node.js Hosting (a beta app platform with a Preview app 
 - Migrations are **additive only** (new tables, nullable columns, indexes). Renames and drops happen in two steps, with the removal in a later publish. MySQL DDL is not transactional, so each migration is one small change (or safe to re-run).
 - A failed migration stops startup, so the deploy is reported unhealthy.
 - Preview and Published share one database (stated by GoDaddy's Hosted Database page): a migration applied by Preview is live for Published, and republishing older code runs it against the newer schema. Additive-only migrations are what keep the live app working in that gap.
-- **Test and live data are mixed on purpose for now** (private single-owner tool). Test books should have a clear title, such as "TEST – …", so they are easy to find and delete. Revisit before public or multi-author use.
+- **Test and live data are mixed on purpose for now** (private single-owner tool). Test media projects should have a clear title, such as "TEST – …", so they are easy to find and delete. Revisit before public or multi-author use.
 
 **Known limits to plan around**
 
@@ -88,32 +91,71 @@ The app runs on GoDaddy Node.js Hosting (a beta app platform with a Preview app 
   - No backup is documented by GoDaddy for files or the database. Preview apps are removed automatically after 30 days (GoDaddy FAQ). After a plan is canceled, apps, secrets, databases and storage are permanently deleted after 30 days.
   - GoDaddy documents `public/assets` as the folder for files that must persist between deployments; its behavior is not yet separated from the other local paths.
   - Even with `/private` assumed durable, no backup exists for it, so the audio would be a single copy on the host.
-- Websockets are unconfirmed, so v1 assumes plain request/response with save-on-change.
+- **No websockets in v1.** The API is plain REST. Text is saved when the user leaves the text field; asset processing status is polled by the browser every second or two while an asset is `processing`. Whether the host supports websockets stays unknown and does not matter until co-editing, which is out of scope.
+- **One active session per media project.** Opening a media project gives the tab a new session ID, stored on the media project as its current session. Every save carries the session ID, and the server refuses saves from any other session. The older tab learns on its next save (or a light poll), shows "this media project was opened elsewhere", and closes the editor while keeping its unsaved text visible so it can be copied. This works across browsers and devices. Text typed since the last field blur is lost if the browser crashes; the owner accepts this.
 - **Uploads** are a single request, with no resumable protocol: if an upload fails, the user restarts it. Verified: bodies up to 100 MiB were accepted on both environments (about 19 s at 5 MiB/s from the owner's machine). The server rejects files over 100 MiB with a clear message. A 5-minute stereo 24-bit 48 kHz WAV is about 86 MB, so it fits; 32-bit float or 96 kHz would not. The 502 returned at 100 MiB plus 1 byte most likely came from our own route cap (the route destroys the connection above 100 MiB), so it does not show a host limit.
 - Database backups depend on whether scheduled jobs exist. Unconfirmed.
 
 ## 5. Data model
 
-The spine is User → Membership → Book → Chapter → Section → Timeline → Track → Clip → Segment, plus an Asset library per Book. All entity IDs are generated by the app (UUID or ULID).
+The spine is User → Membership → Media Project → Chapter → Scene → Segment → Cue → Clip → Asset. A scene also has Lanes, and a Media Project has Characters. All entity IDs are generated by the app (ULID, `CHAR(26)`, collation `ascii_bin`). All times and lengths are integer milliseconds; the interface shows seconds. The Media Project's index is derived from its structure and is not stored.
+
+**Naming.** The root entity is called **Media Project** (formerly Book), so the model can hold an audiobook now and other kinds of work later. In code and the database it is shortened to `project` (table `project`, foreign keys `project_id`). A `type` column (audiobook, textbook, film, series, podcast) is planned and will be added by a later, additive migration; the interface can then label levels per type (for example Chapter or Act).
 
 | Entity | Key fields | Notes |
 | --- | --- | --- |
-| User | id, login, display name | Central accounts |
-| Membership | user, book, role | Roles: owner, author, narrator, translator. Built early to avoid a migration later |
-| Book | id, title, visibility, language, dirty since | Visibility defaults to private. "Dirty since" is set on the first change after a push and cleared by a push; it drives the "unpushed changes" indicator |
-| Chapter, Section | id, book, order, title | Sections are the unit of one timeline |
-| Segment | stable id, clip, order, text, optional file ID, trim in/out | The ID never changes when text is edited |
-| Timeline | section, JSON document | Tracks and clips; live state in MySQL |
-| Track | type: character, SFX or music; name | Character tracks link to a character |
-| Clip | track, start, gain, ordered segments | Holds its segments; the segments reference takes, so moving a clip never touches audio |
-| Take | asset, origin, created at | One recording or generated audio file |
-| Asset | id, book, type, name, master file, playback copy, status, metadata | A master file (24-bit WAV for audio) and an optional playback copy (MP3), each with its own content hash and storage key. Status: `processing`, `ready` or `failed`. The storage key is whatever the active `BlobStore` uses to find the file (a path under the book's folder on the server disk in v1, a Drive file ID in a later adapter) |
+| User | id, email, password hash, display name | Central accounts. The email, stored lowercase and unique, is the login. See Accounts and login below |
+| Membership | user, media project, role | Roles: owner, author, narrator, translator. Built early to avoid a migration later |
+| Media Project | id, title, visibility, language, cover, dirty since, active session | Formerly Book. The cover is an optional image asset from the library (the app checks that its media kind is image). Visibility defaults to private. "Dirty since" is set on the first change after a push and cleared by a push; it drives the "unpushed changes" indicator. "Active session" holds the session ID allowed to save; see section 4. The library is the media project's folder on the server (section 6) |
+| Chapter | id, media project, position, title, introductory flag | Chapters that do not start the count (a prologue, author's notes) are marked introductory. Folder index: `00A` to `00Z` for introductory chapters (by position among them), `01` to `99` for the others. Introductory chapters always come before numbered ones |
+| Scene | id, chapter, position, title | Index `01` to `99` within its chapter. Formerly called "section" |
+| Segment | id, scene, position, optional label | A time box that groups cues. Its start is derived (the end of the previous segment, or 0 for the first) and its length is derived (the end of its last cue); neither is stored. Cues never cross a segment boundary. Moving a segment means reordering segments |
+| Lane | id, scene, position, title, colour, optional character | A logical organizer with no kind of its own. It spans the scene's segments and can hold cues of any kind. Title and colour are copied from the character when it is linked and stay independent afterwards |
+| Cue | id, segment, lane, start, length, optional title, text, clip (the chosen one) | Start is relative to the segment. `clip` is nullable; its foreign key uses `ON DELETE SET NULL`. Text is always Markdown; sound-effect cues have only a title. The cue stores no kind: the media kind comes from its clips' assets |
+| Clip | id, cue, asset, number, offset, length, gain, fade in, fade out, loop, origin, created at | One media realization of a cue; a cue can have several clips as alternatives, one of them chosen. Offset and length select a region of the asset. Gain is in dB. Fades apply to audio only. The asset of a clip never changes |
+| Asset | id, media project, path, media kind, size, media info, hash, status, job state, claimed by, claimed at, attempts, error | A file in the library. The job columns track encoding and peaks work (see Infrastructure tables). Media kind (audio now, video later) is read from the file header, not only the extension. Status: `processing`, `ready` or `failed`. See section 6 |
+| Character | id, media project, name, default colour, picture, description | Project-level. Its files live under `characters/{name}` in the library. The narrator is a character |
+| Note | id, project, author, type, Markdown text, ref key, done at, done by, created at, edited at, deleted at; a root note has no other target (the media project itself) or exactly one of chapter, scene, segment, cue or asset; a reply has a parent note and a root note | Type is `comment`, `reference` or `task`. Notes can be written on any level and on other notes: a chain of comments is a chat thread, and a reply is always a comment (never a reference or a task, and with no ref key or done fields). A reference has a ref key; a task has done at and done by once it is checked. `project` is stored on every note so that all notes, references and tasks of a media project load in one query. The author is empty (null) when the LLM wrote it, and when the user's account is deleted |
+| Snapshot | id, media project, commit SHA, created by, created at | One row per pushed version; see Infrastructure tables |
 
-**Origin field.** Every Take carries an `origin`: `human-recorded`, `generated`, or `voice-converted` (a human performance converted to a character voice). It is unused in v1 but cheap to add now and keeps later claims honest.
+**Script order.** The script order of cues is segment order, then start time, then lane order (the lane that comes first in the scene wins a tie). Nothing is stored for it. Shifting one cue never reorders or moves another, and shifting a segment shifts everything inside it because cue starts are relative.
 
-**Version manifest.** A saved version is text plus timeline JSON plus a manifest mapping each asset to its master hash. Restoring a version restores the manifest. Audio files themselves are never versioned, only referenced.
+**Cue length and clip playback.**
 
-**Translations.** A translated segment stores the original's `segmentId` and a `sourceHash` of the original text it was translated from. The side-by-side view joins on the ID. If the original later changes, the hash no longer matches and the app flags the translation as out of date.
+- A cue's length is a stored property. When a cue is created with text, its length starts as an estimate from the text (Markdown stripped, syllable count, line breaks), with a minimum of 1 second; a cue without text starts at the minimum. After that the author owns the length, and text edits do not change it.
+- The cue's length decides how much of its clip plays: played length is the cue's length if `loop` is -1, otherwise the smaller of the cue's length and the clip's length × (loop + 1). A longer clip is cut at the cue's end without being changed, so lengthening the cue brings the tail back. A shorter clip ends early or, if `loop` is set, repeats. `loop` is the number of extra repeats: 0 plays once, N plays N+1 times, -1 repeats until the cue ends.
+- Fade in applies once, at the start. Fade out is measured back from the end of the played part; with no fade set, the end is a hard cut. Offset plus length must not exceed the media's duration, and fade in plus fade out must not exceed the played length; the app enforces both.
+- The playback rule is one function in `src/shared`, used by the browser player and later by the audio compiler.
+- A "fit cue to clip" action sets the cue's length to the chosen clip's length.
+
+**Lane rules.** Cues on one lane never overlap: a cue ends at the latest where the next one starts, and gaps are allowed. The interface and the API enforce this; it is not a database constraint (one editor per media project makes that safe). A resize that runs into the next cue on the lane asks: shift (the following cues are pushed as a chain, keeping their gaps), trim (the cue is cut where the next begins) or cancel (undo). The API takes the chosen mode. Overlap across lanes is the point of the timeline.
+
+**Characters.** A character holds a name, a default colour, a picture (an image asset), a description and its files. Its files live in the library under `characters/{name}`, with free subfolders such as `records`, `songs` or `pictures`. The folder is created with the character and renamed with it. Voice references are added when needed. *Proposed, not yet confirmed:* the folder name is the sanitized name (up to 30 characters, a number on collision); a character cannot be deleted while a lane uses it, and its folder then stays as an ordinary folder; every new media project gets a Narrator character.
+
+**Notes.** A note is Markdown text written on the media project itself, a chapter, a scene, a segment, a cue or an asset in the library, and has a type: comment, reference or task. A note can also be written on a note: the replies form a chain of comments that reads as a chat thread, and a reply is never a reference or a task. Its author is the user, or later the LLM. Only its author edits or deletes it. A note without replies is deleted outright; a note with replies stays as a tombstone ("deleted") so the thread survives, with its text and ref key cleared. Notes are saved in the snapshot: notes on a chapter, scene, segment or cue in that chapter's file, notes on the media project and on assets in `project.json`. Changes and deletions are visible in the Git history, and a pushed note stays there after deletion (the owner accepts this).
+
+**References.** There is no reference entity and no References chapter. A note of type reference carries a `ref_key`, a very short string (a citation-style key such as `Smith20` or `ALB-03`; proposed limit 16 characters) that is also its sort key, and holds the website link, album or source in its Markdown text. The References view is generated from the reference notes of the media project and has no timelines. It is sorted alphabetically by ref key, or by appearance, which is derived from where each note's target sits in script order (an asset counts at its first cue) and can be grouped by chapter; notes on the media project itself and on assets that no cue uses form their own groups. A cue's reference is a reference note on that cue. Nothing is stored for the order.
+
+**Tasks.** A note of type task is a to-do that can be checked and unchecked (`done at` and `done by` are set when it is checked). A generated Tasks view lists the tasks grouped by chapter, with open and done filters; the chapter of a task is the chapter of its target, and tasks on the media project itself and on assets form their own groups. Nothing is stored for the grouping.
+
+**Limits.** The two-digit fields set limits that the API enforces with a clear message: 99 numbered chapters, 26 introductory chapters, 99 scenes per chapter, 99 segments per scene and 99 minutes within a segment.
+
+**Identifiers, ordering and deletes.**
+
+- IDs are ULIDs stored as `CHAR(26)` with `ascii_bin`: generated by the app, time-sortable so inserts cluster well in InnoDB, and readable in the host's database view (which cannot run SQL).
+- Ordered siblings (chapters in a media project, scenes in a chapter, segments and lanes in a scene) carry a dense integer `position`, 1 to n, with a unique index on (parent, position). An insert or move renumbers the siblings in one transaction, shifting in descending order (`UPDATE … ORDER BY position DESC`) so the unique index never sees a duplicate; to be confirmed in the spike, with "no unique index, the app guards it" as the fallback. Folder indexes are derived from the position.
+- Delete rules: media project → chapter → scene → segment and lane → cue → clip cascade. A note cascades from its media project, from the chapter, scene, segment, cue or asset it targets, and (as a reply) from its parent note; deleting an asset warns about its notes, including references. `clip.asset` and `character.picture` are `RESTRICT`; `lane.character` is `RESTRICT`; `cue.clip`, `note.author`, `note.done_by` and `project.cover` are `SET NULL` (the cover rule is proposed). Deleting a whole media project is an app routine that removes rows in a fixed order (notes, clips, cues and so on, then assets) instead of relying on one cascade, because `RESTRICT` keys such as clip to asset may fail inside a cascade depending on the order InnoDB takes (to confirm in the spike); before deleting anything it asks the user whether the files on disk (every asset in the library and its derived MP3 and peaks files) should be deleted too or kept, and then acts on the files as chosen. The database never touches files, so the app collects affected assets and asks the orphan question before deleting rows.
+- Renames and reorders run in one transaction that locks the media project row first (`SELECT … FOR UPDATE`). Paths and positions are updated without committing, the files are renamed with every move remembered, any failure undoes the moves in reverse and rolls back, and the commit comes last. A crash in the few milliseconds around the commit leaves files and rows apart, which the reconciler repairs by hash. The lock also stops a second reorder on the same media project while one is running.
+
+**Accounts and login.** The login is the email and a password; there is no public sign-up, the owner creates users. Passwords are hashed with Node's built-in `crypto.scrypt` (random salt per user, parameters stored with the hash), because native modules such as `argon2` may not build on the host. After login the browser holds a signed, `HttpOnly`, `Secure`, `SameSite=Lax` cookie with the user ID and an expiry; there is no session table and no special session handling for now. The login route is rate-limited in memory. A password reset is manual (the owner sets a new password with a script) until outgoing email is confirmed.
+
+**Infrastructure tables.** `snapshot` records each pushed version (a version list in the interface; "dirty since" on the media project is cleared by a push only if nothing changed meanwhile). The asset's job columns hold the state of encoding and peaks work: `job_state` (pending, running, done, failed), who claimed it and when, the attempts and the last error; a worker claims a row with a conditional `UPDATE … WHERE job_state = 'pending'`, since `SKIP LOCKED` is unverified. There is no rename journal. Drizzle keeps its own migrations table.
+
+**Origin field.** Every Clip carries an `origin`: `human-recorded`, `generated`, or `voice-converted` (a human performance converted to a character voice). It is unused in v1 but cheap to add now and keeps later claims honest.
+
+**Version manifest.** A saved version is text plus timeline data plus a manifest mapping each asset to its ID, path and hash. Restoring a version restores text, timeline and manifest; audio that has since been renamed or deleted shows the missing-file icon. Audio files themselves are never versioned, only referenced.
+
+**Translations.** A translated cue stores the original's `cueId` and a `sourceHash` of the original text it was translated from. The side-by-side view joins on the ID. If the original later changes, the hash no longer matches and the app flags the translation as out of date.
 
 ## 6. Storage, versioning and provenance
 
@@ -121,63 +163,96 @@ The version history exists to show that the text was written gradually, in small
 
 **Versioning rules**
 
-- Text is saved to MySQL immediately on every change.
-- A snapshot is created only by the manual "push version" action, with an optional label. There is no autosave to GitHub in v1. The push is a single function that takes a book and an optional label, so a timer can call it later.
+- Text is saved to MySQL when the user leaves the text field.
+- A snapshot is created only by the manual "push version" action, with an optional label. There is no autosave to GitHub in v1. The push is a single function that takes a media project and an optional label, so a timer can call it later.
 - The GitHub API creates the commit directly on the remote, so "commit" and "push" are one step.
 - The app shows an "unpushed changes" indicator with the time since the last push.
 - **Accepted risk:** the proof of gradual writing depends on pushing often. A long gap shows up as one large jump in the history. Until a push, the text exists only in MySQL, which has no documented backup.
-- The snapshot repo is public. Visibility is a per-book setting and defaults to private. Publishing a book's history publicly is an explicit action.
+- The snapshot repo is public. Visibility is a per-project setting and defaults to private. Publishing a media project's history publicly is an explicit action.
 - History is append-only: force-push and branch deletion are disabled, and the app never rewrites history.
 - Commits are created through the GitHub API (verified). Commit author and committer dates are set by the caller or defaulted by GitHub, so they prove nothing alone, and the commits are unsigned. GitHub's own record of the push or ref update is the independent timestamp; that has not been verified yet.
 - Signed commits and an external timestamp (OpenTimestamps or an RFC 3161 authority) are planned additions, not v1.
 
-**Repository layout.** The snapshot repo is organized per book, per chapter, per section:
+**Repository layout.** The snapshot repo is organized per media project and per chapter. The live state is in MySQL tables; the files below exist only in the repo and are generated from the tables just before each commit:
 
 ```text
-<book>/
-    book.json            (chapter order, source language, list of translations)
-    book.md              (generated: the whole book's script)
+<project>/
+    project.json         (chapter order, language, cover, list of translations)
+    project.md           (compiled: the whole media project's script)
     <chapter>/
-        chapter.json     (name, sections)
-        <section>.json   (timeline: clips; each clip holds its segments)
-        script.md        (generated: the chapter's script)
+        chapter.json     (the whole chapter: title, introductory flag, and its scenes with segments, lanes, cues with text and notes, clips with asset references)
+        script.md        (compiled: the chapter's script)
     translations/
         <lang>/
-            book.md
+            project.md
             <chapter>/
-                <section>.json
+                chapter.json
                 script.md
 ```
 
-- A section file holds that scene's timeline. Segments carry their text and an optional reference to a file ID, linked to the stored audio.
-- `book.json` is the source of truth for structure. `book.md` and `script.md` are generated, carry an "auto-generated, do not edit" header, and are written at snapshot time only.
-- Translations live in a separate language layer that mirrors the original structure, never inside the original segments. The original text history stays clean, each language can have its own timeline and takes, and a translator works without touching the source.
+- A chapter file holds the chapter's scenes, and in each scene the segments, lanes, cues (title, text, start, length), clips (asset ID, path and hash, offset, length, gain, fades, loop, origin) and notes. All JSON and Markdown files are generated from the tables, never edited by hand, and written in a fixed order with fixed key order, so an unchanged chapter produces an identical file and Git records no change.
+- `project.json` is the source of truth for structure. `project.md` and `script.md` are generated from the cues' text in script order, carry an "auto-generated, do not edit" header, and are written at snapshot time only.
+- Translations live in a separate language layer that mirrors the original structure, never inside the original cues. The original text history stays clean, each language can have its own timeline and clips, and a translator works without touching the source.
+- Not yet decided: folder and file names inside the repo, where characters are saved, and whether sound-effect titles appear in `script.md` (see open questions).
 
-**What the proof can and cannot show.** A gradual trail shows a writing process. It does not prove that no AI was involved, because text could be pasted in small pieces. Later, typed-versus-pasted tracking and an edit-event log would strengthen it. The LLM feature is comment-only by default and does not write into the text, which keeps the trail clean.
+**What the proof can and cannot show.** A gradual trail shows a writing process. It does not prove that no AI was involved, because text could be pasted in small pieces. Later, typed-versus-pasted tracking and an edit-event log would strengthen it. The LLM feature is note-only by default and does not write into the text, which keeps the trail clean.
 
 **Central account trade-offs.** One central GitHub account (and later a central storage account) is simpler for users, but the operator carries the quota, cost and risk, and other authors' proof depends on trusting that account. In v1 the operator also carries the server's disk quota. Say so clearly in the product.
 
-**Audio storage and processing.** In v1, files live on the server's disk, behind `BlobStore`, in one folder per book, named by content hash.
+**Library and assets**
 
-- **Upload.** Recordings made in the browser (fragments of dialogue, up to about a minute) and library files (finished songs, up to five minutes) are uploaded as 24-bit WAV, in one request of at most 100 MiB. A failed upload restarts from the beginning.
+- **One library per media project**, kept as a folder tree on the server's disk behind `BlobStore`. The logical tree in the app is the physical tree: there are no folder rows, folders are directories, and the paths of assets are stored in the database. A later Drive copy mirrors the same tree. A common library shared between media projects is a later idea (another root folder).
+- **Free and managed folders.** The author creates and organizes the free folders (for example `songs` or `bird records/peacock`). Two parts are managed by the app: `storyline` and `characters/{name}`. `storyline` cannot be renamed, and neither can the folders under it by hand.
+- **Asset record.** Every file has an asset record: ID, path, media kind, size, media info, hash and status. Clips point to the asset by ID (a foreign key, with deletion restricted), never by path, so a rename never touches clips. Assets are never updated; a new version is a new asset.
+- **Hash.** The hash is SHA-256 of the audio samples (the data chunk of a WAV), so a move, rename or metadata edit leaves it unchanged; other files hash their bytes. The ID and the hash are separate: the ID is the identity, the hash finds a file again. The hash is unique per media project: no duplicate files, an upload or recording that matches returns the existing asset ("already in the library at …").
+- **Derived files** (the MP3 playback copy, waveform peaks) sit beside the master with the same base name and move with it. The library view hides them.
+- **Reconciler.** On boot or on demand, the app checks the disk against the asset records. A file with no record is adopted and hashed. A record with no file shows a red "missing" icon on its clips. A missing file whose hash matches a file elsewhere is offered as a relink. A file whose hash no longer matches its record shows an amber "changed" icon. Only files that cannot be placed are hashed, not the whole library on every boot.
+- **Renames.** Renaming or moving a folder or file moves the files first and then updates the asset paths in the database (a prefix update for a folder), with a pending-rename record so that a crash in between can be finished or rolled back at boot. Renames happen immediately when an edit commits (the end of a drag, a saved title), not lazily. Pushed snapshots carry each asset's ID, path and hash, so a lost database could be re-linked by scanning the disk and matching hashes.
+
+**Storyline naming.** Dialogue and narration recorded or uploaded in a cue go under `storyline`. Sound effects and music come from the library and are never recorded in a cue.
+
+```text
+storyline/{00A..00Z | 01..99} - {chapter}/{01..99} - {scene}/{01..99}.{MMSS} - {lane} - {title or text} ({n}).ext
+```
+
+- Chapter index: `00A` to `00Z` for introductory chapters, `01` to `99` for the others. Scene index and segment index start at `01`, with two digits. Alphabetical order is chronological order.
+- `MMSS` is the cue's start within its segment (minutes and seconds). `{n}` is the clip's number among the cue's alternatives, from 1, never renumbered.
+- Chapter, scene, lane and the title or text part are sanitized to plain ASCII (accents transliterated, unsafe characters dropped) and cut to 10 characters; an empty result becomes "untitled". The path is at most about 85 characters.
+- If two names still collide, the app replaces the end of the title part with a short ID so the length cap holds. Paths are unique per media project.
+- Reordering chapters, scenes or segments, and renaming chapters, scenes or lanes, rename the folders and files and update the asset paths. A character rename renames its `characters/{name}` folder; a lane keeps the name it copied.
+
+**Names, deleting and orphans**
+
+- A file keeps the name and location given by the first clip that used it. Later clips that use the same file change nothing. Only when that first clip is removed while another clip still uses the file is the file renamed and moved for the next clip (by creation time).
+- Deleting a cue or clip asks, for each asset under `storyline` that would be left with no clip, whether to delete it permanently or keep it; the dialog pre-selects keep. Assets outside `storyline` are kept without asking, and library files are never deleted by deleting a cue. Deleting a scene or chapter asks once for the whole batch, with the file count. Only unused alternatives under `storyline` can be deleted by hand.
+- Kept files are renamed with "(Orphan) " at the start of the name. If a deleted scene or chapter leaves orphans, its folder gets the same prefix, so its index cannot clash with a new scene at the same position. In the database an orphan is simply an asset with no clip.
+- An orphan linked to a new clip is renamed and moved to that clip's path and loses the prefix.
+- Deleting is permanent: there is no trash and no backup, and audio is not in the Git history.
+
+**Audio storage and processing.** In v1, files live on the server's disk, behind `BlobStore`, in the library tree above.
+
+- **Upload.** Recordings made in the browser (fragments of dialogue, up to about a minute) and library files (finished songs, up to five minutes) are uploaded as 24-bit WAV, in one request of at most 100 MiB. A failed upload restarts from the beginning. After the upload the server computes the hash and refuses duplicates.
 - **Encoding.** After the WAV master is stored, the server encodes an MP3 playback copy (starting at 128 kbps, adjustable later because the master is kept) with a pure JS or WebAssembly encoder in a worker thread, one job at a time. Heavy work is allowed to run on the web host; the host's CPU and memory limits are untested.
-- **Status.** The asset is `processing` until the MP3 exists; the interface shows a loading indicator on the new fragment, then `ready`. If encoding fails, the WAV is kept, the asset is marked `failed`, and the encode can be retried.
-- **Restarts.** There are no scheduled jobs, so job state lives in MySQL. On boot, the app re-queues every asset still `processing`.
+- **Status.** The asset is `processing` until the MP3 exists; the interface shows a loading indicator on the new fragment, and the browser polls the status until it is `ready`. If encoding fails, the WAV is kept, the asset is marked `failed`, and the encode can be retried.
+- **Restarts.** There are no scheduled jobs, so job state lives in MySQL. On boot, the app re-queues every asset still `processing`. Preview and Published share the database, so a job needs a claim (who holds it, since when) to avoid two instances encoding the same file.
 - **Delivery.** The player plays the MP3. The download button delivers the WAV master. The app serves audio itself with HTTP range requests so seeking works, and Drive's latency and rate limits do not apply.
 - **MP3 start silence.** Encoders add a few milliseconds of silence at the start. The owner accepts this.
-- **Storage root.** It must be configurable and sit outside any folder that a deploy replaces. It needs a per-environment prefix, because `/private` is shared between Preview and Published; see section 4.
+- **Storage root.** It must be configurable and sit outside any folder that a deploy replaces. Preview and Published share one root, with no per-environment prefix: they share both `/private` and the database, and the paths stored in the database must resolve from either. Test and live data are mixed on purpose (section 4).
 
 **Backup risk.** Recordings are irreplaceable. Even with `/private` assumed durable, the project has no backup, so before real recordings go in it needs a backup or export routine (see open questions). A Drive `BlobStore` is one candidate, but not the only one.
 
 ## 7. Later extensions
 
-Five extensions are planned after the MVP. Each must fit the existing model without reshaping it.
+Later extensions are planned after the MVP. Each must fit the existing model without reshaping it.
 
-- **Translation view.** Original and translation shown side by side in the Redaction View, paired segment to segment. Translations live in their own language layer in the repo and are paired by the original segment's stable ID, with a source hash to flag outdated translations.
-- **Integrated LLM.** A chat for discussing the text and leaving comments. Comment-only by default, so it never writes into the manuscript. Any LLM-inserted text would be flagged.
-- **Speech generation.** Text-to-speech to generate speeches, or speech-to-speech that takes the author's own interpretation and replaces it with a character's voice. Current tools in use: Chatterbox (via Voicebox) for voice cloning and RVC (via Applio) for conversion. Free and open source is a hard constraint. These tools need hardware and software the host does not offer, so this most likely runs as a separate service behind an interface, and the output is a Take with the matching `origin`.
-- **Audio compiler.** Renders a section's timeline into a single audio file. Needs ffmpeg or equivalent, which the host does not provide, so where it runs is to be decided.
-- **Google Drive storage.** A `DriveBlobStore` behind `BlobStore`, one folder per book, via a central service account. Candidate uses are a backup target or an offload of the server disk. Points to settle first (not yet verified against current Google docs):
+- **Translation view.** Original and translation shown side by side in the Redaction View, paired cue to cue. Translations live in their own language layer in the repo and are paired by the original cue's stable ID, with a source hash to flag outdated translations.
+- **Integrated LLM.** A chat for discussing the text and leaving notes. Note-only by default, so it never writes into the manuscript. Any LLM-inserted text would be flagged. LLM notes are saved like any note, with the LLM as author.
+- **Speech generation.** Text-to-speech to generate speeches, or speech-to-speech that takes the author's own interpretation and replaces it with a character's voice. Current tools in use: Chatterbox (via Voicebox) for voice cloning and RVC (via Applio) for conversion. Free and open source is a hard constraint. These tools need hardware and software the host does not offer, so this most likely runs as a separate service behind an interface, and the output is a clip with the matching `origin`.
+- **Audio compiler.** Renders a scene's timeline into a single audio file, using the shared clip playback rule. Needs ffmpeg or equivalent, which the host does not provide, so where it runs is to be decided.
+- **Appendixes.** An ordered list of items with text and an audio file, with no lanes and no timeline. Parked for now; whether an item is a cue without placement or its own small entity, and where its recordings are stored, is to be decided.
+- **Video.** A clip can be audio or video, and the asset already records its media kind. Fades stay audio-only. The rule that all clips of a cue share one media kind is placed when video begins.
+- **Common library.** A library shared between media projects, as another root folder.
+- **Google Drive storage.** A `DriveBlobStore` behind `BlobStore`, one folder per media project, via a central service account; the library tree is mirrored to Drive. Candidate uses are a backup target or an offload of the server disk. Points to settle first (not yet verified against current Google docs):
   - As far as we know, service accounts have no storage quota of their own, so uploads into a folder shared from a personal Google account can fail even though listing works.
   - A Shared Drive avoids this but may require Google Workspace.
   - Whether the owner's account is personal or Workspace decides the route.
@@ -186,23 +261,34 @@ Five extensions are planned after the MVP. Each must fit the existing model with
 
 ## 8. Glossary
 
-These terms are used consistently in code, UI and conversation.
+These terms are used consistently in code, UI and conversation. Several changed meaning on 2026-10-14; older chats and decision-log rows may use the old meanings, noted here as "formerly".
 
 | Term | Meaning |
 | --- | --- |
-| Redaction View | The main editing screen: text divided into chapters, sections and segments, each section shown as a timeline |
-| Section | A part of a chapter; the unit that has one timeline |
-| Segment | The smallest piece of text, with a permanent ID; lives inside a clip and may reference a take |
-| Track | One layer of a timeline: a character's speech, a sound effect or music |
-| Clip | A block placed on a track, with start and gain, that holds its segments |
-| Take | One recording or generated audio file for a segment |
-| Asset | Any file in a book's library; audio assets have a WAV master and an MP3 playback copy |
+| Media Project | The root entity: one audiobook now, other kinds of work later (a `type` column is planned). Formerly Book. In code and the database it is `project`. Not to be confused with a Claude Project or a GitHub project |
+| Redaction View | The main editing screen: the media project divided into chapters, scenes and segments, each scene shown as a timeline of lanes and cues |
+| Chapter, introductory chapter | A part of the media project. An introductory chapter (a prologue, author's notes) does not start the count and has an index from `00A` to `00Z` |
+| Scene | A part of a chapter; the unit that has one timeline. Formerly "section" |
+| Segment | A time box inside a scene that groups cues. It starts where the previous segment ends, ends where its last cue ends, and may carry a label. Formerly "the smallest piece of text, with a permanent ID" |
+| Lane | A logical row of a scene's timeline, with a title, a colour and an optional link to a character. It has no kind. Formerly "track" or "layer" |
+| Cue | A block on a lane, inside a segment: start, length, optional title, Markdown text, notes and its clips. It holds the permanent ID that clips, notes and translations attach to. Formerly "clip" |
+| Clip | One media realization of a cue: a region of an asset (offset, length) with gain, fades and loop. A cue can have several clips as alternatives, one chosen. Formerly "take" |
+| Chosen clip | The clip of a cue that plays. Other clips are alternatives |
+| Asset | A file in a media project's library, with an ID, a path and a hash. It is never updated; audio assets have a WAV master and an MP3 playback copy |
+| Media | The content kind of an asset's file: audio now, video later |
 | Master, playback copy | The 24-bit WAV that is stored and downloaded, and the MP3 derived from it that the player plays |
-| Library | The set of a book's assets, stored through `BlobStore` (server disk in v1) |
-| Snapshot, push version | A commit of text, timeline JSON and asset manifest to the snapshot repo, made when the owner presses "push version" |
-| Manifest | A list mapping each asset to its master hash, saved with a version |
+| Library | The folder tree of a media project's assets on the server's disk, behind `BlobStore` |
+| Storyline | The managed library folder that holds recordings made or uploaded in cues, named after their chapter, scene, segment, lane and time |
+| Orphan | A file under `storyline` that no clip uses any more and that the author chose to keep; its name starts with "(Orphan) " |
+| Hash | SHA-256 of an asset's audio samples (bytes for other files); unique per media project |
+| Character | A project-level person or voice (the narrator included) with a name, default colour, picture, description and files |
+| Note | Markdown text written by an author (or later the LLM) on the media project, a chapter, a scene, a segment, a cue or an asset, or as a reply to another note. Its type is comment, reference or task. A chain of comments is a chat thread |
+| Reference | A note of type reference, with a short ref key that is also its sort key (a link, an album, a source). The References view is generated from reference notes; nothing else is stored |
+| Task | A note of type task that can be checked. The Tasks view is generated from task notes, grouped by chapter |
+| Snapshot, push version | A commit of text, timeline data and asset manifest to the snapshot repo, made when the owner presses "push version" |
+| Manifest | A list mapping each asset to its ID, path and hash, saved with a version |
 | BlobStore, VersionStore | Storage interfaces; server disk and GitHub are the first implementations, Drive comes later |
-| Origin | How a take came to exist: human-recorded, generated or voice-converted |
+| Origin | How a clip came to exist: human-recorded, generated or voice-converted |
 
 ## 9. Decision log
 
@@ -210,10 +296,37 @@ Decisions are listed newest first. Add a row whenever a decision changes; never 
 
 | Decision | Reason |
 | --- | --- |
+| The app is named **Redaction Studio** (formerly Audiobook Studio), a tool for any kind of media project (audiobook, textbook, film, series, podcast), not only audiobooks | The owner started it to produce an audiobook, and the possibility of other media made it a tool for all of them |
+| Notes can be written on any level: the media project, a chapter, a scene, a segment, a cue or an asset, and on other notes (the replies form a chat thread). The text is Markdown. Every note stores its project; a root note stores no other target (the media project itself) or exactly one foreign key to its chapter, scene, segment, cue or asset (checked by the app); a reply stores its parent and root note. Notes cascade from the project, from their target and from their parent; a note with replies is tombstoned instead of deleted; `note.author` is `SET NULL`. Supersedes "comments on cues only" | Foreign keys and cascades keep integrity, which one polymorphic id column could not; the project column lets one query load every note and reference; the root note makes a thread one query; tombstones keep other people's replies |
+| A media project can have a cover: an optional image asset in its library, stored as `project.cover` (a foreign key to asset, `SET NULL` when the asset is deleted; proposed). Deleting a whole media project becomes an ordered app routine rather than one cascade, and the user is first asked whether the assets on disk should be deleted too or kept | The cover is just another asset, so it gets hashing, naming and orphan handling for free. `SET NULL` keeps a missing cover from blocking anything, and an ordered delete avoids restrict-versus-cascade conflicts between the project, its assets and the clips that use them |
+| A note has a type: comment, reference or task. A chain of comments is a thread; a reply is always a comment, never a reference or a task. A reference note has a `ref_key`, a very short string that is also its sort key (replacing a reference flag and a reference title). A task note can be checked (`done at`, `done by`), and a generated Tasks view lists tasks grouped by chapter | One note mechanism covers discussion, sources and to-dos on every level. A short key sorts and cites a reference without parsing text; replies stay simple; tasks and references stay generated views with nothing extra to store |
+| No reference entity and no References chapter. A note of type reference (a link, an album, a source) has a ref key; the References view is generated from reference notes, sorted by ref key or by appearance and grouped by chapter. A cue's reference is a reference note on that cue. Supersedes the planned References chapter and a reference column on the cue | Nothing extra to store, keep consistent or number; it stays out of the chapter numbering and limits, and assets and cues share the same mechanism |
+| The root entity is **Media Project** (formerly Book), shortened to `project` in code and the database, with a `type` column (audiobook, textbook, film, series, podcast) added later by an additive migration. `chapter` stays the table name; the interface may label it per type. The repo files become `project.json` and `project.md` | The studio may later serve films and series. Renaming the root is cheap now and expensive after real data exists, while a type column and UI labels can wait |
+| IDs are ULIDs (`CHAR(26)`, `ascii_bin`). Ordered siblings use a dense integer `position` with a unique index on (parent, position), shifting in descending order. Delete rules: cascade down the hierarchy, `RESTRICT` for assets in use and characters used by lanes, `SET NULL` for `cue.clip` and a note's author. The chosen clip is `cue.clip` (nullable, with its foreign key) | App-generated, sortable, readable keys; the lists are tiny (99 chapters), so renumbering costs nothing and the folder index stays equal to the position. The cascade on the circular cue–clip key must be confirmed in the spike, with an app-enforced link as fallback |
+| No rename journal. A rename or reorder runs in one transaction that locks the media project row, updates the database without committing, renames the files with an undo list, and commits last. Supersedes the pending-rename journal in the library row below | A journal only protects against a crash in a window of milliseconds, and the reconciler already relinks missing files by hash, so the damage heals itself. The row lock also blocks overlapping reorders without another table |
+| Infrastructure: a `snapshot` table for pushed versions, and job columns on `asset` for encoding and peaks work (no separate jobs table until video or other job kinds need one) | A version list for free; one job kind per asset does not justify a table yet, and the later split is an additive migration |
+| Login is email and password, hashed with `crypto.scrypt`; no public sign-up; a signed cookie with no session table and no special session handling; manual password reset until outgoing email is confirmed | Simplest model for a private tool with a few invited authors; no native dependencies; no expiry cleanup job (scheduled jobs are unconfirmed). Revocation, reset by email and a session table are later, additive work |
+| Live state is stored in relational tables for all entities (cues, clips, notes included). JSON files exist only in the snapshot repo, one per chapter (its scenes, segments, lanes, cues, clips and notes inside), generated together with the compiled Markdown files just before each commit. Supersedes the JSON-per-scene layout and the earlier "timeline stored as JSON" for live state | Tables give foreign keys, per-cue IDs for notes and translations, and queries (for example finding the clips of an asset) without parsing documents. One file per chapter keeps the repo small and diffs readable, and generated files cannot drift from the live data |
+| Deleting a cue or clip asks, for each asset under `storyline` left with no clip, whether to delete it permanently or keep it (the dialog pre-selects keep). Assets outside `storyline` are kept without asking, and library files are never deleted by deleting a cue. Deleting a scene or chapter asks once for the batch. Kept files get "(Orphan) " at the start of their name (a deleted scene or chapter that still holds orphans gets the same prefix on its folder); an orphan linked to a new clip is renamed and moved to that clip's path | Recordings are irreplaceable and not in the Git history, so deletion is always an explicit, permanent choice. The prefix keeps orphans visible to anyone reading the disk; in the database an orphan is simply an asset with no clip |
+| A `storyline` file keeps the name and location given by the first clip that used it; later clips using it change nothing. Only when that clip is removed while another clip still uses the file is the file renamed and moved for the next clip (by creation time) | Names stay stable and meaningful, and the file always matches a clip that uses it. Assets are never updated, so a clip's asset never changes and creation time is link time; nothing extra is stored |
+| Recordings made or uploaded in a cue are stored under `storyline` with the naming pattern in section 6: chapter index, scene index, segment index and start time in the name, so alphabetical order is chronological. Parts are sanitized to ASCII and cut to 10 characters, with two-digit indexes (introductory chapters `00A` to `00Z`) and limits of 99. `storyline` and its folders cannot be renamed by hand; the app renames them when chapters, scenes or lanes change. Sound effects and music come from the library and are never recorded in a cue | Files stay organized and readable without the app, and paths stay short (about 85 characters). Seconds are enough because a lane never has two cues starting at once and series of sounds are single library files; a short-ID fallback and unique paths per media project cover any collision |
+| The library is the physical folder tree: no folder rows, one library per media project, derived files (MP3, peaks) beside the master with the same base name. Renames move files first and then update asset paths, run inside one database transaction that commits last (see Identifiers, ordering and deletes), and happen immediately when an edit commits. A reconciler checks the disk against asset records (adopt unknown files, red icon for missing files, relink by hash, amber icon for changed files). Supersedes "one folder per media project, named by content hash" and the per-environment storage prefix | The owner wants a library that is understandable without the app and later copied to Drive. The database stays the truth for identity; the transaction ordering and the reconciler cover the two stores drifting apart |
+| Asset entity: one record per file with ID, path, media kind, size, hash and status. The hash is SHA-256 of the audio samples (bytes for other files) and is unique per media project, so duplicates are refused and the existing asset returned. Assets are never updated; a new version is a new asset and a new clip. Clips reference assets by ID with deletion restricted. Supersedes the storage key and playback-copy fields of the old Asset entity | A stable ID separates identity from name, a foreign key protects references, and the hash finds a file moved or renamed outside the app. Hash and audio info are stored once per file however many clips use it. A file edited outside the app is flagged, never silently re-hashed |
+| A cue's length is a stored property, estimated from its text at creation (syllable count, line breaks, 1 second minimum) and owned by the author afterwards. The cue's length decides what plays: a longer clip is cut without being changed, a shorter one ends early or loops (`loop` is 0, N extra repeats, or -1 until the cue ends). Cues on one lane never overlap (gaps allowed), enforced by the interface and API; a resize into the next cue asks shift, trim or cancel | One authoritative length instead of a hidden second one; non-destructive; the estimate is only a suggestion. Fade fields exist on the clip now so that later work does not need a migration |
+| All times and lengths are integer milliseconds | Avoids floating-point drift; equal start times stay exactly equal |
+| The model is restructured: Chapter → Scene (formerly section) → Segment (a time box with an optional label) → Cue (block on a lane: start, length, optional title, Markdown text) → Clip (one media realization: asset region with offset, length, gain, fades, loop, origin; formerly take). Lane replaces track and layer, has no kind and may link to a character; a cue stores no kind, the media kind comes from the asset. Segment start and length are derived; script order is segment order, then start time, then lane order. Supersedes "Segments live inside clips", "Stable segment IDs from day one", and the Section, Timeline, Track, Clip, Take and Segment entities of the old section 5 | Cues are placed by hand and overlap across lanes, so a segment cannot be a text piece inside a clip. The text, the permanent ID and the anchor for clips, notes and translations now sit on the cue. A video extension needs no new cue fields |
+| Cue text is always Markdown; sound-effect cues have only a title | One format to render and store; the length estimate strips the Markdown first |
+| Characters are project-level (name, default colour, picture, description, files under `characters/{name}`); the narrator is a character. A lane copies the character's name and colour when linked and does not follow later renames | Lane names appear in file names, so a character rename must not rename files across the media project |
+| Notes (first on cues only; see the notes-on-any-level row at the top) are edited or deleted only by their author, and are saved with the chapter file in the snapshot. Changed or deleted notes stay visible in the Git history | Owner accepts this. Keeps the snapshot to one JSON file per chapter |
+| Chapters that do not start the count (prologue, author's notes) are marked introductory and indexed `00A` to `00Z`; numbered chapters are `01` to `99` (limit 99 for now). Scene and segment indexes start at `01` | `0A` would sort between chapter 09 and 10, while `00A` sorts first in every order |
+| Appendixes are parked (not in v1). Video clips and a common library are later extensions the model leaves room for | Scope. The asset already records its media kind, and a library is just a root folder |
+| The version manifest maps each asset to its ID, path and hash. Because audio can be deleted on the author's confirmation, past versions no longer guarantee that their audio exists; a restore shows the missing-file icon. Supersedes "blobs referenced by any past version are never deleted" | The owner chose explicit permanent deletion; only the text is proven |
+| One storage root is shared by Preview and Published, with no per-environment prefix. Supersedes "namespaced per environment" in the local-disk row below | They share both `/private` and the database, and the paths stored in the database must resolve from either; test and live data are mixed on purpose |
+| Real-time needs are met with plain REST, no websockets in v1: text saves when the user leaves the text field, the browser polls asset status while it is processing, and co-editing is out of scope. A media project has one active session at a time, enforced by the server (session ID on each save; refused saves close the older tab's editor and keep its text visible). Supersedes "saved to MySQL immediately" in the push-version row below | Single-owner tool, so push is not needed. The server-side rule covers other browsers and devices, unlike a browser-only check, and prevents silent overwrites from two open tabs. Losing unsaved text in a browser crash is accepted |
 | Audio is uploaded as 24-bit WAV in one request of at most 100 MiB, with a restart on failure and no resumable uploads. The server stores the WAV master, encodes an MP3 playback copy (128 kbps to start) in a worker thread using a pure JS or WebAssembly encoder, plays the MP3 and delivers the WAV only on download; a loading indicator shows while a fragment uploads and encodes. Supersedes "Uploads are chunked and resumable" below and the browser-side encoding assumption in section 4 | Browser takes are about a minute and library files at most five minutes (about 86 MB for stereo 24-bit 48 kHz), so uploads are small and a restart is cheap. Playback traffic stays low. MP3 start delay is accepted |
 | The principle "heavy work stays outside the host" is removed. Short processing, such as MP3 encoding, runs in the web app process in a worker thread. Where the audio compiler and speech generation run is decided when they are built | The owner never set this as a constraint. The host's CPU and memory limits are untested and are checked in the spike |
-| Text is saved to MySQL immediately; GitHub snapshots happen only on a manual "push version" (with an optional label). No autosave to GitHub in v1. The push is one function, so a timer can call it later; an "unpushed changes" indicator shows the time since the last push, driven by a "dirty since" field on the book | Owner's choice for a private tool. Accepted risk: long gaps weaken the gradual-writing proof, and unpushed text exists only in MySQL, which has no documented backup |
-| Test and live data share one database (Preview and Published), and nothing separates them for now; test books get a clear title | Private single-owner tool, so mixed data costs nothing today. Separating environments later is a refactor, not a rewrite. Revisit before public or multi-author use |
+| Text is saved to MySQL immediately; GitHub snapshots happen only on a manual "push version" (with an optional label). No autosave to GitHub in v1. The push is one function, so a timer can call it later; an "unpushed changes" indicator shows the time since the last push, driven by a "dirty since" field on the media project | Owner's choice for a private tool. Accepted risk: long gaps weaken the gradual-writing proof, and unpushed text exists only in MySQL, which has no documented backup |
+| Test and live data share one database (Preview and Published), and nothing separates them for now; test media projects get a clear title | Private single-owner tool, so mixed data costs nothing today. Separating environments later is a refactor, not a rewrite. Revisit before public or multi-author use |
 | Schema migrations run from the app at startup via Drizzle's migrator, under a MySQL advisory lock, with the SQL files committed to the repo. Migrations are additive only (expand, then contract in a later publish), one change per migration, and a failure stops startup | No SQL access or SSH on the host, and Preview and Published share one database (per GoDaddy's Hosted Database page), so a migration applied by Preview is live for Published. MySQL DDL is not transactional |
 | ORM: Drizzle over `mysql2` (`drizzle-orm` in `dependencies`, `drizzle-kit` in `devDependencies`). IDs for segments and all other entities are app-generated UUIDs or ULIDs. Supersedes "Drizzle or Knex" below | Schema in TypeScript gives shared types and generated SQL migrations with the least code (chosen as quickest to implement). MySQL has no `RETURNING`, so IDs must not depend on auto-increment |
 | Frontend: React, built with Vite. Supersedes "React or Svelte" | Largest ecosystem for timeline, drag and editor pieces; the hard parts (Web Audio, waveform library, ProseMirror-based editor) do not depend on the framework |
@@ -226,9 +339,9 @@ Decisions are listed newest first. Add a row whenever a decision changes; never 
 | Audio and library files are stored on the server's disk in v1 behind `BlobStore` (`LocalDiskBlobStore`); Google Drive moves to a later extension. Supersedes the Drive part of "Central Drive and GitHub account" below | Removes Drive's service-account quota and Workspace question and Drive's playback latency from the MVP; the adapter keeps the choice reversible. Accepted risk: the disk is the only copy until a backup exists, and persistence across redeploys is unverified |
 | Code repo is a single package (`src/server`, `src/web`, `src/shared`), Fastify, ES modules with `NodeNext`, port from `PORT` | Simplest deploy while the host's app root and build behavior are unknown; folders can be split later |
 | MySQL from the app via `mysql2` with host-injected `DB_*` variables; short-lived connections per request | Verified on the host in the spike; the host's docs recommend this pattern |
-| Segments live inside clips; a segment holds text and an optional file ID for its take | Matches the section file layout in the repo; the segment ID stays stable for takes, comments and translations |
-| Translations in a separate language layer, mirroring the original structure and paired by segment ID plus source hash | Keeps the original text history clean for proof, allows a timeline per language, and flags translations when the original changes |
-| Snapshot repo layout: book, chapter and section files, with generated book.md and script.md | Readable diffs and a structure the Redaction View maps onto directly; book.json is the source of truth for structure |
+| ~~Segments live inside clips; a segment holds text and an optional file ID for its take~~ (superseded by the model restructuring above) | Matches the section file layout in the repo; the segment ID stays stable for takes, notes and translations |
+| Translations in a separate language layer, mirroring the original structure and paired by segment ID plus source hash (now the cue ID plus source hash) | Keeps the original text history clean for proof, allows a timeline per language, and flags translations when the original changes |
+| Snapshot repo layout: media project, chapter and section files, with generated project.md and script.md (sections are now scenes) | Readable diffs and a structure the Redaction View maps onto directly; project.json is the source of truth for structure |
 | Snapshots via GitHub REST API, no `git` binary; separate code and snapshot repos | No SSH on the host; snapshot commits must not trigger deploys |
 | Runtime: GoDaddy Node.js Apps (Node 22), deployed from GitHub | Included in the plan; Node found under the hosting dashboard, not cPanel |
 | Backend: Node.js + TypeScript, Fastify or Express | One language across client and server; shared types for the timeline model |
@@ -236,8 +349,8 @@ Decisions are listed newest first. Add a row whenever a decision changes; never 
 | Provenance scope: text only, small frequent snapshots, append-only public repo, external timestamp later | Simplest version that proves incremental writing. Note: "small frequent snapshots" is replaced by manual pushes in v1 (see above) |
 | Central Drive and GitHub account, behind swappable adapters | Simpler for users; the operator accepts cost and risk |
 | Database holds live state; Git receives snapshots only | Fast editing and clean history without a commit per edit |
-| Timeline stored as JSON referencing hashed, immutable audio | Non-destructive editing, diffable history |
-| Stable segment IDs from day one | Takes, comments and translations attach to them |
+| Timeline stored as JSON referencing hashed, immutable audio | Non-destructive editing, diffable history. Live state is now relational tables (see the newest row) |
+| ~~Stable segment IDs from day one~~ (superseded: stable cue IDs, see the model restructuring above) | Takes, notes and translations attach to them |
 | Roles (Membership table) modeled early | Avoids a painful migration when other authors join |
 
 ## 10. Open questions and spike
@@ -255,19 +368,20 @@ The first task is a short spike that settles the hosting unknowns before any rea
 - Run Drizzle's migrator on the host: migration folder path under `tsx` and `dist/`, the advisory lock, and a deliberately failing migration (to confirm the deploy reports unhealthy).
 - Encode a real 5-minute stereo 24-bit 48 kHz WAV to MP3 on the host in a worker thread, and record time and memory.
 - Upload a WAV close to 100 MiB and confirm that the 100 MiB limit rejection message works.
+- Compute SHA-256 over the samples of a WAV close to 100 MiB on the host, and record the time.
+- On `/private`: rename a file and a folder, move a folder that holds a few hundred files, and record whether it is atomic and how long it takes (the library design depends on cheap renames).
 
 The Drive spike (listing a folder and uploading a small file with a service account) moved to the Google Drive extension in section 7.
 
 **Open questions**
 
-- [ ] Does the host support websockets?
 - [ ] What are the request size and time limits for uploads? Partly answered: up to 100 MiB accepted (about 19 s); larger and longer untested. Not needed while files stay under 100 MiB.
 - [ ] Are cron or scheduled jobs available, so MySQL (and audio) can be backed up somewhere?
 - [ ] What is the database size limit on this plan?
 - [ ] What is the disk quota for files on this plan, and where can the app write files that survive redeploys? Partly answered: `/private` is writable and shared; assumed durable for now; quota and durability unverified.
 - [ ] Backup strategy for audio on the server disk: what, where and how often, before real recordings go in.
-- [ ] Waveform peaks: computed on the server in the same pass as the MP3 encode (proposed), or in the browser?
-- [ ] Which audio formats does the library accept? Proposed: WAV and MP3 at first (an uploaded MP3 skips encoding); FLAC or others need a decoder.
+- [ ] Waveform peaks: computed on the server in the same pass as the MP3 encode and stored beside the master (proposed), or in the browser?
+- [ ] Which audio formats does the library accept? Proposed: WAV and MP3 at first (an uploaded MP3 skips encoding); FLAC or others need a decoder. Related: the hash of an MP3 would be of its bytes (proposed), since hashing samples needs a decoder.
 - [ ] Does the host's CPU and memory allow MP3 encoding in a worker thread, and does Drizzle's migrator lock by itself? (Both covered by the spike additions.)
 - [ ] How does the host build `dist/`? Not visible in the deploy log. GoDaddy's FAQ says runtime packages must be in `dependencies`. The Preview log shows the host running `npm run dev` (`tsx watch`); the Published start command is unconfirmed.
 - [ ] What wiped the local disk at the 2026-10-13 11:08 UTC update? The commit history shows no dependency change between the markers written and the loss, so the earlier hypothesis (a dependency change replaces the container) is not supported. Cause unknown. GoDaddy's Hosted Database page says files and assets persist across deploys, which this contradicts.
@@ -277,11 +391,27 @@ The Drive spike (listing a folder and uploading a small file with a service acco
 - [ ] Spike cleanup before real data: remove the `/spike/*` routes, the `spike_ping` table, the spike secrets and the test markers on local disk and `/private`.
 - [ ] Do the app's own File Manager and Database view allow export of files and of MySQL? (owner to check) Note: the database view does not run arbitrary SQL.
 - [ ] Preview apps are removed after 30 days (GoDaddy FAQ). What happens to their `/private` files? The database is shared with Published, so it is expected to survive; unconfirmed.
+- [ ] Database design, still to do: the full table list with column types, collations and indexes, the migration order, consistent snapshot generation per chapter, and the `dirty since` write path.
+- [ ] Spike: does InnoDB accept `ON DELETE CASCADE` from cue to clip together with `ON DELETE SET NULL` from `cue.clip` to clip? Fallback: no foreign key on `cue.clip`, enforced by the app.
+- [ ] Spike: does deleting a project with one cascade fail when `RESTRICT` keys (clip to asset, character picture) are involved? If so, the ordered app routine is required, not just preferred.
+- [ ] Spike: does `UPDATE ... ORDER BY position DESC` shift a unique `(parent, position)` index without errors? Fallback: no unique index.
+- [ ] Which MySQL version does the host run, and are `CHECK` constraints and `SKIP LOCKED` available? (Both currently unverified.)
+- [ ] Outgoing email from the host, for password reset. Until then the owner resets passwords by script.
+- [ ] Tune the `crypto.scrypt` cost parameters on the host, so a login takes a fraction of a second without starving the process.
+- [ ] Notes: ref key rules (proposed: up to 16 characters, required for a reference, unique per media project, case-insensitive, cleared when its note becomes a tombstone), whether tasks need an assignee or a due date, whether a task can be reopened by anyone or only its author, and whether the generated References and Tasks lists are also compiled to files (such as `references.md`) in the snapshot repo.
+- [ ] Snapshot repo layout for the new model: folder and file names inside the repo, where characters are saved, and whether sound-effect titles appear in `script.md`.
+- [ ] Characters: confirm the proposed defaults in section 5 (folder name rule, delete blocked while a lane uses the character, Narrator created with every media project).
+- [ ] Speech-length estimate: the syllable counter per media project language, the speaking rate and the pause per line break (starting values, tuned against real recordings).
+- [ ] Sanitizing file names to ASCII: transliteration rules for the languages of the media project (Portuguese, English, German, Spanish).
+- [ ] Appendixes: a cue without placement or their own entity, and where their recordings are stored.
+- [ ] Video (later): where the rule "all clips of a cue share one media kind" is enforced, and the derived files video needs (the host has no ffmpeg).
 - [ ] Later (Drive extension): personal Google account or Workspace, and Shared Drive versus another quota and ownership model for the service account.
 - [ ] Later: auto-push to GitHub on a timer (the push function already supports it). A starting proposal was 60 s idle and a 5-minute ceiling, skipping unchanged content.
 - [ ] Later: separating test data from live data, before any public or multi-author use.
 
-**Closed in the Oct 13 chat:** frontend framework (React), ORM (Drizzle), autosave cadence (manual push only for now), separating test and live data (accepted for now), how the app tells Preview from Published (not needed now), connection pool (short-lived connections, per the host's guidance), remote MySQL access from the owner's machine (not needed; migrations run in the app).
+**Closed in the Oct 13 chat:** websockets (not needed for v1; REST with polling), frontend framework (React), ORM (Drizzle), autosave cadence (manual push only for now), separating test and live data (accepted for now), how the app tells Preview from Published (not needed now), connection pool (short-lived connections, per the host's guidance), remote MySQL access from the owner's machine (not needed; migrations run in the app).
+
+**Closed in the Oct 14 chat:** the root is Media Project, IDs, ordering, delete rules, infra tables and login (see section 9), live state in relational tables with per-chapter JSON and compiled Markdown generated only at snapshot time, the media project model from chapter to clip (scene, segment, lane, cue, clip and their rules), the asset entity and its hash, the library tree and the storyline naming pattern, deleting and orphans, notes, characters (apart from the proposed defaults above), Markdown text, introductory chapters, appendixes parked.
 
 ## 11. Working agreements
 
@@ -292,7 +422,7 @@ The owner is a former developer and project manager with 16 years of experience,
 - **Honest engagement over validation.** Push back on weak decisions and name risks plainly, including on decisions already made.
 - **Verify before asserting.** Hosting behavior, API limits and library details must be checked against current documentation; mark anything unverified as such.
 - **Respect the constraints.** Free and open-source tooling, the current hosting plan, and the scope rules in sections 2 and 3.
-- **Keep this Bible current.** When a chat produces a decision, propose a one-line decision-log entry and update the affected section.
+- **Keep this Bible current.** When a chat produces a decision, propose a one-line decision-log entry and update the affected section. Every time the Bible is changed, also update the "Updated" date and time under the title (Berlin time).
 - **One task per chat.** Specific chats handle specific tasks (for example, the spike, the timeline component, the storage adapter). Each starts from this Bible, and its outcome is fed back into it.
 - **Where the work happens.** Planning and decisions happen in chats of this Project. Code changes happen in Claude Code, in the local clone of the code repo, with the owner's own git login. The canonical Bible lives in the code repo at `docs/PROJECT_BIBLE.md`, and the copy in the Project files is replaced whenever it changes.
 - **Secrets.** Tokens, passwords and service-account files never go into chats or the repo. They live in the host's environment settings and in the local `.env`. GitHub tokens are fine-grained and limited to the one repo they need.
