@@ -1,0 +1,351 @@
+/**
+ * Redaction Studio: Drizzle schema (MySQL).
+ *
+ * Mirrors the "Physical schema" section of docs/PROJECT_BIBLE.md. Draft for review:
+ * nothing here has run against the host's database yet (see the database spike in the Bible).
+ *
+ * Conventions
+ * - Ids are app-generated ULIDs: CHAR(26) ascii_bin, same type on every foreign key column.
+ * - Text uses the database default collation. Where case-insensitive uniqueness matters
+ *   (user.email, asset.path, note.ref_key) the column states utf8mb4_unicode_ci itself.
+ *   Create the database with DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci.
+ * - Times are integer milliseconds; timestamps are DATETIME(3) in UTC, set by the app.
+ * - Closed sets are ENUMs; adding a value is an additive migration.
+ * - Rules the database cannot express (cue overlap on a lane, a cue's lane and segment sharing a scene,
+ *   asset immutability, reply rules for notes, one reference per ref key) are enforced by the app.
+ */
+import {
+  bigint,
+  boolean,
+  customType,
+  datetime,
+  decimal,
+  index,
+  int,
+  json,
+  mysqlEnum,
+  mysqlTable,
+  primaryKey,
+  smallint,
+  text,
+  tinyint,
+  uniqueIndex,
+  varchar,
+  type AnyMySqlColumn,
+} from 'drizzle-orm/mysql-core';
+
+// ---- column helpers -------------------------------------------------------
+
+/** ULID: CHAR(26), ASCII, binary collation (case-sensitive, compact, readable in the host's database view). */
+const ulid = customType<{ data: string }>({
+  dataType: () => 'char(26) character set ascii collate ascii_bin',
+});
+
+/** Fixed-length ASCII text, case-sensitive (hashes, commit SHAs, colours). */
+const asciiChar = customType<{ data: string; config: { length: number } }>({
+  dataType: (config) => `char(${config?.length ?? 1}) character set ascii collate ascii_bin`,
+});
+
+const asciiVarchar = customType<{ data: string; config: { length: number } }>({
+  dataType: (config) => `varchar(${config?.length ?? 64}) character set ascii collate ascii_bin`,
+});
+
+/** Case-insensitive, accent-insensitive text (utf8mb4_unicode_ci), for columns that carry a uniqueness rule. */
+const ciVarchar = customType<{ data: string; config: { length: number } }>({
+  dataType: (config) =>
+    `varchar(${config?.length ?? 255}) character set utf8mb4 collate utf8mb4_unicode_ci`,
+});
+
+const ts = (name: string) => datetime(name, { mode: 'date', fsp: 3 });
+const createdAt = () => ts('created_at').notNull();
+const updatedAt = () => ts('updated_at').notNull();
+
+const ms = (name: string) => int(name, { unsigned: true });
+const position = () => smallint('position', { unsigned: true }).notNull();
+
+// ---- accounts -------------------------------------------------------------
+
+export const user = mysqlTable(
+  'user',
+  {
+    id: ulid('id').primaryKey(),
+    email: ciVarchar('email', { length: 254 }).notNull(), // stored lowercase
+    passwordHash: varchar('password_hash', { length: 255 }).notNull(), // scrypt string with its parameters
+    displayName: varchar('display_name', { length: 100 }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('user_email_uq').on(t.email)],
+);
+
+// ---- project ----------------------------------------------------------------
+
+export const project = mysqlTable('project', {
+  id: ulid('id').primaryKey(),
+  title: varchar('title', { length: 200 }).notNull(),
+  visibility: mysqlEnum('visibility', ['private', 'public']).notNull().default('private'),
+  language: varchar('language', { length: 10 }).notNull(), // BCP 47, such as pt-BR
+  // Cyclic with asset: the constraint is emitted as a separate ALTER TABLE by drizzle-kit.
+  coverAssetId: ulid('cover_asset_id').references((): AnyMySqlColumn => asset.id, {
+    onDelete: 'set null',
+  }),
+  // Increased by the touch helper on every write; a push clears dirtySince only if the revision is unchanged.
+  revision: bigint('revision', { mode: 'number', unsigned: true }).notNull().default(0),
+  dirtySince: ts('dirty_since'),
+  activeSession: ulid('active_session'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const membership = mysqlTable(
+  'membership',
+  {
+    userId: ulid('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    projectId: ulid('project_id')
+      .notNull()
+      .references(() => project.id, { onDelete: 'cascade' }),
+    // One role per membership for now; several roles later means a user_roles table.
+    role: mysqlEnum('role', ['owner', 'author', 'narrator', 'translator']).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.projectId] }),
+    index('membership_project_idx').on(t.projectId),
+  ],
+);
+
+// ---- library ----------------------------------------------------------------
+
+export const asset = mysqlTable(
+  'asset',
+  {
+    id: ulid('id').primaryKey(),
+    projectId: ulid('project_id')
+      .notNull()
+      .references(() => project.id, { onDelete: 'cascade' }),
+    path: ciVarchar('path', { length: 255 }).notNull(),
+    hash: asciiChar('hash', { length: 64 }).notNull(), // SHA-256 of the audio samples (bytes for other files), lowercase hex
+    mediaKind: mysqlEnum('media_kind', ['audio', 'image', 'video', 'document', 'other']).notNull(),
+    size: bigint('size', { mode: 'number', unsigned: true }).notNull(),
+    mediaInfo: json('media_info'), // duration, sample rate, channels, bit depth, ...
+    // The state of the encoding and peaks work, claimed by a worker with a conditional UPDATE.
+    status: mysqlEnum('status', ['pending', 'processing', 'ready', 'failed'])
+      .notNull()
+      .default('pending'),
+    // The reconciler's result: drives the red (missing) and amber (changed) icons.
+    fileState: mysqlEnum('file_state', ['ok', 'missing', 'changed']).notNull().default('ok'),
+    claimedBy: varchar('claimed_by', { length: 64 }),
+    claimedAt: ts('claimed_at'),
+    attempts: tinyint('attempts', { unsigned: true }).notNull().default(0),
+    error: text('error'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('asset_project_hash_uq').on(t.projectId, t.hash),
+    uniqueIndex('asset_project_path_uq').on(t.projectId, t.path),
+    index('asset_status_claimed_idx').on(t.status, t.claimedAt),
+  ],
+);
+
+export const character = mysqlTable(
+  'character',
+  {
+    id: ulid('id').primaryKey(),
+    projectId: ulid('project_id')
+      .notNull()
+      .references(() => project.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 100 }).notNull(),
+    defaultColour: asciiChar('default_colour', { length: 7 }).notNull(), // #rrggbb
+    pictureAssetId: ulid('picture_asset_id').references(() => asset.id, { onDelete: 'restrict' }),
+    description: text('description'),
+    folder: varchar('folder', { length: 30 }).notNull(), // sanitized folder name under characters/, a number added on collision
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('character_project_folder_uq').on(t.projectId, t.folder)],
+);
+
+// ---- the tree: chapter > scene > segment / lane > cue > clip -------------------
+
+export const chapter = mysqlTable(
+  'chapter',
+  {
+    id: ulid('id').primaryKey(),
+    projectId: ulid('project_id')
+      .notNull()
+      .references(() => project.id, { onDelete: 'cascade' }),
+    // 1..n across all chapters; introductory chapters come first (enforced by the app).
+    position: position(),
+    title: varchar('title', { length: 200 }).notNull(),
+    introductory: boolean('introductory').notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('chapter_project_position_uq').on(t.projectId, t.position)],
+);
+
+export const scene = mysqlTable(
+  'scene',
+  {
+    id: ulid('id').primaryKey(),
+    chapterId: ulid('chapter_id')
+      .notNull()
+      .references(() => chapter.id, { onDelete: 'cascade' }),
+    position: position(),
+    title: varchar('title', { length: 200 }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('scene_chapter_position_uq').on(t.chapterId, t.position)],
+);
+
+export const segment = mysqlTable(
+  'segment',
+  {
+    id: ulid('id').primaryKey(),
+    sceneId: ulid('scene_id')
+      .notNull()
+      .references(() => scene.id, { onDelete: 'cascade' }),
+    position: position(),
+    label: varchar('label', { length: 100 }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('segment_scene_position_uq').on(t.sceneId, t.position)],
+);
+
+export const lane = mysqlTable(
+  'lane',
+  {
+    id: ulid('id').primaryKey(),
+    sceneId: ulid('scene_id')
+      .notNull()
+      .references(() => scene.id, { onDelete: 'cascade' }),
+    characterId: ulid('character_id').references(() => character.id, { onDelete: 'restrict' }),
+    position: position(),
+    title: varchar('title', { length: 100 }).notNull(),
+    colour: asciiChar('colour', { length: 7 }).notNull(), // #rrggbb, copied from the character when linked
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('lane_scene_position_uq').on(t.sceneId, t.position)],
+);
+
+export const cue = mysqlTable(
+  'cue',
+  {
+    id: ulid('id').primaryKey(),
+    segmentId: ulid('segment_id')
+      .notNull()
+      .references(() => segment.id, { onDelete: 'cascade' }),
+    laneId: ulid('lane_id')
+      .notNull()
+      .references(() => lane.id, { onDelete: 'cascade' }),
+    // The chosen clip. Cyclic with clip; the constraint becomes a separate ALTER TABLE.
+    clipId: ulid('clip_id').references((): AnyMySqlColumn => clip.id, { onDelete: 'set null' }),
+    startMs: ms('start_ms').notNull(), // relative to the segment
+    lengthMs: ms('length_ms').notNull(), // authoritative: a clip plays inside it
+    title: varchar('title', { length: 200 }),
+    textMd: text('text_md').notNull(), // Markdown; the app writes '' for sound-effect cues
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('cue_segment_start_idx').on(t.segmentId, t.startMs),
+    index('cue_lane_segment_start_idx').on(t.laneId, t.segmentId, t.startMs),
+    index('cue_clip_idx').on(t.clipId),
+  ],
+);
+
+export const clip = mysqlTable(
+  'clip',
+  {
+    id: ulid('id').primaryKey(),
+    cueId: ulid('cue_id')
+      .notNull()
+      .references((): AnyMySqlColumn => cue.id, { onDelete: 'cascade' }),
+    assetId: ulid('asset_id')
+      .notNull()
+      .references(() => asset.id, { onDelete: 'restrict' }),
+    number: smallint('number', { unsigned: true }).notNull(), // the take number, the "(n)" in file names
+    offsetMs: ms('offset_ms').notNull(),
+    lengthMs: ms('length_ms').notNull(),
+    gainDb: decimal('gain_db', { precision: 5, scale: 2 }).notNull().default('0.00'),
+    fadeInMs: ms('fade_in_ms').notNull().default(0),
+    fadeOutMs: ms('fade_out_ms').notNull().default(0),
+    // `loop` is a reserved word in MySQL. 0 plays once, N plays N + 1 times, -1 repeats until the cue ends.
+    loops: smallint('loops').notNull().default(0),
+    origin: mysqlEnum('origin', ['human-recorded', 'generated', 'voice-converted']).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('clip_cue_number_uq').on(t.cueId, t.number),
+    index('clip_asset_idx').on(t.assetId),
+  ],
+);
+
+// ---- notes: comment | reference | task, on any level, flat threads ---------------
+
+export const note = mysqlTable(
+  'note',
+  {
+    id: ulid('id').primaryKey(),
+    projectId: ulid('project_id')
+      .notNull()
+      .references(() => project.id, { onDelete: 'cascade' }),
+    authorUserId: ulid('author_user_id').references(() => user.id, { onDelete: 'set null' }), // null: written by the LLM, or the account is gone
+    type: mysqlEnum('type', ['comment', 'reference', 'task']).notNull(),
+    textMd: text('text_md').notNull(),
+    refKey: ciVarchar('ref_key', { length: 24 }), // references only: required, unique per project, also the sort key
+    doneAt: ts('done_at'), // tasks only
+    doneByUserId: ulid('done_by_user_id').references(() => user.id, { onDelete: 'set null' }),
+    // A root note has no other target (the project itself) or exactly one of these (checked by the app).
+    chapterId: ulid('chapter_id').references(() => chapter.id, { onDelete: 'cascade' }),
+    sceneId: ulid('scene_id').references(() => scene.id, { onDelete: 'cascade' }),
+    segmentId: ulid('segment_id').references(() => segment.id, { onDelete: 'cascade' }),
+    cueId: ulid('cue_id').references(() => cue.id, { onDelete: 'cascade' }),
+    assetId: ulid('asset_id').references(() => asset.id, { onDelete: 'cascade' }),
+    // A reply is always a comment. It points at its root note (one cascade level) and may name the note it answers.
+    rootNoteId: ulid('root_note_id').references((): AnyMySqlColumn => note.id, {
+      onDelete: 'cascade',
+    }),
+    replyToNoteId: ulid('reply_to_note_id').references((): AnyMySqlColumn => note.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: createdAt(),
+    editedAt: ts('edited_at'),
+    deletedAt: ts('deleted_at'), // tombstone: a note with replies keeps its row, text and ref key cleared
+  },
+  (t) => [
+    index('note_project_type_idx').on(t.projectId, t.type),
+    uniqueIndex('note_project_ref_key_uq').on(t.projectId, t.refKey), // several NULLs are allowed
+    index('note_chapter_idx').on(t.chapterId),
+    index('note_scene_idx').on(t.sceneId),
+    index('note_segment_idx').on(t.segmentId),
+    index('note_cue_idx').on(t.cueId),
+    index('note_asset_idx').on(t.assetId),
+    index('note_root_created_idx').on(t.rootNoteId, t.createdAt),
+    index('note_reply_to_idx').on(t.replyToNoteId),
+  ],
+);
+
+// ---- versions ----------------------------------------------------------------
+
+export const snapshot = mysqlTable(
+  'snapshot',
+  {
+    id: ulid('id').primaryKey(),
+    projectId: ulid('project_id')
+      .notNull()
+      .references(() => project.id, { onDelete: 'cascade' }),
+    commitSha: asciiVarchar('commit_sha', { length: 64 }).notNull(),
+    revision: bigint('revision', { mode: 'number', unsigned: true }).notNull(), // the project revision this snapshot captured
+    label: varchar('label', { length: 200 }),
+    createdByUserId: ulid('created_by_user_id').references(() => user.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+  },
+  (t) => [index('snapshot_project_created_idx').on(t.projectId, t.createdAt)],
+);
