@@ -1,6 +1,6 @@
 # Redaction Studio — Project Bible
 
-Sep 30, 2026 · @Kalleo · Updated Oct 15, 2026, 13:40 (Berlin)
+Sep 30, 2026 · @Kalleo · Updated Oct 15, 2026, 13:50 (Berlin)
 
 ## 1. Vision and users
 
@@ -439,7 +439,7 @@ The Drive spike (listing a folder and uploading a small file with a service acco
 - [ ] Spike cleanup before real data: remove the `/spike/*` routes (the `/spike/db-schema` route and `SPIKE_TOKEN` were removed from the code on 2026-10-15; delete `SPIKE_TOKEN` from the host's environment), the `spike_ping` table, the spike secrets and the test markers on local disk and `/private`.
 - [ ] Do the app's own File Manager and Database view allow export of files and of MySQL? (owner to check) Note: the database view does not run arbitrary SQL.
 - [ ] Preview apps are removed after 30 days (GoDaddy FAQ). What happens to their `/private` files? The database is shared with Published, so it is expected to survive; unconfirmed.
-- [x] Database spike, run 2026-10-15 (18 of 18 passed, results in the decision log and section 4). Still to confirm on the host after the first deploy: the log line "Database migrations are up to date", the 13 tables in the database, and a real `readConsistent` call once the first snapshot push exists.
+- [x] Database spike, run 2026-10-15 (18 of 18 passed, results in the decision log and section 4). The first migration was applied on the host on 2026-10-15 (owner confirmed), so the advisory lock and the migration folder path are verified. Still to confirm: a real `readConsistent` call once the first snapshot push exists, and the failing-migration case (a deliberately broken migration should make the deploy report unhealthy).
 - [ ] Outgoing email from the host, for password reset. Until then the owner resets passwords by script.
 - [ ] Notes: whether the generated References and Tasks lists are also compiled to files (such as `references.md`) in the snapshot repo, whether tasks later need an assignee or a due date (decided: not for now), and whether a user can later hold several roles (decided: one role per membership for now; a `user_roles` table is the later refactor).
 - [ ] Snapshot repo layout for the new model: folder and file names inside the repo, where characters are saved, and whether sound-effect titles appear in `script.md`.
