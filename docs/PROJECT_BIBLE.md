@@ -1,6 +1,6 @@
 # Redaction Studio — Project Bible
 
-Sep 30, 2026 · @Kalleo · Updated Oct 15, 2026, 14:05 (Berlin)
+Sep 30, 2026 · @Kalleo · Updated Oct 15, 2026, 17:55 (Berlin)
 
 ## 1. Vision and users
 
@@ -444,7 +444,7 @@ The Drive spike (listing a folder and uploading a small file with a service acco
 - [ ] Preview apps are removed after 30 days (GoDaddy FAQ). What happens to their `/private` files? The database is shared with Published, so it is expected to survive; unconfirmed.
 - [x] Database spike, run 2026-10-15 (18 of 18 passed, results in the decision log and section 4). The first migration was applied on the host on 2026-10-15 (owner confirmed), so the advisory lock and the migration folder path are verified. Still to confirm: a real `readConsistent` call once the first snapshot push exists, and the failing-migration case (a deliberately broken migration should make the deploy report unhealthy).
 - [ ] Outgoing email from the host, for password reset. Until then the admin resets passwords in the Accounts screen.
-- [ ] Auth layer on the host: set `SESSION_SECRET` (at least 32 random characters) and `ADMIN_EMAIL`, `ADMIN_PASSWORD` in the host's environment settings, deploy, log in at `/app`, change the password, remove `ADMIN_PASSWORD`. Check that `Secure` cookies work through the host's proxy and that `request.ip` is the client's address (the per-address login limit depends on it).
+- [x] Auth layer on the host (owner confirmed 2026-10-15): the first admin login, the forced password change, creating a user and logging in as that user all work, so the `Secure` cookie works through the host's proxy. Still unchecked: that `request.ip` is the real client address (the per-address login limit depends on it), and the `RESET_ADMIN_PASSWORD` recovery on the host.
 - [ ] Notes: whether the generated References and Tasks lists are also compiled to files (such as `references.md`) in the snapshot repo, whether tasks later need an assignee or a due date (decided: not for now), and whether a user can later hold several roles (decided: one role per membership for now; a `user_roles` table is the later refactor).
 - [ ] Snapshot repo layout for the new model: folder and file names inside the repo, where characters are saved, and whether sound-effect titles appear in `script.md`.
 - [ ] Characters: confirm the proposed defaults in section 5 (folder name rule, delete blocked while a lane uses the character, Narrator created with every media project).
