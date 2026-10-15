@@ -1,6 +1,5 @@
-import type { drizzle } from 'drizzle-orm/mysql2';
+import type { Db } from './client.js';
 
-type Db = ReturnType<typeof drizzle>;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
 /**

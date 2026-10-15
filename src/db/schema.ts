@@ -73,6 +73,8 @@ export const user = mysqlTable(
     email: ciVarchar('email', { length: 254 }).notNull(), // stored lowercase
     passwordHash: varchar('password_hash', { length: 255 }).notNull(), // scrypt string with its parameters
     displayName: varchar('display_name', { length: 100 }).notNull(),
+    disabledAt: ts('disabled_at'), // set: the user cannot log in and every session cookie stops working
+    mustChangePassword: boolean('must_change_password').notNull().default(false), // set after a temporary password
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
