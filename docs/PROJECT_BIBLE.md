@@ -1,6 +1,6 @@
 # Redaction Studio — Project Bible
 
-Sep 30, 2026 · @Kalleo · Updated Oct 16, 2026, 08:35 (Berlin)
+Sep 30, 2026 · @Kalleo · Updated Oct 16, 2026, 09:11 (Berlin)
 
 ## 1. Vision and users
 
@@ -382,6 +382,7 @@ Decisions are listed newest first. Add a row whenever a decision changes; never 
 
 | Decision | Reason |
 | --- | --- |
+| Image resizer: wasm-vips (pure WebAssembly) in the single-worker pool, with `output_profile: 'srgb'`, all metadata stripped and JPEG quality 82. Jimp and jsquash stay in the spike module only for comparison and are removed with it | Local spike: wasm-vips passed 26 of 27 fixtures (the 27th, a static GIF, is skipped by design); 12 MP JPEG in about 0.15 s warm and 1.1 s cold at about 300–340 MB RSS, 48 MP in 1.3 s at about 410 MB. jsquash is about 4x slower and heavier and ignores Display P3; Jimp is slowest, haloes transparent edges and fails at 48 MP. Not yet measured on the host |
 | Replace on a name collision in a free folder: the new file becomes a new asset at the old path; clips, the cover and the character picture are re-pointed in one transaction; clips are clamped to the new duration; each affected cue gets a task note "Check fit after replacement"; the old file is kept as "(Replaced) " or deleted by the user's choice (keep pre-selected, proposed). The app renames user files only in *Save as copy*, in `storyline`, with the orphan prefixes and for derived files. Amends "the asset of a clip never changes" | Assets stay immutable and hashes and manifests stay true, while the owner gets the replace behavior wanted. Clamping keeps the playback invariants. The task note makes a possible misfit visible. A permanent delete of an irreplaceable recording stays an explicit choice |
 | Lightweight copies: `asset.size_lightweight` and `asset.lightweight_path`. Every WAV gets an MP3; an image above 600 px on its longest side gets a copy of exactly 600 px named `{base}_{W}x{H}.{ext}`; smaller images get none. Cards, lists and previews use the lightweight copy; the original is shown in Project View and character profiles and delivered on download (audio: WAV or MP3 menu). Cover and character pictures are limited to 10 MB. Files are served by an authenticated route by asset ID and variant. The resizer is verified in a separate spike chat | Unnecessary download size is the main cost of images in lists, and one rule covers audio and images. A stored path avoids guessing derived files by name. Needs a pure JS or WebAssembly resizer, not yet verified on the host |
 | Teams and membership: the admin creates users and teams and never joins a media project; a user can be in zero, one or several teams (a user in no team is standalone); any non-admin user can create a media project and becomes its owner; owners add members by searching name or email among users in their teams and set roles; last-owner rule. Supersedes "the admin adds, changes or removes memberships" and "any author can create a project" | Owners know who works with them, and the admin should not read manuscripts. Teams limit who is discoverable without a user directory visible to everyone. The last-owner rule avoids media projects nobody can manage |
@@ -466,7 +467,7 @@ The first task is a short spike that settles the hosting unknowns before any rea
 
 - Run Drizzle's migrator on the host: migration folder path under `tsx` and `dist/`, the advisory lock, and a deliberately failing migration (to confirm the deploy reports unhealthy).
 - Encode a real 5-minute stereo 24-bit 48 kHz WAV to MP3 on the host in a worker thread, and record time and memory.
-- Image resizer (owner, 2026-10-16: done in its own chat): resize a 12 MP phone photo to 600 px on the longest side in a worker thread with a pure JS or WebAssembly resizer on the host, and record time and memory; test EXIF orientation, a PNG with transparency and an animated GIF (to be skipped).
+- Image resizer (owner, 2026-10-16: done in its own chat). **Local part done 2026-10-16** (code in `src/spike/image/`, kit and report in `spikes/image-resizer/`, route `/spike/image/*` registered only when `SPIKE_TOKEN` is set); **the host run is still to do**: resize a 12 MP phone photo to 600 px on the longest side in a worker thread with a pure JS or WebAssembly resizer on the host, and record time and memory; test EXIF orientation, a PNG with transparency and an animated GIF (to be skipped).
 - Upload a WAV close to 100 MiB and confirm that the 100 MiB limit rejection message works.
 - Compute SHA-256 over the samples of a WAV close to 100 MiB on the host, and record the time.
 - On `/private`: rename a file and a folder, move a folder that holds a few hundred files, and record whether it is atomic and how long it takes (the library design depends on cheap renames).
@@ -482,6 +483,8 @@ The Drive spike (listing a folder and uploading a small file with a service acco
 - [ ] Backup strategy for audio on the server disk: what, where and how often, before real recordings go in.
 - [ ] Waveform peaks: computed on the server in the same pass as the MP3 encode and stored beside the master (proposed), or in the browser?
 - [ ] Which audio formats does the library accept? Proposed: WAV and MP3 at first (an uploaded MP3 skips encoding); FLAC or others need a decoder. Related: the hash of an MP3 would be of its bytes (proposed), since hashing samples needs a decoder.
+- [ ] Image resizer on the host: time and memory for a real 12 MP photo, whether wasm-vips threads work (`VIPS_CONCURRENCY` 1 or 2), whether the worker starts under `tsx watch` (it boots through `worker-boot.mjs`) and from `dist/`, and a `maxPixels` below 50 MP if memory is tight (50 MP peaked at roughly 0.4–0.8 GB locally).
+- [ ] Image resizer, not yet covered: HEIC input, resizing static GIFs (skipped today), and whether the reduced copy of a PNG should stay PNG.
 - [ ] Does the host's CPU and memory allow MP3 encoding in a worker thread, and does Drizzle's migrator lock by itself? (Both covered by the spike additions.)
 - [ ] How does the host build `dist/`? Not visible in the deploy log. GoDaddy's FAQ says runtime packages must be in `dependencies`. The Preview log shows the host running `npm run dev` (`tsx watch`); the Published start command is unconfirmed.
 - [ ] What wiped the local disk at the 2026-10-13 11:08 UTC update? The commit history shows no dependency change between the markers written and the loss, so the earlier hypothesis (a dependency change replaces the container) is not supported. Cause unknown. GoDaddy's Hosted Database page says files and assets persist across deploys, which this contradicts.
