@@ -1,4 +1,4 @@
-export const LIB_IDS = ['wasm-vips', 'jimp', 'jsquash'] as const;
+export const LIB_IDS = ['wasm-vips'] as const;
 export type LibId = (typeof LIB_IDS)[number];
 
 /** The copy keeps the original's format (Bible, section 6), so input and output formats are the same set. */
@@ -7,8 +7,6 @@ export type ImageFormat = 'jpeg' | 'png' | 'webp';
 /** Formats each library can both read and write (static, so the main thread need not load the library to know). */
 export const LIB_SUPPORTS: Record<LibId, readonly ImageFormat[]> = {
   'wasm-vips': ['jpeg', 'png', 'webp'],
-  jimp: ['jpeg', 'png'],
-  jsquash: ['jpeg', 'png', 'webp'],
 };
 
 /** What the shared inspection can say about a file without decoding it. */

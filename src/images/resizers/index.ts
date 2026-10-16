@@ -12,8 +12,6 @@ export async function loadResizer(id: LibId): Promise<Resizer> {
   let resizer: Resizer;
   switch (id) {
     case 'wasm-vips': resizer = (await import('./wasm-vips.js')).wasmVips; break;
-    case 'jimp': resizer = (await import('./jimp.js')).jimp; break;
-    case 'jsquash': resizer = (await import('./jsquash.js')).jsquash; break;
     default: throw new Error(`unknown library: ${String(id)}`);
   }
   await resizer.init();

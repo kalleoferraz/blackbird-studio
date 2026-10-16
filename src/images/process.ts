@@ -101,7 +101,7 @@ export async function processImage(input: Uint8Array, opts: ProcessOptions): Pro
   }
   if (inspection.truncated) return fail('decode_failed', 'the file is cut off (end of file not found)');
   if (inspection.animated) return { status: 'skipped', lib, inspection, reason: 'animated image: no lightweight copy', metrics: { inspectMs } };
-  if (inspection.format === 'gif') return { status: 'skipped', lib, inspection, reason: 'GIF is not resized in this spike', metrics: { inspectMs } };
+  if (inspection.format === 'gif') return { status: 'skipped', lib, inspection, reason: 'GIF is not resized (animated or static)', metrics: { inspectMs } };
 
   if (Math.max(inspection.displayWidth, inspection.displayHeight) <= maxSide) {
     return { status: 'skipped', lib, inspection, reason: `not larger than ${maxSide} px: no lightweight copy`, metrics: { inspectMs } };
