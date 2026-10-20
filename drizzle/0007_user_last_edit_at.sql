@@ -1,0 +1,1 @@
+ALTER TABLE `user` ADD `last_edit_at` datetime(3);

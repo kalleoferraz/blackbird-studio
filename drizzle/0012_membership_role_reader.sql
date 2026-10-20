@@ -1,0 +1,1 @@
+ALTER TABLE `membership` MODIFY COLUMN `role` enum('owner','author','narrator','translator','reader') NOT NULL;

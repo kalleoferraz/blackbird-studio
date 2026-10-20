@@ -5,7 +5,7 @@ import { newUlid } from '../db/ids.js';
 import { membership, project, user } from '../db/schema.js';
 import { checkPasswordRules, hashPassword } from './password.js';
 
-export const ROLES = ['owner', 'author', 'narrator', 'translator'] as const;
+export const ROLES = ['owner', 'author', 'narrator', 'translator', 'reader'] as const;
 export type Role = (typeof ROLES)[number];
 
 export type UserRow = typeof user.$inferSelect;
@@ -96,6 +96,8 @@ export async function createUser(
     displayName: input.displayName,
     disabledAt: null,
     mustChangePassword: input.mustChangePassword,
+    lastLoginAt: null,
+    lastEditAt: null,
     createdAt: now,
     updatedAt: now,
   };

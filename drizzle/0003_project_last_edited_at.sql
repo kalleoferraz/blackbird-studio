@@ -1,0 +1,1 @@
+ALTER TABLE `project` ADD `last_edited_at` datetime(3);

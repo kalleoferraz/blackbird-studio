@@ -1,0 +1,2 @@
+ALTER TABLE `cue` ADD `character_id` char(26) character set ascii collate ascii_bin;--> statement-breakpoint
+ALTER TABLE `cue` ADD CONSTRAINT `cue_character_id_character_id_fk` FOREIGN KEY (`character_id`) REFERENCES `character`(`id`) ON DELETE restrict ON UPDATE no action;

@@ -1,0 +1,1 @@
+ALTER TABLE `project` ADD `subtitle` varchar(200);

@@ -1,0 +1,2 @@
+ALTER TABLE `asset` ADD `lightweight_path` varchar(255) character set utf8mb4 collate utf8mb4_unicode_ci;--> statement-breakpoint
+ALTER TABLE `asset` ADD CONSTRAINT `asset_project_lightweight_path_uq` UNIQUE(`project_id`,`lightweight_path`);

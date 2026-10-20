@@ -1,0 +1,1 @@
+ALTER TABLE `lane` ADD `auto` boolean DEFAULT true NOT NULL;

@@ -75,17 +75,45 @@ export const user = mysqlTable(
     displayName: varchar('display_name', { length: 100 }).notNull(),
     disabledAt: ts('disabled_at'), // set: the user cannot log in and every session cookie stops working
     mustChangePassword: boolean('must_change_password').notNull().default(false), // set after a temporary password
+  lastLoginAt: ts('last_login_at'),
+  lastEditAt: ts('last_edit_at'), // set by the touch helper for the acting user
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [uniqueIndex('user_email_uq').on(t.email)],
 );
 
+export const team = mysqlTable(
+  'team',
+  {
+    id: ulid('id').primaryKey(),
+    name: varchar('name', { length: 100 }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('team_name_uq').on(t.name)],
+);
+
+export const teamMember = mysqlTable(
+  'team_member',
+  {
+    teamId: ulid('team_id')
+      .notNull()
+      .references(() => team.id, { onDelete: 'cascade' }),
+    userId: ulid('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.userId] }), index('team_member_user_idx').on(t.userId)],
+);
+
 // ---- project ----------------------------------------------------------------
 
 export const project = mysqlTable('project', {
   id: ulid('id').primaryKey(),
+  type: mysqlEnum('type', ['audiobook', 'textbook', 'film', 'series', 'podcast']).notNull().default('audiobook'),
   title: varchar('title', { length: 200 }).notNull(),
+  subtitle: varchar('subtitle', { length: 200 }),
   visibility: mysqlEnum('visibility', ['private', 'public']).notNull().default('private'),
   language: varchar('language', { length: 10 }).notNull(), // BCP 47, such as pt-BR
   // Cyclic with asset: the constraint is emitted as a separate ALTER TABLE by drizzle-kit.
@@ -95,10 +123,13 @@ export const project = mysqlTable('project', {
   // Increased by the touch helper on every write; a push clears dirtySince only if the revision is unchanged.
   revision: bigint('revision', { mode: 'number', unsigned: true }).notNull().default(0),
   dirtySince: ts('dirty_since'),
+  lastEditedAt: ts('last_edited_at'), // set by the touch helper on every write that ends up in a snapshot
   activeSession: ulid('active_session'),
+  // Folder name in the snapshot repo: suggested from the title at creation, unique ignoring case, not changed by title edits.
+  repoFolder: ciVarchar('repo_folder', { length: 80 }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-});
+}, (t) => [uniqueIndex('project_repo_folder_uq').on(t.repoFolder)]);
 
 export const membership = mysqlTable(
   'membership',
@@ -110,7 +141,7 @@ export const membership = mysqlTable(
       .notNull()
       .references(() => project.id, { onDelete: 'cascade' }),
     // One role per membership for now; several roles later means a user_roles table.
-    role: mysqlEnum('role', ['owner', 'author', 'narrator', 'translator']).notNull(),
+    role: mysqlEnum('role', ['owner', 'author', 'narrator', 'translator', 'reader']).notNull(),
     createdAt: createdAt(),
   },
   (t) => [
@@ -132,6 +163,8 @@ export const asset = mysqlTable(
     hash: asciiChar('hash', { length: 64 }).notNull(), // SHA-256 of the audio samples (bytes for other files), lowercase hex
     mediaKind: mysqlEnum('media_kind', ['audio', 'image', 'video', 'document', 'other']).notNull(),
     size: bigint('size', { mode: 'number', unsigned: true }).notNull(),
+    sizeLightweight: bigint('size_lightweight', { mode: 'number', unsigned: true }), // null: no lightweight copy
+    lightweightPath: ciVarchar('lightweight_path', { length: 255 }), // the derived copy (MP3 of a WAV, reduced image)
     mediaInfo: json('media_info'), // duration, sample rate, channels, bit depth, ...
     // The state of the encoding and peaks work, claimed by a worker with a conditional UPDATE.
     status: mysqlEnum('status', ['pending', 'processing', 'ready', 'failed'])
@@ -149,6 +182,7 @@ export const asset = mysqlTable(
   (t) => [
     uniqueIndex('asset_project_hash_uq').on(t.projectId, t.hash),
     uniqueIndex('asset_project_path_uq').on(t.projectId, t.path),
+    uniqueIndex('asset_project_lightweight_path_uq').on(t.projectId, t.lightweightPath), // several NULLs allowed
     index('asset_status_claimed_idx').on(t.status, t.claimedAt),
   ],
 );
@@ -231,6 +265,7 @@ export const lane = mysqlTable(
     position: position(),
     title: varchar('title', { length: 100 }).notNull(),
     colour: asciiChar('colour', { length: 7 }).notNull(), // #rrggbb, copied from the character when linked
+    auto: boolean('auto').notNull().default(true), // created by the app from cues; deleted when empty; a renamed or recoloured lane stops being automatic (proposed)
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -247,12 +282,17 @@ export const cue = mysqlTable(
     laneId: ulid('lane_id')
       .notNull()
       .references(() => lane.id, { onDelete: 'cascade' }),
+    type: mysqlEnum('type', ['speech', 'sfx', 'music']).notNull().default('speech'),
+    // The speaker: null means none or, for a speech cue with a Narrator character, see the Bible. Lanes follow from it.
+    characterId: ulid('character_id').references(() => character.id, { onDelete: 'restrict' }),
     // The chosen clip. Cyclic with clip; the constraint becomes a separate ALTER TABLE.
     clipId: ulid('clip_id').references((): AnyMySqlColumn => clip.id, { onDelete: 'set null' }),
     startMs: ms('start_ms').notNull(), // relative to the segment
     lengthMs: ms('length_ms').notNull(), // authoritative: a clip plays inside it
-    title: varchar('title', { length: 200 }),
-    textMd: text('text_md').notNull(), // Markdown; the app writes '' for sound-effect cues
+    // True until the length is set by hand or a clip becomes chosen. Speech: follows the text estimate; sfx and music: follows the chosen clip's audio length.
+    lengthAuto: boolean('length_auto').notNull().default(true),
+    title: varchar('title', { length: 200 }), // unused since 2026-10-20 (merged into text_md); a later migration removes it
+    textMd: text('text_md').notNull(), // speech: Markdown spoken text; sfx and music: a one-line description
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
