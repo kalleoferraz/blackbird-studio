@@ -127,6 +127,13 @@
       "when": 1792500183035,
       "tag": "0017_lane_auto",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1792509683475,
+      "tag": "0018_character_is_narrator",
+      "breakpoints": true
     }
   ]
 }

@@ -195,6 +195,7 @@ export const character = mysqlTable(
       .notNull()
       .references(() => project.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 100 }).notNull(),
+    isNarrator: boolean('is_narrator').notNull().default(false), // the Narrator of the media project; cannot be removed
     defaultColour: asciiChar('default_colour', { length: 7 }).notNull(), // #rrggbb
     pictureAssetId: ulid('picture_asset_id').references(() => asset.id, { onDelete: 'restrict' }),
     description: text('description'),

@@ -1,6 +1,11 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { registerAdminRoutes } from './admin-routes.js';
 import { registerAuthRoutes } from './auth-routes.js';
+import { registerCharacterRoutes } from './characters.js';
+import { registerErrorHandler } from './http.js';
+import { registerProjectRoutes } from './projects.js';
+import { registerSnapshotRoutes } from './snapshots.js';
+import { registerStoryRoutes } from './story.js';
 import { registerUi } from './ui.js';
 
 export function buildApp(): FastifyInstance {
@@ -18,8 +23,13 @@ export function buildApp(): FastifyInstance {
     time: new Date().toISOString(),
   }));
 
+  registerErrorHandler(app);
   registerAuthRoutes(app);
   registerAdminRoutes(app);
+  registerProjectRoutes(app);
+  registerStoryRoutes(app);
+  registerCharacterRoutes(app);
+  registerSnapshotRoutes(app);
   registerUi(app);
 
   return app;

@@ -12,3 +12,12 @@ export async function withDb<T>(fn: (db: Db) => Promise<T>): Promise<T> {
     await conn.end();
   }
 }
+
+export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+/** Something that can run queries: a connection or a transaction. */
+export type Q = Db | Tx;
+
+/** Runs `fn` in one transaction on a short-lived connection. */
+export function inTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return withDb((db) => db.transaction(fn));
+}

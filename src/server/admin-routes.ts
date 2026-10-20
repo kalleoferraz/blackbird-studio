@@ -2,18 +2,19 @@ import type { FastifyInstance } from 'fastify';
 import {
   ROLES,
   createUser,
+  isDuplicateKey,
+  soleAuthorProjects,
   findUserById,
   generateTemporaryPassword,
   listProjects,
   listUsers,
   normalizeEmail,
-  removeMembership,
   setDisabled,
-  setMembership,
   setPassword,
-  type Role,
 } from '../auth/accounts.js';
-import { ULID_PATTERN } from '../db/ids.js';
+import { asc, and, eq } from 'drizzle-orm';
+import { ULID_PATTERN, newUlid } from '../db/ids.js';
+import { team, teamMember, user } from '../db/schema.js';
 import { withDb } from '../db/client.js';
 import { authenticate, bodyString, requireAdmin } from './auth-routes.js';
 
@@ -61,30 +62,81 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (id === request.account!.id) return reply.code(400).send({ error: 'cannot_disable_yourself' });
     const found = await withDb(async (db) => {
       if (!(await findUserById(db, id))) return false;
+      if (disabled) {
+        const blocking = await soleAuthorProjects(db, id);
+        if (blocking.length > 0) return blocking;
+      }
       await setDisabled(db, id, disabled);
       return true;
     });
+    if (Array.isArray(found)) return reply.code(409).send({ error: 'last_author', projects: found });
     return found ? { ok: true } : reply.code(404).send({ error: 'not_found' });
   });
 
-  app.put('/api/admin/users/:id/memberships/:projectId', { preHandler: adminOnly, bodyLimit: 1024 }, async (request, reply) => {
-    const { id, projectId } = request.params as { id: string; projectId: string };
-    const role = bodyString(request.body, 'role');
-    if (!ULID_PATTERN.test(id) || !ULID_PATTERN.test(projectId) || !role || !(ROLES as readonly string[]).includes(role)) {
-      return reply.code(400).send({ error: 'invalid_request' });
+  // ---- teams: who may find whom when adding project members -------------------------------
+
+  app.get('/api/admin/teams', { preHandler: adminOnly }, async () =>
+    withDb(async (db) => {
+      const teams = await db.select().from(team).orderBy(asc(team.name));
+      const members = await db
+        .select({ teamId: teamMember.teamId, id: user.id, email: user.email, displayName: user.displayName })
+        .from(teamMember)
+        .innerJoin(user, eq(user.id, teamMember.userId))
+        .orderBy(asc(user.email));
+      return { teams: teams.map((t) => ({ id: t.id, name: t.name, members: members.filter((m) => m.teamId === t.id).map(({ teamId: _t, ...m }) => m) })) };
+    }),
+  );
+
+  app.post('/api/admin/teams', { preHandler: adminOnly, bodyLimit: 1024 }, async (request, reply) => {
+    const name = bodyString(request.body, 'name')?.trim();
+    if (!name || name.length > 100) return reply.code(400).send({ error: 'invalid_request' });
+    const now = new Date();
+    const id = newUlid();
+    try {
+      await withDb((db) => db.insert(team).values({ id, name, createdAt: now, updatedAt: now }));
+    } catch (err) {
+      if (isDuplicateKey(err)) return reply.code(409).send({ error: 'name_taken' });
+      throw err;
     }
-    const result = await withDb(async (db) => {
-      if (!(await findUserById(db, id))) return 'no_user';
-      return (await setMembership(db, id, projectId, role as Role)) ? 'ok' : 'no_project';
-    });
-    if (result === 'ok') return { ok: true };
-    return reply.code(404).send({ error: result === 'no_user' ? 'not_found' : 'project_not_found' });
+    return reply.code(201).send({ id });
   });
 
-  app.delete('/api/admin/users/:id/memberships/:projectId', { preHandler: adminOnly }, async (request, reply) => {
-    const { id, projectId } = request.params as { id: string; projectId: string };
-    if (!ULID_PATTERN.test(id) || !ULID_PATTERN.test(projectId)) return reply.code(400).send({ error: 'invalid_request' });
-    await withDb((db) => removeMembership(db, id, projectId));
+  app.patch('/api/admin/teams/:id', { preHandler: adminOnly, bodyLimit: 1024 }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const name = bodyString(request.body, 'name')?.trim();
+    if (!ULID_PATTERN.test(id) || !name || name.length > 100) return reply.code(400).send({ error: 'invalid_request' });
+    try {
+      await withDb((db) => db.update(team).set({ name, updatedAt: new Date() }).where(eq(team.id, id)));
+    } catch (err) {
+      if (isDuplicateKey(err)) return reply.code(409).send({ error: 'name_taken' });
+      throw err;
+    }
+    return { ok: true };
+  });
+
+  app.delete('/api/admin/teams/:id', { preHandler: adminOnly }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (!ULID_PATTERN.test(id)) return reply.code(400).send({ error: 'invalid_request' });
+    await withDb((db) => db.delete(team).where(eq(team.id, id)));
+    return { ok: true };
+  });
+
+  app.put('/api/admin/teams/:id/members/:userId', { preHandler: adminOnly }, async (request, reply) => {
+    const { id, userId } = request.params as { id: string; userId: string };
+    if (!ULID_PATTERN.test(id) || !ULID_PATTERN.test(userId)) return reply.code(400).send({ error: 'invalid_request' });
+    const ok = await withDb(async (db) => {
+      const t = await db.select({ id: team.id }).from(team).where(eq(team.id, id)).limit(1);
+      if (t.length === 0 || !(await findUserById(db, userId))) return false;
+      await db.insert(teamMember).ignore().values({ teamId: id, userId });
+      return true;
+    });
+    return ok ? { ok: true } : reply.code(404).send({ error: 'not_found' });
+  });
+
+  app.delete('/api/admin/teams/:id/members/:userId', { preHandler: adminOnly }, async (request, reply) => {
+    const { id, userId } = request.params as { id: string; userId: string };
+    if (!ULID_PATTERN.test(id) || !ULID_PATTERN.test(userId)) return reply.code(400).send({ error: 'invalid_request' });
+    await withDb((db) => db.delete(teamMember).where(and(eq(teamMember.teamId, id), eq(teamMember.userId, userId))));
     return { ok: true };
   });
 }

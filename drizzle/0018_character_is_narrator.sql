@@ -1,0 +1,1 @@
+ALTER TABLE `character` ADD `is_narrator` boolean DEFAULT false NOT NULL;

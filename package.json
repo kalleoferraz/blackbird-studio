@@ -12,7 +12,11 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "web:dev": "vite --config web/vite.config.ts web",
+    "web:build": "vite build --config web/vite.config.ts web",
+    "web:typecheck": "tsc -p web/tsconfig.json",
+    "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@octokit/rest": "^22.0.1",
@@ -24,8 +28,14 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
     "drizzle-kit": "^0.31.11",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vite": "^5.4.21"
   }
 }

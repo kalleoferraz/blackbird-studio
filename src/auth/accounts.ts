@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { asc, eq, and } from 'drizzle-orm';
+import { asc, eq, and, inArray, ne, isNull } from 'drizzle-orm';
 import { withDb, type Db } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { membership, project, user } from '../db/schema.js';
@@ -173,19 +173,24 @@ export async function listProjects(db: Db): Promise<{ id: string; title: string 
   return db.select({ id: project.id, title: project.title }).from(project).orderBy(asc(project.title));
 }
 
-/** Adds or changes a membership; returns false when the project does not exist. */
-export async function setMembership(db: Db, userId: string, projectId: string, role: Role): Promise<boolean> {
-  const found = await db.select({ id: project.id }).from(project).where(eq(project.id, projectId)).limit(1);
-  if (found.length === 0) return false;
-  await db
-    .insert(membership)
-    .values({ userId, projectId, role, createdAt: new Date() })
-    .onDuplicateKeyUpdate({ set: { role } });
-  return true;
-}
-
-export async function removeMembership(db: Db, userId: string, projectId: string): Promise<void> {
-  await db.delete(membership).where(and(eq(membership.userId, userId), eq(membership.projectId, projectId)));
+/** Projects where this user is the only enabled author: disabling them would leave the project without one. */
+export async function soleAuthorProjects(db: Db, userId: string): Promise<{ projectId: string; title: string }[]> {
+  const mine = await db
+    .select({ projectId: membership.projectId, title: project.title })
+    .from(membership)
+    .innerJoin(project, eq(project.id, membership.projectId))
+    .where(and(eq(membership.userId, userId), inArray(membership.role, ['owner', 'author'])));
+  const blocking: { projectId: string; title: string }[] = [];
+  for (const m of mine) {
+    const others = await db
+      .select({ id: user.id })
+      .from(membership)
+      .innerJoin(user, eq(user.id, membership.userId))
+      .where(and(eq(membership.projectId, m.projectId), inArray(membership.role, ['owner', 'author']), ne(membership.userId, userId), isNull(user.disabledAt)))
+      .limit(1);
+    if (others.length === 0) blocking.push(m);
+  }
+  return blocking;
 }
 
 // ---- startup --------------------------------------------------------------------

@@ -6,7 +6,7 @@ Full context: [docs/PROJECT_BIBLE.md](docs/PROJECT_BIBLE.md).
 
 ## Status
 
-Spike finished and cleaned up (Bible section 10). Currently: Fastify skeleton with `/` and `/health`; no features yet.
+First working version (everything except audio): accounts and teams, projects, members, Story Index, script writing (segments, cues, characters, lanes) and Save snapshot. Audio, notes, tasks and references come next (Bible section 2).
 
 ## Requirements
 
@@ -18,7 +18,9 @@ Node.js 22 or newer.
 npm install
 cp .env.example .env     # then adjust if needed
 npm run dev              # watch mode on http://localhost:3000/health
-npm run build            # compile to dist/
+npm run web:build        # build the React app into public/app (commit the result)
+npm run build            # compile the server to dist/
+npm test                 # integration tests (need a MySQL/MariaDB test database, see test/api.test.ts)
 npm start                # run the compiled build
 ```
 
@@ -26,6 +28,8 @@ npm start                # run the compiled build
 
 ```text
 src/server/   Fastify API
+src/snapshot/ snapshot files and the GitHub version store
+web/          React app (Vite); builds into public/app
 docs/         Project Bible
 ```
 
