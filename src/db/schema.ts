@@ -1,5 +1,5 @@
 /**
- * Redaction Studio: Drizzle schema (MySQL).
+ * Blackbird Script Studio: Drizzle schema (MySQL).
  *
  * Mirrors the "Physical schema" section of docs/PROJECT_BIBLE.md. The key types, collations and
  * delete rules were checked on the host's database in the 2026-10-15 spike (see the Bible); the
