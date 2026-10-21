@@ -3,13 +3,14 @@
  * lanes, Lane rules, Cue length and clip playback). All functions run inside the caller's transaction.
  */
 import { and, asc, desc, eq, inArray, max } from 'drizzle-orm';
-import type { Tx } from '../db/client.js';
+import { basename } from 'node:path';
+import type { Q, Tx } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { closeGap, openGap, PARKED } from '../db/positions.js';
-import { chapter, character, cue, lane, project, segment, scene } from '../db/schema.js';
+import { asset, assetPeaks, chapter, character, clip, cue, lane, project, segment, scene } from '../db/schema.js';
 import { MIN_CUE_MS, estimateSpeechMs } from '../shared/estimate.js';
 import { ripple, type RippleCue } from '../shared/ripple.js';
-import { HttpError, notFound } from './http.js';
+import { HttpError, badRequest, notFound } from './http.js';
 
 export type CueType = 'speech' | 'sfx' | 'music';
 export const MAX_SCENE_MS = 99 * 60 * 1000; // 99 minutes within a scene (Bible, section 5, Limits)
@@ -478,3 +479,216 @@ export async function createSegment(tx: Tx, chapterId: string, title: string, po
   await newScene(tx, id);
   return id;
 }
+
+// ---- clips: audio pieces assigned to a cue (Bible, section 5, Cue length and clip playback) ----------
+
+export const DEFAULT_FADE_MS = 100;
+export const MIN_CLIP_MS = 100;
+const CLIP_ORIGINS = ['human-recorded', 'generated', 'voice-converted'] as const;
+export type ClipOrigin = (typeof CLIP_ORIGINS)[number];
+
+export interface ClipView {
+  id: string;
+  cueId: string;
+  number: number;
+  assetId: string;
+  name: string;
+  offsetMs: number;
+  lengthMs: number;
+  gainDb: number;
+  fadeInMs: number;
+  fadeOutMs: number;
+  loops: number;
+  origin: ClipOrigin;
+  assetDurationMs: number | null;
+  status: 'pending' | 'processing' | 'ready' | 'failed';
+  hasPeaks: boolean;
+}
+
+/** The clips of some cues, with what the timeline needs of their audio (never the peaks themselves). */
+export async function clipsOfCues(q: Q, cueIds: string[]): Promise<Map<string, ClipView[]>> {
+  const out = new Map<string, ClipView[]>();
+  if (cueIds.length === 0) return out;
+  const rows = await q
+    .select({
+      id: clip.id,
+      cueId: clip.cueId,
+      number: clip.number,
+      assetId: clip.assetId,
+      path: asset.path,
+      mediaInfo: asset.mediaInfo,
+      status: asset.status,
+      offsetMs: clip.offsetMs,
+      lengthMs: clip.lengthMs,
+      gainDb: clip.gainDb,
+      fadeInMs: clip.fadeInMs,
+      fadeOutMs: clip.fadeOutMs,
+      loops: clip.loops,
+      origin: clip.origin,
+      peaks: assetPeaks.assetId,
+    })
+    .from(clip)
+    .innerJoin(asset, eq(asset.id, clip.assetId))
+    .leftJoin(assetPeaks, eq(assetPeaks.assetId, clip.assetId))
+    .where(inArray(clip.cueId, cueIds))
+    .orderBy(asc(clip.cueId), asc(clip.number));
+  for (const r of rows) {
+    const dur = (r.mediaInfo as { durationMs?: unknown } | null)?.durationMs;
+    const view: ClipView = {
+      id: r.id,
+      cueId: r.cueId,
+      number: r.number,
+      assetId: r.assetId,
+      name: basename(r.path),
+      offsetMs: r.offsetMs,
+      lengthMs: r.lengthMs,
+      gainDb: Number(r.gainDb),
+      fadeInMs: r.fadeInMs,
+      fadeOutMs: r.fadeOutMs,
+      loops: r.loops,
+      origin: r.origin,
+      assetDurationMs: typeof dur === 'number' ? dur : null,
+      status: r.status,
+      hasPeaks: r.peaks !== null,
+    };
+    (out.get(r.cueId) ?? out.set(r.cueId, []).get(r.cueId)!).push(view);
+  }
+  return out;
+}
+
+async function audioDuration(tx: Tx, projectId: string, assetId: string): Promise<number> {
+  const row = (await tx.select().from(asset).where(and(eq(asset.id, assetId), eq(asset.projectId, projectId))).limit(1))[0];
+  if (!row) throw new HttpError(400, 'invalid_asset');
+  if (row.mediaKind !== 'audio') throw new HttpError(400, 'not_audio', 'That file is not audio.');
+  if (row.status === 'failed') throw new HttpError(409, 'asset_failed', 'That audio file could not be processed.');
+  const dur = (row.mediaInfo as { durationMs?: unknown } | null)?.durationMs;
+  if (typeof dur !== 'number' || dur <= 0) throw new HttpError(409, 'asset_not_ready');
+  return dur;
+}
+
+function checkPiece(offsetMs: number, lengthMs: number, durationMs: number): void {
+  if (lengthMs < MIN_CLIP_MS) throw badRequest('invalid_lengthMs');
+  if (offsetMs + lengthMs > durationMs) throw new HttpError(400, 'beyond_audio', 'The piece goes past the end of the audio file.');
+  checkSpan(0, lengthMs);
+}
+
+/** A chosen clip sets the cue's length (audio cues are trim-only); speech stops following the text estimate. */
+async function followClip(tx: Tx, current: CueRow, clipLengthMs: number): Promise<void> {
+  checkSpan(current.startMs, clipLengthMs);
+  const delta = clipLengthMs - current.lengthMs;
+  await tx
+    .update(cue)
+    .set({ lengthMs: clipLengthMs, lengthAuto: current.type === 'speech' ? false : current.lengthAuto, updatedAt: new Date() })
+    .where(eq(cue.id, current.id));
+  if (delta !== 0) await applyRipple(tx, current.sceneId, current.startMs + current.lengthMs, delta, [current.id]);
+}
+
+async function cueProject(tx: Tx, cueId: string): Promise<{ current: CueRow; projectId: string }> {
+  const current = await cueRow(tx, cueId);
+  const seg = await sceneRow(tx, current.sceneId);
+  const ctx = await segmentContext(tx, seg.segmentId);
+  return { current, projectId: ctx.projectId };
+}
+
+export interface NewClip {
+  assetId: string;
+  offsetMs?: number;
+  lengthMs?: number;
+  /** The piece defaults to the cue's length (when the file allows) instead of the rest of the file. */
+  keepCueLength?: boolean;
+  choose?: boolean;
+  origin?: ClipOrigin;
+}
+
+export async function addClip(tx: Tx, cueId: string, input: NewClip): Promise<string> {
+  const { current, projectId } = await cueProject(tx, cueId);
+  const duration = await audioDuration(tx, projectId, input.assetId);
+  const offsetMs = input.offsetMs ?? 0;
+  if (offsetMs >= duration) throw new HttpError(400, 'beyond_audio', 'The piece starts past the end of the audio file.');
+  const keep = input.keepCueLength ?? !current.lengthAuto;
+  const available = duration - offsetMs;
+  const lengthMs = input.lengthMs ?? (keep ? Math.min(current.lengthMs, available) : available);
+  checkPiece(offsetMs, lengthMs, duration);
+  const fade = Math.min(DEFAULT_FADE_MS, Math.floor(lengthMs / 2));
+  const last = (await tx.select({ n: max(clip.number) }).from(clip).where(eq(clip.cueId, cueId)))[0]?.n ?? 0;
+  const id = newUlid();
+  await tx.insert(clip).values({
+    id,
+    cueId,
+    assetId: input.assetId,
+    number: Number(last) + 1,
+    offsetMs,
+    lengthMs,
+    fadeInMs: fade,
+    fadeOutMs: fade,
+    origin: input.origin ?? 'human-recorded',
+    createdAt: new Date(),
+  });
+  if (input.choose ?? true) {
+    await tx.update(cue).set({ clipId: id, updatedAt: new Date() }).where(eq(cue.id, cueId));
+    await followClip(tx, current, lengthMs);
+  }
+  return id;
+}
+
+export interface ClipPatch {
+  offsetMs?: number;
+  lengthMs?: number;
+  gainDb?: number;
+  fadeInMs?: number;
+  fadeOutMs?: number;
+  loops?: number;
+}
+
+export async function updateClip(tx: Tx, clipId: string, patch: ClipPatch): Promise<void> {
+  const row = (await tx.select().from(clip).where(eq(clip.id, clipId)).limit(1))[0];
+  if (!row) throw notFound();
+  const { current, projectId } = await cueProject(tx, row.cueId);
+  const duration = await audioDuration(tx, projectId, row.assetId);
+  const offsetMs = patch.offsetMs ?? row.offsetMs;
+  const lengthMs = patch.lengthMs ?? row.lengthMs;
+  checkPiece(offsetMs, lengthMs, duration);
+  let fadeInMs = patch.fadeInMs ?? row.fadeInMs;
+  let fadeOutMs = patch.fadeOutMs ?? row.fadeOutMs;
+  if (patch.fadeInMs !== undefined || patch.fadeOutMs !== undefined) {
+    if (fadeInMs + fadeOutMs > lengthMs) throw new HttpError(400, 'fades_too_long', 'The fades are longer than the piece.');
+  } else if (fadeInMs + fadeOutMs > lengthMs) {
+    // A shorter piece squeezes its fades instead of refusing the trim.
+    fadeInMs = Math.min(fadeInMs, Math.floor(lengthMs / 2));
+    fadeOutMs = Math.min(fadeOutMs, lengthMs - fadeInMs);
+  }
+  await tx
+    .update(clip)
+    .set({
+      offsetMs,
+      lengthMs,
+      fadeInMs,
+      fadeOutMs,
+      ...(patch.gainDb !== undefined ? { gainDb: patch.gainDb.toFixed(2) } : {}),
+      ...(patch.loops !== undefined ? { loops: patch.loops } : {}),
+    })
+    .where(eq(clip.id, clipId));
+  if (current.clipId === clipId && lengthMs !== current.lengthMs) await followClip(tx, current, lengthMs);
+}
+
+/** Chooses the clip a cue plays (null: none; the cue keeps its length). */
+export async function chooseClip(tx: Tx, cueId: string, clipId: string | null): Promise<void> {
+  const current = await cueRow(tx, cueId);
+  if (clipId === null) {
+    await tx.update(cue).set({ clipId: null, updatedAt: new Date() }).where(eq(cue.id, cueId));
+    return;
+  }
+  const row = (await tx.select().from(clip).where(and(eq(clip.id, clipId), eq(clip.cueId, cueId))).limit(1))[0];
+  if (!row) throw new HttpError(400, 'invalid_clip');
+  await tx.update(cue).set({ clipId, updatedAt: new Date() }).where(eq(cue.id, cueId));
+  await followClip(tx, current, row.lengthMs);
+}
+
+/** Removes a take. The audio file stays in the library. */
+export async function removeClip(tx: Tx, clipId: string): Promise<void> {
+  const row = (await tx.select({ id: clip.id }).from(clip).where(eq(clip.id, clipId)).limit(1))[0];
+  if (!row) throw notFound();
+  await tx.delete(clip).where(eq(clip.id, clipId)); // the cue's chosen clip becomes null (ON DELETE SET NULL)
+}
+
+export const CLIP_ORIGIN_LIST: readonly string[] = CLIP_ORIGINS;

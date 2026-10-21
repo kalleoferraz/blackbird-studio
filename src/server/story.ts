@@ -4,11 +4,15 @@ import { inTransaction, withDb, type Q, type Tx } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { closeGap, openGap, parkRow } from '../db/positions.js';
 import { touchProject } from '../db/touch.js';
-import { chapter, cue, lane, project, segment, scene } from '../db/schema.js';
+import { chapter, clip, cue, lane, project, segment, scene } from '../db/schema.js';
 import { accessTo, accessToEntity, checkId } from './access.js';
 import { authenticate } from './auth-routes.js';
 import {
   MAX_SCENE_MS,
+  CLIP_ORIGIN_LIST,
+  addClip,
+  chooseClip,
+  clipsOfCues,
   createSegment,
   deleteCue,
   deleteScene,
@@ -17,9 +21,13 @@ import {
   moveCue,
   newScene,
   pruneLanes,
+  removeClip,
   sceneCues,
   splitScene,
+  updateClip,
   updateCue,
+  type ClipOrigin,
+  type ClipPatch,
   type CuePatch,
   type CueType,
 } from './content.js';
@@ -85,8 +93,11 @@ async function segmentContent(tx: Q, segmentId: string) {
   const lanes = await tx.select().from(lane).where(eq(lane.segmentId, segmentId)).orderBy(asc(lane.position));
   let start = 0;
   const outScenes = [];
-  for (const s of scenes) {
-    const cues = await sceneCues(tx as Tx, s.id);
+  const sceneCueRows = [];
+  for (const s of scenes) sceneCueRows.push(await sceneCues(tx as Tx, s.id));
+  const clips = await clipsOfCues(tx, sceneCueRows.flat().map((c) => c.id));
+  for (const [i, s] of scenes.entries()) {
+    const cues = sceneCueRows[i]!;
     const length = cues.reduce((m, c) => Math.max(m, c.startMs + c.lengthMs), 0);
     outScenes.push({
       id: s.id,
@@ -104,6 +115,7 @@ async function segmentContent(tx: Q, segmentId: string) {
         lengthAuto: c.lengthAuto,
         text: c.textMd,
         clipId: c.clipId,
+        clips: clips.get(c.id) ?? [],
       })),
     });
     start += length;
@@ -383,6 +395,75 @@ export function registerStoryRoutes(app: FastifyInstance): void {
     const afterCueId = body.afterCueId === undefined || body.afterCueId === null ? null : checkId(body.afterCueId);
     return segmentWrite(request, 'cue', id, async (tx) => {
       await moveCue(tx, id, sceneId, afterCueId);
+    });
+  });
+
+  // ---- clips ------------------------------------------------------------------------
+
+  async function cueOfClip(clipId: string): Promise<string> {
+    const row = (await withDb((db) => db.select({ cueId: clip.cueId }).from(clip).where(eq(clip.id, clipId)).limit(1)))[0];
+    if (!row) throw new HttpError(404, 'not_found');
+    return row.cueId;
+  }
+
+  app.post('/api/cues/:id/clips', small, async (request, reply) => {
+    const id = checkId((request.params as { id: string }).id);
+    const body = asBody(request.body);
+    const assetId = checkId(body.assetId);
+    const offsetMs = optInt(body, 'offsetMs', 0, MAX_SCENE_MS);
+    const lengthMs = optInt(body, 'lengthMs', 100, MAX_SCENE_MS);
+    const keepCueLength = optBool(body, 'keepCueLength');
+    const choose = optBool(body, 'choose');
+    let origin: ClipOrigin | undefined;
+    if ('origin' in body) {
+      if (typeof body.origin !== 'string' || !CLIP_ORIGIN_LIST.includes(body.origin)) throw badRequest('invalid_origin');
+      origin = body.origin as ClipOrigin;
+    }
+    const result = await segmentWrite(request, 'cue', id, async (tx) => ({
+      created: await addClip(tx, id, { assetId, offsetMs, lengthMs, keepCueLength, choose, origin }),
+    }));
+    return reply.code(201).send(result);
+  });
+
+  app.patch('/api/clips/:id', small, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    const body = asBody(request.body);
+    const patch: ClipPatch = {};
+    const offsetMs = optInt(body, 'offsetMs', 0, MAX_SCENE_MS);
+    if (offsetMs !== undefined) patch.offsetMs = offsetMs;
+    const lengthMs = optInt(body, 'lengthMs', 100, MAX_SCENE_MS);
+    if (lengthMs !== undefined) patch.lengthMs = lengthMs;
+    const fadeInMs = optInt(body, 'fadeInMs', 0, MAX_SCENE_MS);
+    if (fadeInMs !== undefined) patch.fadeInMs = fadeInMs;
+    const fadeOutMs = optInt(body, 'fadeOutMs', 0, MAX_SCENE_MS);
+    if (fadeOutMs !== undefined) patch.fadeOutMs = fadeOutMs;
+    const loops = optInt(body, 'loops', -1, 99);
+    if (loops !== undefined) patch.loops = loops;
+    if ('gainDb' in body) {
+      if (typeof body.gainDb !== 'number' || !Number.isFinite(body.gainDb) || body.gainDb < -60 || body.gainDb > 24) throw badRequest('invalid_gainDb');
+      patch.gainDb = body.gainDb;
+    }
+    const cueId = await cueOfClip(id);
+    return segmentWrite(request, 'cue', cueId, async (tx) => {
+      await updateClip(tx, id, patch);
+    });
+  });
+
+  app.delete('/api/clips/:id', auth, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    const cueId = await cueOfClip(id);
+    return segmentWrite(request, 'cue', cueId, async (tx) => {
+      await removeClip(tx, id);
+    });
+  });
+
+  /** Chooses the clip a cue plays; `clipId: null` chooses none. */
+  app.post('/api/cues/:id/choose-clip', small, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    const body = asBody(request.body);
+    const clipId = body.clipId === null ? null : checkId(body.clipId);
+    return segmentWrite(request, 'cue', id, async (tx) => {
+      await chooseClip(tx, id, clipId);
     });
   });
 

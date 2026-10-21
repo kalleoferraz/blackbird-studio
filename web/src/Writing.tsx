@@ -117,7 +117,7 @@ function SceneBlock({ seg, index, total, segmentId, lanes, characters, readOnly,
           if (!here || here.afterCueId !== afterId) return null;
           const prev = seg.cues.find((c) => c.id === afterId);
           const pseudo: Cue = { id: 'draft', laneId: '', type: here.type, characterId: here.characterId, startMs: prev ? prev.startMs + prev.lengthMs : 0,
-            lengthMs: 0, lengthAuto: true, text: '', clipId: null };
+            lengthMs: 0, lengthAuto: true, text: '', clipId: null, clips: [] };
           return <CueBlock key={'draft-' + afterId} cue={pseudo} lane={undefined} characters={characters} readOnly={false} call={call} isLast={afterId === (seg.cues[seg.cues.length - 1]?.id ?? null)}
             drafting={{ patch: (b) => setDraft({ ...here, ...b }), save: saveDraft, cancel: () => setDraft(null) }}
             startDraft={() => undefined} setConfirm={setConfirm} onNewCharacter={onNewCharacter} />;
@@ -246,7 +246,7 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
   const nameStyle = { color: black ? 'var(--text)' : colour };
   return (
     <div className={'cue ' + cue.type + (editing ? ' editing' : '') + (isNow ? ' playhead' : '') + (played ? ' played' : '')} data-cue-id={cue.id} onClick={onCueClick}>
-      {isNow && <span className="progress" style={{ height: `${play / 10}%` }} />}
+      {isNow && <span className="progress" style={{ width: `${play / 10}%` }} />}
       <span className={'strip' + (black ? ' black' : '')} style={{ background: colour }} />
       <div className="tagcol">
       <div className="tag">

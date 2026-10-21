@@ -148,6 +148,13 @@
       "when": 1792612000000,
       "tag": "0020_asset_peaks",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1792698400000,
+      "tag": "0021_clip_fade_default",
+      "breakpoints": true
     }
   ]
 }

@@ -336,8 +336,8 @@ export const clip = mysqlTable(
     offsetMs: ms('offset_ms').notNull(),
     lengthMs: ms('length_ms').notNull(),
     gainDb: decimal('gain_db', { precision: 5, scale: 2 }).notNull().default('0.00'),
-    fadeInMs: ms('fade_in_ms').notNull().default(0),
-    fadeOutMs: ms('fade_out_ms').notNull().default(0),
+    fadeInMs: ms('fade_in_ms').notNull().default(100), // 100 ms: enough to avoid clicks; editable later
+    fadeOutMs: ms('fade_out_ms').notNull().default(100),
     // `loop` is a reserved word in MySQL. 0 plays once, N plays N + 1 times, -1 repeats until the cue ends.
     loops: smallint('loops').notNull().default(0),
     origin: mysqlEnum('origin', ['human-recorded', 'generated', 'voice-converted']).notNull(),

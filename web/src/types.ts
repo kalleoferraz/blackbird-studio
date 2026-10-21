@@ -28,9 +28,15 @@ export interface StoryChapter { id: string; position: number; index: string; tit
 export interface Story { chapters: StoryChapter[]; created?: string }
 
 export type CueType = 'speech' | 'sfx' | 'music';
+export interface Clip {
+  id: string; cueId: string; number: number; assetId: string; name: string;
+  offsetMs: number; lengthMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number; loops: number;
+  origin: 'human-recorded' | 'generated' | 'voice-converted';
+  assetDurationMs: number | null; status: 'pending' | 'processing' | 'ready' | 'failed'; hasPeaks: boolean;
+}
 export interface Cue {
   id: string; laneId: string; type: CueType; characterId: string | null;
-  startMs: number; lengthMs: number; lengthAuto: boolean; text: string; clipId: string | null;
+  startMs: number; lengthMs: number; lengthAuto: boolean; text: string; clipId: string | null; clips: Clip[];
 }
 export interface Scene { id: string; position: number; label: string | null; startMs: number; lengthMs: number; cues: Cue[] }
 export interface Lane { id: string; title: string; colour: string; characterId: string | null; position: number; auto: boolean }
