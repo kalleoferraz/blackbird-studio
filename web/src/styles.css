@@ -263,3 +263,25 @@ span.num { background: var(--panel2); border: 1px solid var(--line); border-radi
 .axis span { position: absolute; top: 2px; transform: translateX(-50%); }
 .pk-btns { margin-top: 14px; align-items: center; }
 .cue-clip { font-size: 11.5px; color: var(--muted); margin-top: 2px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Recording: the play button turns red; the cue being recorded is red-orange instead of yolk */
+.nav-ctrls button.play.rec { background: #E5412D; color: #fff; }
+.nav-ctrls button.play.rec:hover:not(:disabled) { background: #f0553f; }
+.nav-ctrls button.play.rec:disabled { background: #E5412D; color: #fff; opacity: .7; }
+.rec-count { font: 700 20px/1 ui-monospace, SFMono-Regular, Menlo, monospace; animation: rec-blink 1s steps(1, end) infinite; }
+.rec-dot { display: grid; place-items: center; animation: rec-blink 1s steps(1, end) infinite; }
+.nav-ctrls button.play.rec svg { width: 26px; height: 26px; }
+@keyframes rec-blink { 0%, 60% { opacity: 1; } 61%, 100% { opacity: .15; } }
+.cue.recording::after { border-color: var(--alert); }
+.cue.recording .progress { background: rgba(242, 106, 61, .22); }
+.cue.recording .strip { background: var(--alert) !important; }
+.cue.recording .now-tag { background: var(--alert); color: #fff; }
+.cue.armed::after { content: ""; position: absolute; inset: 0; border: 1px dashed var(--alert); border-radius: 5px; pointer-events: none; }
+
+.cue-actions { display: flex; flex-direction: column; align-items: center; justify-content: space-between; align-self: stretch; min-height: 40px; }
+.audio-btn { border: 0; background: none; padding: 2px; color: var(--muted); display: inline-grid; place-items: center; border-radius: 4px; line-height: 0; }
+button.audio-btn:hover { color: var(--primary); background: var(--line); }
+.audio-btn.none { color: #5d5450; }
+.remove-cue { padding: 2px; line-height: 0; color: var(--muted); } .remove-cue:hover { color: var(--danger); }
+.times .len.est { color: var(--faint); } .times .len.est:hover { color: var(--primary); }
+.audio-btn.has { color: #7ba167; } button.audio-btn.has:hover { color: #94bb7f; }

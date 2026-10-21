@@ -12,6 +12,7 @@ const ICONS = {
   sceneNext: <><path d="M2.5 6.2v11.6L11.5 12z" /><path d="M11.5 6.2v11.6L20.5 12z" /></>,
   segNext: <><path d="M4 6.2v11.6L15 12z" /><rect x="17.4" y="6" width="2.6" height="12" rx="1" /></>,
   play: <path d="M8 5.2v13.6L19 12z" />,
+  rec: <circle cx="12" cy="12" r="6.5" />,
   pause: <><rect x="6.5" y="5" width="3.8" height="14" rx="1" /><rect x="13.7" y="5" width="3.8" height="14" rx="1" /></>,
 };
 const Icon = ({ children }: { children: ReactNode }) => <svg viewBox="0 0 24 24" aria-hidden="true">{children}</svg>;
@@ -32,6 +33,8 @@ export function NavBar({ store, story, follow, onFollow, editing }: {
   useSyncExternalStore(store.subscribe, store.getVersion);
   const seg = store.current();
   const pos = store.pos;
+  const recView = store.recView();
+  const recKind = recView.startsWith('count') ? 'count' : recView;
 
   // ---- the position readout, with the higher levels dropped one by one when there is no room ----
   const chapter = pos && story.chapters.find((c) => c.segments.some((s) => s.id === pos.segmentId));
@@ -66,7 +69,7 @@ export function NavBar({ store, story, follow, onFollow, editing }: {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey) return;
       const t = e.target as HTMLElement | null;
       if (t?.closest('input, textarea, select, [contenteditable="true"]') || document.querySelector('.backdrop')) return;
-      if (e.key === ' ') { if (t?.closest('button, a')) return; e.preventDefault(); store.toggle(); return; }
+      if (e.key === ' ') { if (t?.closest('button, a')) return; e.preventDefault(); if (store.rec) store.rec.stop(); else store.toggle(); return; }
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       e.preventDefault();
       store.move(e.altKey ? 'segment' : e.shiftKey ? 'scene' : 'cue', e.key === 'ArrowLeft' ? 'prev' : 'next');
@@ -92,8 +95,17 @@ export function NavBar({ store, story, follow, onFollow, editing }: {
         </div>
         <div className="nav-ctrls">
           {BUTTONS.slice(0, 3).map(btn)}
+          {recView ? (
+            <button type="button" className={'play rec ' + recKind} disabled={recView === 'saving'}
+              aria-label={recView === 'saving' ? 'Saving the take' : store.rec?.phase === 'count' ? 'Cancel the recording' : 'Stop recording'}
+              title={recView === 'saving' ? 'Saving the take…' : store.rec?.phase === 'count' ? 'Cancel (Space)' : 'Stop recording (Space)'}
+              onClick={() => store.rec?.stop()}>
+              {recKind === 'count' ? <span key={recView} className="rec-count">{recView.slice(6) === '0' ? '…' : recView.slice(6)}</span>
+                : recKind === 'saving' ? <span className="rec-count">…</span> : <span className="rec-dot"><Icon>{ICONS.rec}</Icon></span>}
+            </button>
+          ) : (
           <button type="button" className="play" disabled={!pos} aria-label={store.playing ? 'Pause' : 'Play'} title={store.playing ? 'Pause (Space)' : 'Play (Space)'}
-            onClick={() => store.toggle()}><Icon>{store.playing ? ICONS.pause : ICONS.play}</Icon></button>
+            onClick={() => store.toggle()}><Icon>{store.playing ? ICONS.pause : ICONS.play}</Icon></button>)}
           {BUTTONS.slice(3).map(btn)}
         </div>
         <div className="nav-right">

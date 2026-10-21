@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as RPointerEvent } from 'react';
-import { api } from './api.ts';
+import { api, uploadFile } from './api.ts';
 import { go } from './App.tsx';
 import type { Character, Me, ProjectCard, SegmentContent, Story } from './types.ts';
 import { StoryIndex } from './StoryIndex.tsx';
@@ -11,6 +11,8 @@ import { errorText, useLocalState } from './ui.tsx';
 import { NavBar } from './NavBar.tsx';
 import { NavContext, PlaybackStore } from './playback.ts';
 import { toNav } from './nav.ts';
+import { recordTake } from './recording.ts';
+import { AudioPlayer } from './audio-playback.ts';
 
 export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: string; segmentId?: string }) {
   const [project, setProject] = useState<ProjectCard | null>(null);
@@ -60,11 +62,29 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   // ---- navigation bar: one playhead for the whole script view ----
   const [playback] = useState(() => new PlaybackStore());
   useEffect(() => () => playback.dispose(), [playback]);
+  useEffect(() => { const player = new AudioPlayer(playback); return () => player.dispose(); }, [playback]);
   const [follow, setFollow] = useLocalState('rs.follow', true);
   const [editingN, setEditingN] = useState(0);
   const editing = editingN > 0;
   const setEditing = useCallback((on: boolean) => setEditingN((n) => Math.max(0, n + (on ? 1 : -1))), []);
-  const nav = useMemo(() => ({ store: playback, setEditing }), [playback, setEditing]);
+  const contentRef = useRef(content); contentRef.current = content;
+  const onContentRef = useRef(onContent); onContentRef.current = onContent;
+  const record = useCallback((cueId: string) => {
+    const c = contentRef.current;
+    const si = c ? c.scenes.findIndex((s) => s.cues.some((q) => q.id === cueId)) : -1;
+    if (!c || si < 0) return;
+    const q = c.scenes[si]!.cues.find((x) => x.id === cueId)!;
+    void recordTake({
+      store: playback, cueId,
+      seek: () => playback.seek({ segmentId: c.segment.id, scene: si, ms: q.startMs }),
+      upload: async (mp3) => {
+        onContentRef.current(await uploadFile<SegmentContent>('POST', `/api/cues/${cueId}/recording`, mp3));
+        window.dispatchEvent(new Event('library-changed'));
+      },
+      onError: setError,
+    });
+  }, [playback]);
+  const nav = useMemo(() => ({ store: playback, setEditing, record }), [playback, setEditing, record]);
   const order = useMemo(() => (story ? story.chapters.flatMap((c) => c.segments.map((x) => x.id)) : []), [story]);
   useEffect(() => playback.setOrder(order), [playback, order]);
   const sub = playback.subscribe;

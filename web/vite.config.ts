@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   base: '/app/',
   plugins: [react()],
-  build: { outDir: '../public/app', emptyOutDir: true, sourcemap: false },
+  // The audio worklet must stay a real file (a data: address is not allowed to run as a script).
+  build: { outDir: '../public/app', emptyOutDir: true, sourcemap: false, assetsInlineLimit: (file) => (file.endsWith('recorder-worklet.js') ? false : undefined) },
   server: { port: 5173, proxy: { '/api': 'http://127.0.0.1:3000' } },
 });

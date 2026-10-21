@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { and, count, eq, inArray } from 'drizzle-orm';
 import { withDb, type Q } from '../db/client.js';
-import { asset, assetPeaks, character, clip, note, project } from '../db/schema.js';
+import { asset, assetPeaks, character, clip, cue, note, project } from '../db/schema.js';
 import { clearCover, uploadCover, useEarlierCover, EARLIER_COVER } from '../library/covers.js';
 import {
   MAX_PICTURE, MAX_UPLOAD, assetsUnder, checkFolder, cleanFileName, findByHash, join, removeFiles, sha256, splitName, storeFile,
@@ -59,8 +59,20 @@ async function usageOf(q: Q, projectId: string, ids: string[]): Promise<Map<stri
   if (p?.cover && ids.includes(p.cover)) add(p.cover, 'the cover');
   const chars = await q.select({ id: character.pictureAssetId, name: character.name }).from(character).where(and(eq(character.projectId, projectId), inArray(character.pictureAssetId, ids)));
   for (const c of chars) add(c.id, `the picture of ${c.name}`);
-  const clips = await q.select({ id: clip.assetId, n: count() }).from(clip).where(inArray(clip.assetId, ids)).groupBy(clip.assetId);
-  for (const c of clips) add(c.id, `${Number(c.n)} clip${Number(c.n) === 1 ? '' : 's'}`);
+  // A clip holds its file, except a take under Storyline that its cue does not play: that one is only an alternative
+  // and goes with the file when the file is deleted (Bible: only unused alternatives can be deleted by hand).
+  const clips = await q
+    .select({ id: clip.id, assetId: clip.assetId, path: asset.path, chosen: cue.clipId })
+    .from(clip)
+    .innerJoin(asset, eq(asset.id, clip.assetId))
+    .innerJoin(cue, eq(cue.id, clip.cueId))
+    .where(inArray(clip.assetId, ids));
+  const holding = new Map<string, number>();
+  for (const c of clips) {
+    if (isStoryline(c.path) && c.chosen !== c.id) continue;
+    holding.set(c.assetId, (holding.get(c.assetId) ?? 0) + 1);
+  }
+  for (const [id, n] of holding) add(id, n === 1 ? 'a cue that plays it' : `${n} clips`);
   const notes = await q.select({ id: note.assetId }).from(note).where(and(eq(note.projectId, projectId), inArray(note.assetId, ids)));
   for (const n of notes) add(n.id, 'a note');
   return out;
@@ -245,7 +257,10 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
         const first = rows.find((a) => usage.has(a.id))!;
         throw new HttpError(409, 'in_use', `${first.path.slice(first.path.lastIndexOf('/') + 1)} is used by ${usage.get(first.id)!.join(', ')}.`, { files: usage.size });
       }
-      if (rows.length > 0) await db.delete(asset).where(inArray(asset.id, rows.map((a) => a.id)));
+      if (rows.length > 0) {
+        await db.delete(clip).where(inArray(clip.assetId, rows.map((a) => a.id)));
+        await db.delete(asset).where(inArray(asset.id, rows.map((a) => a.id)));
+      }
       await blobStore().removeDir(projectId, folder);
       return { ok: true, removedFiles: rows.length };
     });
@@ -333,6 +348,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       await accessTo(db, request.account!.id, a.projectId, { edit: true });
       const usage = (await usageOf(db, a.projectId, [id])).get(id);
       if (usage) throw new HttpError(409, 'in_use', `Used by ${usage.join(', ')}.`, { usage });
+      await db.delete(clip).where(eq(clip.assetId, id)); // only alternatives can be left (see usageOf)
       await db.delete(asset).where(eq(asset.id, id));
       await removeFiles(a);
       return { ok: true };

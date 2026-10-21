@@ -24,7 +24,7 @@ export function registerUi(app: FastifyInstance): void {
       .header('x-content-type-options', 'nosniff')
       .header('x-frame-options', 'DENY')
       .header('referrer-policy', 'same-origin')
-      .header('content-security-policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+      .header('content-security-policy', "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' data:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
       .send(content);
   };
   app.get('/app', async (_req, reply) => send(reply, 'index.html'));

@@ -25,6 +25,15 @@ function TypeIcon({ type }: { type: CueType }) {
     </svg>
   );
 }
+/** A speaker with sound waves: the cue has audio. */
+function AudioIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2 6v4h2.5L8 13V3L4.500 6H2Z" fill="currentColor" /><path d="M10.500 5.500a3.500 3.500 0 0 1 0 5M12.500 3.500a6 6 0 0 1 0 9" />
+    </svg>
+  );
+}
+
 const TYPE_LABEL: Record<CueType, string> = { speech: 'Speech', sfx: 'Sound effect', music: 'Music' };
 
 export function Writing({ content, characters, readOnly, onContent, onError, onNewCharacter }: Props) {
@@ -195,7 +204,11 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
   }, [editing, setNavEditing]);
   // The playhead, per cue: -1 waiting, 0..1000 while playing (overlapping cues play side by side), 2000 once finished.
   const play = useStoreValue(nav?.store, (st) => st.cueState(cue.id), -1);
-  const isNow = play >= 0 && play <= 1000, played = play === 2000;
+  // The cue being recorded progresses like a playing one (in red-orange) and stays full once its estimated length is over.
+  const recPhase = useStoreValue(nav?.store, (st) => st.recPhase(cue.id), '');
+  const recording = recPhase === 'rec';
+  const shown = recording && play === 2000 ? 1000 : recording && play < 0 ? 0 : play;
+  const isNow = shown >= 0 && shown <= 1000, played = shown === 2000 && !recording;
   // A click puts the playhead at the cue, but a double click (which starts editing) must not move it, so the seek waits a moment.
   const seekTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => () => clearTimeout(seekTimer.current), []);
@@ -209,6 +222,7 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
   const chosenClip = cue.clips.find((k) => k.id === cue.clipId);
   const character = characters.find((c) => c.id === cue.characterId);
   const colour = lane?.colour ?? character?.colour ?? '#888888';
+  const patch2 = (method: string, url: string, body?: unknown) => call(method, url, body);
   const patch = async (body: object) => {
     if (drafting) { drafting.patch(body as Partial<Draft>); return null; }
     return call('PATCH', `/api/cues/${cue.id}`, body);
@@ -239,20 +253,28 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
     ...(cue.type === 'speech' ? [{ label: 'Re-estimate from text', onClick: () => void patch({ lengthAuto: true }) } as MenuItem] : []),
     { label: 'Edit length', onClick: () => setEditLen(formatMs(cue.lengthMs)) },
   ];
-  const moreMenu: MenuItem[] = [
-    { label: cue.clipId ? 'Change audio…' : 'Choose audio…', onClick: () => setPicking({ cue, colour: colour.toLowerCase() === '#000000' ? '#EDE4DC' : colour }) },
-    'sep',
-    { label: 'Delete cue', danger: true, onClick: () => setConfirm({
-      title: 'Delete cue', label: 'Delete', message: 'Delete this cue?', run: async () => { await call('DELETE', `/api/cues/${cue.id}`); } }) },
-  ];
+  const askDelete = () => setConfirm({
+    title: 'Delete cue', label: 'Delete', message: 'Delete this cue?', run: async () => { await call('DELETE', `/api/cues/${cue.id}`); } });
 
+  const audioMenu: MenuItem[] = [
+    ...cue.clips.map((k): MenuItem => ({ label: `Take ${k.number} · ${k.name}`, hint: formatMs(k.lengthMs), checked: k.id === cue.clipId,
+      onClick: () => { if (k.id !== cue.clipId) void patch2('POST', `/api/cues/${cue.id}/choose-clip`, { clipId: k.id }); } })),
+    ...(cue.clips.length ? ['sep' as const] : []),
+    { label: 'Record a take…', disabled: !!nav?.store.rec, onClick: () => nav?.record(cue.id) },
+    { label: 'Choose audio…', onClick: () => setPicking({ cue, colour: colour.toLowerCase() === '#000000' ? '#EDE4DC' : colour }) },
+    'sep',
+    { label: 'Remove audio', danger: true, disabled: !chosenClip, onClick: () => { if (chosenClip) void patch2('DELETE', `/api/clips/${chosenClip.id}`); } },
+  ];
+  // A length that is only an estimate (no audio, not set by hand) is shown in gray.
+  const estimated = !chosenClip && cue.lengthAuto ? ' est' : '';
+  const audioTitle = cue.clips.length ? 'No take chosen' : 'No audio yet: record a take or choose audio';
   const placeholder = cue.type === 'speech' ? 'Spoken text (Markdown)…' : cue.type === 'sfx' ? 'Describe the sound effect…' : 'Describe the music…';
   const black = colour.toLowerCase() === '#000000';
   const name = cue.type === 'speech' ? (character?.name ?? lane?.title ?? 'No character') : (lane?.title ?? TYPE_LABEL[cue.type]);
   const nameStyle = { color: black ? 'var(--text)' : colour };
   return (
-    <div className={'cue ' + cue.type + (editing ? ' editing' : '') + (isNow ? ' playhead' : '') + (played ? ' played' : '')} data-cue-id={cue.id} onClick={onCueClick}>
-      {isNow && <span className="progress" style={{ width: `${play / 10}%` }} />}
+    <div className={'cue ' + cue.type + (editing ? ' editing' : '') + (isNow ? ' playhead' : '') + (played ? ' played' : '') + (recording ? ' recording' : '') + (recPhase === 'count' ? ' armed' : '')} data-cue-id={cue.id} onClick={onCueClick}>
+      {isNow && <span className="progress" style={{ height: `${shown / 10}%` }} />}
       <span className={'strip' + (black ? ' black' : '')} style={{ background: colour }} />
       <div className="tagcol">
       <div className="tag">
@@ -283,19 +305,26 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
         ) : (
           <div className={'cue-text' + (cue.text ? '' : ' empty')} onDoubleClick={() => { clearTimeout(seekTimer.current); if (!readOnly) setEditing(true); }}>
             {cue.text ? (cue.type === 'speech' && !character?.isNarrator ? '— ' : '') + cue.text : placeholder}</div>)}
-        {chosenClip && !editing && (
-          <div className="cue-clip" title="The audio this cue plays">♪ {chosenClip.name} · {formatMs(chosenClip.offsetMs)} → {formatMs(chosenClip.offsetMs + chosenClip.lengthMs)}</div>)}
       </div>
       <div className="times">
         <span className="start" title="Start within the scene">{formatClock(cue.startMs)}</span>
-        {editLen !== null ? (
-          <input className="len-input" autoFocus value={editLen} onChange={(e) => setEditLen(e.target.value)} onBlur={commitLen}
-            onKeyDown={(e) => { if (e.key === 'Enter') commitLen(); if (e.key === 'Escape') setEditLen(null); }} />
-        ) : drafting ? <span className="len">–</span> : readOnly ? <span className="len">{formatTenths(cue.lengthMs)}</span> : (
-          <MenuButton className="len" items={lengthMenu} title={`${formatSeconds(cue.lengthMs)}${cue.lengthAuto ? ' · follows the text (auto)' : ''}`}>{formatTenths(cue.lengthMs)}</MenuButton>)}
+          {editLen !== null ? (
+            <input className="len-input" autoFocus value={editLen} onChange={(e) => setEditLen(e.target.value)} onBlur={commitLen}
+              onKeyDown={(e) => { if (e.key === 'Enter') commitLen(); if (e.key === 'Escape') setEditLen(null); }} />
+          ) : drafting ? <span className="len">–</span> : readOnly ? <span className={'len' + estimated}>{formatTenths(cue.lengthMs)}</span> : (
+            <MenuButton className={'len' + estimated} items={lengthMenu} title={`${formatSeconds(cue.lengthMs)}${cue.lengthAuto ? ' · follows the text (auto)' : ''}`}>{formatTenths(cue.lengthMs)}</MenuButton>)}
         {cue.lengthAuto && !drafting && <span className="auto" title="The length follows the text until you set it by hand">auto</span>}
       </div>
-      {readOnly || drafting ? <span /> : <MenuButton className="icon more-cue" items={moreMenu} title="More">⋯</MenuButton>}
+      <div className="cue-actions">
+        {readOnly || drafting ? <span /> : (
+          <button type="button" className="icon more-cue remove-cue" title="Delete cue" aria-label="Delete cue" onClick={askDelete}>
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+              <circle cx="8" cy="8" r="6.2" /><path d="M5.600 5.600l4.800 4.800M10.400 5.600l-4.800 4.800" />
+            </svg>
+          </button>)}
+        {!drafting && (readOnly ? cue.clips.length > 0 : true) && (readOnly ? <span className={'audio-btn' + (chosenClip ? ' has' : ' none')} title={chosenClip?.name ?? audioTitle}><AudioIcon /></span> :
+          <MenuButton className={'audio-btn' + (chosenClip ? ' has' : ' none')} items={audioMenu} title={chosenClip ? chosenClip.name : audioTitle}><AudioIcon /></MenuButton>)}
+      </div>
     </div>
   );
 }

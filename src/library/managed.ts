@@ -65,3 +65,9 @@ export async function normalizeAllManagedFolders(log?: { info(o: unknown, m?: st
     }
   }
 }
+
+/** A chapter's index in file and folder names: `00A` to `00Z` for introductory chapters, `01` to `99` for the others. */
+export function chapterIndexLabel(position: number, introductory: boolean, introCount: number): string {
+  if (introductory) return `00${String.fromCharCode(64 + position)}`;
+  return String(position - introCount).padStart(2, '0');
+}

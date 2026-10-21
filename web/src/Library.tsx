@@ -4,6 +4,9 @@ import { formatBytes, formatDuration } from './format.ts';
 import type { LibFile, LibFolder, LibListing } from './types.ts';
 import { Confirm, Dialog, MenuButton, errorText, useLocalState } from './ui.tsx';
 
+/** Dispatched on `window` when files are added to the library from outside the Library panel. */
+export const LIBRARY_CHANGED = 'library-changed';
+
 const KIND_ICON: Record<string, string> = { image: '🖼', audio: '♪', video: '▶', document: '📄', other: '▫' };
 const ROOT: LibFolder = { name: '/', path: '', managed: true, writable: true };
 
@@ -39,6 +42,15 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
   }, [fetchList]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { void reloadOpen(['', ...open]); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Something outside the panel changed the library (a take was recorded): look again at the folders that are open.
+  const reloadRef = useRef(reloadOpen);
+  reloadRef.current = reloadOpen;
+  useEffect(() => {
+    const again = () => { void reloadRef.current(); };
+    window.addEventListener(LIBRARY_CHANGED, again);
+    return () => window.removeEventListener(LIBRARY_CHANGED, again);
+  }, []);
 
   // While an audio file is still being encoded, look again every two seconds (Bible: the browser polls the status).
   const working = Object.entries(lists).filter(([, l]) => l.files.some((f) => f.status === 'pending' || f.status === 'processing')).map(([p]) => p);

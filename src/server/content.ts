@@ -503,6 +503,8 @@ export interface ClipView {
   assetDurationMs: number | null;
   status: 'pending' | 'processing' | 'ready' | 'failed';
   hasPeaks: boolean;
+  /** The MP3 playback copy exists (the player asks for it); otherwise the file itself plays. */
+  light: boolean;
 }
 
 /** The clips of some cues, with what the timeline needs of their audio (never the peaks themselves). */
@@ -517,6 +519,8 @@ export async function clipsOfCues(q: Q, cueIds: string[]): Promise<Map<string, C
       assetId: clip.assetId,
       path: asset.path,
       mediaInfo: asset.mediaInfo,
+      lightweightPath: asset.lightweightPath,
+      sizeLightweight: asset.sizeLightweight,
       status: asset.status,
       offsetMs: clip.offsetMs,
       lengthMs: clip.lengthMs,
@@ -550,6 +554,7 @@ export async function clipsOfCues(q: Q, cueIds: string[]): Promise<Map<string, C
       assetDurationMs: typeof dur === 'number' ? dur : null,
       status: r.status,
       hasPeaks: r.peaks !== null,
+      light: r.lightweightPath !== null && r.sizeLightweight !== null,
     };
     (out.get(r.cueId) ?? out.set(r.cueId, []).get(r.cueId)!).push(view);
   }

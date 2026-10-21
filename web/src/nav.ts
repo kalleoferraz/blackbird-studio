@@ -8,7 +8,9 @@ import type { SegmentContent } from './types.ts';
 export const RESTART_MS = 3000;
 
 export type Level = 'cue' | 'scene' | 'segment';
-export interface NavCue { id: string; startMs: number; lengthMs: number }
+/** The audio a cue plays (its chosen clip). */
+export interface NavClip { assetId: string; light: boolean; offsetMs: number; lengthMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number }
+export interface NavCue { id: string; startMs: number; lengthMs: number; clip?: NavClip | null }
 export interface NavScene { id: string; startMs: number; lengthMs: number; cues: NavCue[] }
 export interface NavSegment { id: string; scenes: NavScene[] }
 /** `ms` is counted from the start of the scene. */
@@ -18,12 +20,17 @@ export type Arrive = 'start' | 'first-cue' | 'last-cue' | 'last-scene';
 export type Move = { pos: Pos } | { segmentId: string; arrive: Arrive };
 export type Step = { pos: Pos } | { move: Move } | { end: Pos };
 
+function chosenClip(q: SegmentContent['scenes'][number]['cues'][number]): NavClip | null {
+  const k = q.clips.find((x) => x.id === q.clipId);
+  return k ? { assetId: k.assetId, light: k.light, offsetMs: k.offsetMs, lengthMs: k.lengthMs, gainDb: k.gainDb, fadeInMs: k.fadeInMs, fadeOutMs: k.fadeOutMs } : null;
+}
+
 export function toNav(c: SegmentContent): NavSegment {
   return {
     id: c.segment.id,
     scenes: c.scenes.map((s) => ({
       id: s.id, startMs: s.startMs, lengthMs: s.lengthMs,
-      cues: s.cues.map((q) => ({ id: q.id, startMs: q.startMs, lengthMs: q.lengthMs })).sort((a, b) => a.startMs - b.startMs),
+      cues: s.cues.map((q) => ({ id: q.id, startMs: q.startMs, lengthMs: q.lengthMs, clip: chosenClip(q) })).sort((a, b) => a.startMs - b.startMs),
     })),
   };
 }

@@ -32,7 +32,7 @@ export interface Clip {
   id: string; cueId: string; number: number; assetId: string; name: string;
   offsetMs: number; lengthMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number; loops: number;
   origin: 'human-recorded' | 'generated' | 'voice-converted';
-  assetDurationMs: number | null; status: 'pending' | 'processing' | 'ready' | 'failed'; hasPeaks: boolean;
+  assetDurationMs: number | null; status: 'pending' | 'processing' | 'ready' | 'failed'; hasPeaks: boolean; light: boolean;
 }
 export interface Cue {
   id: string; laneId: string; type: CueType; characterId: string | null;

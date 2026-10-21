@@ -8,9 +8,13 @@ import {
 
 const TICK_MS = 100;
 
+/** A take being recorded: counting in (count 3..1, 0 while the microphone is asked for), recording, or saving. */
+export interface RecState { cueId: string; phase: 'count' | 'rec' | 'saving'; count: number; stop: () => void; cancel: () => void }
+
 export class PlaybackStore {
   pos: Pos | null = null;
   playing = false;
+  rec: RecState | null = null;
   /** A move into a segment whose content is still loading. */
   pending: { segmentId: string; arrive: Arrive } | null = null;
   private data: NavSegment | null = null;
@@ -74,6 +78,14 @@ export class PlaybackStore {
     this.emit();
   }
 
+  setRec(r: Omit<RecState, never> | null) { this.rec = r; this.emit(); }
+  play() { if (this.pos && !this.playing) { this.start(); this.emit(); } }
+  pause() { if (this.playing) { this.stop(); this.emit(); } }
+  /** The recording phase for one cue ('' when it is not the one being recorded). */
+  recPhase(cueId: string): string { return this.rec?.cueId === cueId ? this.rec.phase : ''; }
+  /** What the play button shows while a take is made, as one primitive: '' none, 'count:3', 'rec', 'saving'. */
+  recView(): string { return !this.rec ? '' : this.rec.phase === 'count' ? `count:${this.rec.count}` : this.rec.phase; }
+
   toggle() { if (this.pos) { if (this.playing) this.stop(); else this.start(); this.emit(); } }
   private start() {
     this.playing = true; this.last = performance.now();
@@ -94,7 +106,7 @@ export class PlaybackStore {
     else { this.pos = s.end; this.stop(); }
     this.emit();
   }
-  dispose() { this.stop(); this.subs.clear(); }
+  dispose() { this.rec?.cancel(); this.stop(); this.subs.clear(); }
 
   // ---- values for the screen (primitives, so a component re-renders only when its own value changes) ----
   currentCueId(): string {
@@ -126,7 +138,7 @@ export class PlaybackStore {
   key(): number { return this.pos ? posKey(this.pos) : -1; }
 }
 
-export interface NavCtx { store: PlaybackStore; setEditing: (on: boolean) => void }
+export interface NavCtx { store: PlaybackStore; setEditing: (on: boolean) => void; record: (cueId: string) => void }
 export const NavContext = createContext<NavCtx | null>(null);
 export const useNav = () => useContext(NavContext);
 

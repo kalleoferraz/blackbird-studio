@@ -146,4 +146,44 @@ describe('clips', () => {
     assert.equal(cueOf(d.body, ids.c1).clipId, null);
     assert.equal(cueOf(d.body, ids.c1).lengthMs, 150);
   });
+
+  it('stores a recording under Storyline as the next take and chooses it', async () => {
+    const { encodeWavToMp3 } = await import('../src/audio/encode.js');
+    const { sanitizePart } = await import('../src/library/storyline.js');
+    assert.equal(sanitizePart('Ação à Straße — "Hello"!'), 'Acao a Str');
+    assert.equal(sanitizePart('???'), 'untitled');
+    const mp3 = Buffer.from(await encodeWavToMp3(wavFile({ seconds: 2, seed: 21, sampleRate: 44100, channels: 1 })));
+    const cueId = await sfxCue('Splash!');
+    const rec = (data: Buffer) => call('ann', 'POST', `/api/cues/${cueId}/recording`, data, { 'content-type': 'application/octet-stream' });
+    const r = await rec(mp3);
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.match(r.body.path, /^Storyline\/01 - [^/]+\/01 - [^/]+\/01\.\d{4} - [^/]+ - Splash \(1\)\.mp3$/);
+    const cue = cueOf(r.body, cueId);
+    assert.equal(cue.clipId, r.body.created);
+    assert.equal(cue.clips[0].origin, 'human-recorded');
+    assert.ok(Math.abs(cue.lengthMs - 2000) < 100, String(cue.lengthMs));
+    const again = await rec(Buffer.from(await encodeWavToMp3(wavFile({ seconds: 1, seed: 22, sampleRate: 44100, channels: 1 }))));
+    assert.match(again.body.path, / \(2\)\.mp3$/);
+    assert.equal(cueOf(again.body, cueId).clips.length, 2);
+    assert.equal((await call('cy', 'POST', `/api/cues/${cueId}/recording`, mp3, { 'content-type': 'application/octet-stream' })).status, 404);
+    assert.equal((await rec(Buffer.from('not audio at all'))).status >= 400, true);
+  });
+
+  it('lets an unplayed take be deleted from the library, but not the one a cue plays', async () => {
+    const { encodeWavToMp3 } = await import('../src/audio/encode.js');
+    const cueId = await sfxCue('Takes');
+    const rec = async (seed: number) => call('ann', 'POST', `/api/cues/${cueId}/recording`, Buffer.from(await encodeWavToMp3(wavFile({ seconds: 1, seed, sampleRate: 44100, channels: 1 }))), { 'content-type': 'application/octet-stream' });
+    const first = await rec(31);
+    const second = await rec(32);
+    const c = cueOf(second.body, cueId);
+    assert.equal(c.clips.length, 2);
+    assert.equal(c.clipId, second.body.created); // the newest take is the one played
+    const firstAsset = c.clips[0].assetId, secondAsset = c.clips[1].assetId;
+    assert.equal((await call('ann', 'DELETE', `/api/assets/${secondAsset}`)).status, 409);
+    const del = await call('ann', 'DELETE', `/api/assets/${firstAsset}`);
+    assert.equal(del.status, 200, JSON.stringify(del.body));
+    const left = cueOf(await content(), cueId);
+    assert.deepEqual(left.clips.map((k: any) => k.id), [second.body.created]);
+    void first;
+  });
 });
