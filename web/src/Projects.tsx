@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api } from './api.ts';
+import { api, assetUrl } from './api.ts';
 import { go } from './App.tsx';
 import { ChangePassword } from './Login.tsx';
 import type { Language, Me, ProjectCard } from './types.ts';
@@ -29,6 +29,7 @@ export function Projects({ me, onLogout, onMe }: { me: Me; onLogout: () => void;
         <div className="grid">
           {list.map((p) => (
             <a key={p.id} className="project-card" href={`#/p/${p.id}`}>
+              {p.coverAssetId && <div className="pc-cover"><img src={assetUrl(p.coverAssetId, true)} alt="" loading="lazy" /></div>}
               <div className="pc-type">{TYPES.find((t) => t.id === p.type)?.label ?? p.type} · {p.language}{p.role === 'viewer' && ' · view only'}</div>
               <div className="pc-title">{p.title}</div>
               {p.subtitle && <div className="pc-sub">{p.subtitle}</div>}

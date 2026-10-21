@@ -3,6 +3,7 @@ import { registerAdminRoutes } from './admin-routes.js';
 import { registerAuthRoutes } from './auth-routes.js';
 import { registerCharacterRoutes } from './characters.js';
 import { registerErrorHandler } from './http.js';
+import { registerLibraryRoutes } from './library.js';
 import { registerProjectRoutes } from './projects.js';
 import { registerSnapshotRoutes } from './snapshots.js';
 import { registerStoryRoutes } from './story.js';
@@ -29,6 +30,7 @@ export function buildApp(): FastifyInstance {
   registerProjectRoutes(app);
   registerStoryRoutes(app);
   registerCharacterRoutes(app);
+  registerLibraryRoutes(app);
   registerSnapshotRoutes(app);
   registerUi(app);
 

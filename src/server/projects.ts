@@ -9,6 +9,7 @@ import { NARRATOR_COLOUR } from '../shared/palette.js';
 import { LANGUAGES, languageProfile } from '../shared/languages.js';
 import { accessTo, checkId, levelOf } from './access.js';
 import { authenticate } from './auth-routes.js';
+import { blobStore } from '../storage/blob-store.js';
 import { createCharacter } from './characters.js';
 import { createScene, insertCue, narratorOf } from './content.js';
 import { HttpError, asBody, badRequest, forbidden, optString, reqString } from './http.js';
@@ -206,7 +207,8 @@ export function registerProjectRoutes(app: FastifyInstance): void {
   app.delete('/api/projects/:id', { ...auth, bodyLimit: 4096 }, async (request) => {
     const id = checkId((request.params as { id: string }).id);
     const body = asBody(request.body);
-    return inTransaction(async (tx) => {
+    const deleteFiles = body.deleteFiles === true;
+    const result = await inTransaction(async (tx) => {
       await accessTo(tx, request.account!.id, id, { edit: true });
       const row = (await tx.select().from(project).where(eq(project.id, id)).limit(1))[0]!;
       if (body.confirmTitle !== row.title) throw new HttpError(400, 'confirm_title', 'Type the title of the media project to confirm.');
@@ -220,6 +222,9 @@ export function registerProjectRoutes(app: FastifyInstance): void {
       await tx.delete(project).where(eq(project.id, id));
       return { ok: true };
     });
+    // Files on disk go only when the author chose so; otherwise they stay in the library folder.
+    if (deleteFiles) await blobStore().removeProject(id).catch((e) => request.log.error(e));
+    return result;
   });
 
   // ---- members ----------------------------------------------------------------------

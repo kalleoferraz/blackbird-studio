@@ -58,7 +58,7 @@ input.inline { background: transparent; border: 1px solid transparent; padding: 
 .script { display: flex; flex-direction: column; height: 100%; }
 .script .topbar { margin: 0; padding: 8px 14px; background: var(--panel); }
 .inline-error { cursor: pointer; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.script-body { display: grid; grid-template-columns: clamp(230px, 15vw, 340px) 1fr clamp(250px, 16vw, 360px); flex: 1; min-height: 0; }
+.script-body { position: relative; display: grid; grid-template-columns: var(--lw, 280px) minmax(0, 1fr) var(--rw, 320px); flex: 1; min-height: 0; }
 .story, .right { background: var(--panel); overflow-y: auto; padding: 8px 0; } .story { border-right: 1px solid var(--line); } .right { border-left: 1px solid var(--line); }
 .row-item { display: flex; align-items: center; gap: 6px; padding: 5px 8px; position: relative; cursor: pointer; }
 .chapter-row { font-weight: 600; } .scene-row { padding-left: 38px; font-weight: 400; } .scene-row.current { background: #2a2022; box-shadow: inset 3px 0 var(--primary); }
@@ -112,7 +112,7 @@ textarea.cue-text { resize: none; overflow: hidden; padding: 0; background: tran
 .gap-inner button { font-size: .78rem; padding: 2px 12px; color: var(--muted); background: var(--bg); white-space: nowrap; }
 .gap-inner button:hover { color: var(--text); }
 .add-segment { margin-top: 6px; color: var(--muted); }
-@media (max-width: 900px) { .script-body { grid-template-columns: 200px 1fr; } .right { display: none; } }
+@media (max-width: 900px) { .script-body { grid-template-columns: 200px 1fr; } .right, .sp-right { display: none; } }
 
 .brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 600; color: var(--text); }
 .brand .logo { width: 28px; height: 28px; flex: none; }
@@ -121,3 +121,36 @@ textarea.cue-text { resize: none; overflow: hidden; padding: 0; background: tran
 .copy-row { display: flex; align-items: center; gap: 10px; }
 .copy-btn { display: inline-flex; align-items: center; gap: 6px; }
 .copy-btn svg { width: 15px; height: 15px; }
+
+/* ---- library, covers, pictures ---- */
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-bottom: 8px; font-size: .88rem; }
+.crumbs button { border: 0; background: none; padding: 2px 4px; color: var(--muted); } .crumbs button.on { color: var(--text); font-weight: 600; } .crumbs button:hover { color: var(--primary); }
+.lib-actions { gap: 6px; margin-bottom: 8px; } .library.drag { outline: 2px dashed var(--primary); outline-offset: -4px; }
+.lib-list { display: flex; flex-direction: column; }
+.lib-row { display: flex; align-items: center; gap: 4px; border-radius: 6px; } .lib-row:hover { background: rgba(255,255,255,.04); }
+.lib-open { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; text-align: left; border: 0; background: none; padding: 5px 4px; color: var(--text); }
+.lib-thumb { width: 36px; height: 36px; flex: none; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.05); border-radius: 5px; overflow: hidden; font-size: 1.1rem; }
+.lib-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.lib-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .lib-meta { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preview { display: flex; justify-content: center; background: rgba(0,0,0,.25); border-radius: 6px; padding: 8px; } .preview img { max-width: 100%; max-height: 65vh; object-fit: contain; }
+a.button { display: inline-block; border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; color: var(--text); }
+.avatar { width: 28px; height: 28px; flex: none; border-radius: 50%; border: 2px solid; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; } .avatar.big { width: 72px; height: 72px; font-size: .75rem; } .picture-row { align-items: center; gap: 10px; }
+.pc-cover { margin: -16px -16px 12px; height: 150px; overflow: hidden; border-radius: var(--radius) var(--radius) 0 0; background: rgba(0,0,0,.25); } .pc-cover img { width: 100%; height: 100%; object-fit: cover; }
+.head { align-items: flex-start; gap: 18px; }
+.cover { position: relative; width: 150px; flex: none; aspect-ratio: 2 / 3; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,.05); display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); }
+.cover img { width: 100%; height: 100%; object-fit: cover; }
+.cover-actions { position: absolute; inset: auto 0 0 0; display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 18px 8px 8px; font-size: .82rem; background: linear-gradient(transparent, rgba(0,0,0,.75)); opacity: 0; transition: opacity .12s; }
+.cover:hover .cover-actions, .cover.empty .cover-actions, .cover:focus-within .cover-actions { opacity: 1; } .cover-actions button { white-space: nowrap; padding: 4px 10px; background: rgba(14,12,14,.88); color: var(--text); } .cover.empty .cover-actions { background: none; inset: 0; justify-content: center; }
+label.check { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; font-size: .9rem; } label.check input { margin-top: 3px; }
+
+.splitter { position: absolute; top: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 5; } .splitter:hover, body.resizing .splitter { background: color-mix(in srgb, var(--primary) 45%, transparent); }
+body.resizing { user-select: none; cursor: col-resize; }
+.tree-row { display: flex; align-items: center; gap: 2px; border-radius: 6px; min-height: 30px; } .tree-row:hover { background: rgba(255,255,255,.05); } .tree-row.drop { outline: 1px dashed var(--primary); }
+.tree-main { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; border: 0; background: none; padding: 3px 4px; color: var(--text); text-align: left; }
+.tree-caret { width: 14px; flex: none; color: var(--muted); font-size: .7rem; text-align: center; } .tree-icon { flex: none; width: 22px; height: 22px; border-radius: 4px; overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: .95rem; }
+.tree-icon img { width: 100%; height: 100%; object-fit: cover; }
+.details-card { display: flex; gap: 22px; align-items: flex-start; } .details-main { flex: 1; min-width: 0; } .details-main .row { margin-top: 16px; }
+.library.panel-body { padding-left: 4px; padding-right: 6px; }
+.details-main .facts { margin-top: 18px; }
+.library .tree-row { padding-right: 0; }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties, type PointerEvent as RPointerEvent } from 'react';
 import { api } from './api.ts';
 import { go } from './App.tsx';
 import type { Character, Me, ProjectCard, SceneContent, Story } from './types.ts';
@@ -7,7 +7,7 @@ import { Writing } from './Writing.tsx';
 import { CharacterDialog, RightPanel, type CharacterDialogState } from './RightPanel.tsx';
 import { ago } from './format.ts';
 import { BlackbirdIcon } from './Brand.tsx';
-import { errorText } from './ui.tsx';
+import { errorText, useLocalState } from './ui.tsx';
 
 export function ScriptView({ me, projectId, sceneId }: { me: Me; projectId: string; sceneId?: string }) {
   const [project, setProject] = useState<ProjectCard | null>(null);
@@ -15,6 +15,8 @@ export function ScriptView({ me, projectId, sceneId }: { me: Me; projectId: stri
   const [content, setContent] = useState<SceneContent | null>(null);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [error, setError] = useState('');
+  const [leftW, setLeftW] = useLocalState('rs.leftW', 280);
+  const [rightW, setRightW] = useLocalState('rs.rightW', 320);
   const [dialog, setDialog] = useState<CharacterDialogState>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState('');
@@ -67,7 +69,9 @@ export function ScriptView({ me, projectId, sceneId }: { me: Me; projectId: stri
         {!readOnly && <button onClick={() => void saveSnapshot()} disabled={saving}>{saving ? 'Saving…' : 'Save snapshot'}</button>}
         <span className="muted small">{me.user.displayName}{readOnly && ' · view only'}</span>
       </header>
-      <div className="script-body">
+      <div className="script-body" style={{ '--lw': `${leftW}px`, '--rw': `${rightW}px` } as CSSProperties}>
+        <Splitter side="left" width={leftW} onChange={setLeftW} />
+        <Splitter side="right" width={rightW} onChange={setRightW} />
         <StoryIndex projectId={projectId} story={story} currentSceneId={sceneId} readOnly={!!readOnly}
           onStory={setStory} onOpenScene={openScene} onError={setError} onChanged={() => { void loadProject(); if (sceneId) void api<SceneContent>('GET', `/api/scenes/${sceneId}`).then(setContent).catch(() => setContent(null)); }} />
         <main className="center-col">
@@ -80,7 +84,7 @@ export function ScriptView({ me, projectId, sceneId }: { me: Me; projectId: stri
             </div>
           ) : <p className="muted">Select or add a scene.</p>}
         </main>
-        <RightPanel characters={characters} readOnly={!!readOnly}
+        <RightPanel projectId={projectId} characters={characters} readOnly={!!readOnly}
           onCharacters={() => void loadCharacters()} onError={setError} openDialog={setDialog} />
       </div>
       {dialog && <CharacterDialog projectId={projectId} state={dialog} characters={characters} onClose={() => setDialog(null)}
@@ -95,4 +99,25 @@ function TitleEdit({ value, onSave, className, disabled }: { value: string; onSa
   if (disabled) return <div className={className}>{value}</div>;
   return <input className={'inline ' + className} value={v} onChange={(e) => setV(e.target.value)}
     onBlur={() => v.trim() && v !== value && onSave(v.trim())} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />;
+}
+
+/** A draggable divider between a side panel and the writing panel; the width is remembered in the browser. */
+function Splitter({ side, width, onChange }: { side: 'left' | 'right'; width: number; onChange: (w: number) => void }) {
+  const start = (e: RPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const x0 = e.clientX, w0 = width;
+    let latest = w0;
+    const body = e.currentTarget.parentElement!;
+    const move = (m: PointerEvent) => {
+      const delta = side === 'left' ? m.clientX - x0 : x0 - m.clientX;
+      latest = Math.max(180, Math.min(640, w0 + delta));
+      body.style.setProperty(side === 'left' ? '--lw' : '--rw', `${latest}px`);
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); document.body.classList.remove('resizing'); onChange(latest); };
+    document.body.classList.add('resizing');
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  return <div className={'splitter sp-' + side} style={side === 'left' ? { left: `calc(var(--lw) - 3px)` } : { right: `calc(var(--rw) - 3px)` }}
+    onPointerDown={start} onDoubleClick={() => onChange(side === 'left' ? 280 : 320)} title="Drag to resize (double-click to reset)" />;
 }

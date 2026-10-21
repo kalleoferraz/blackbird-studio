@@ -33,4 +33,6 @@ web/          React app (Vite); builds into public/app
 docs/         Project Bible
 ```
 
+The library (covers, pictures, uploads) is stored on disk under `LIBRARY_ROOT` (default `./library`, git-ignored). On the host set it to a folder that survives deploys, such as `/private/library`.
+
 Two repos, two jobs: this repo deploys the app; a separate snapshot repo receives text versions at runtime.

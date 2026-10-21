@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
-import { api } from './api.ts';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api, assetUrl, uploadFile } from './api.ts';
 import { go } from './App.tsx';
 import { TYPES } from './Projects.tsx';
 import type { Language, Me, Member, ProjectCard } from './types.ts';
 import { ago, formatBytes } from './format.ts';
 import { BlackbirdIcon } from './Brand.tsx';
-import { Dialog, errorText } from './ui.tsx';
+import { Confirm, Dialog, errorText } from './ui.tsx';
 
 export function ProjectView({ me, projectId, onLogout }: { me: Me; projectId: string; onLogout: () => void }) {
   const [p, setP] = useState<ProjectCard | null>(null);
@@ -30,31 +30,61 @@ export function ProjectView({ me, projectId, onLogout }: { me: Me; projectId: st
     <div className="page">
       <header className="topbar"><a href="#/" className="brand" title="Projects"><BlackbirdIcon /></a><a href="#/">← Projects</a><span className="grow" />
         <span className="muted">{me.user.displayName}</span><button onClick={onLogout}>Sign out</button></header>
-      <div className="row"><div className="grow">
-        <EditableText value={p.title} disabled={!author} className="h1" onSave={(v) => v.trim() && patch({ title: v.trim() })} />
-        <EditableText value={p.subtitle ?? ''} placeholder="Add a subtitle" disabled={!author} className="sub" onSave={(v) => patch({ subtitle: v.trim() })} />
-      </div>
-        <button className="primary" onClick={() => go(`/p/${p.id}/s`)}>Open script</button></div>
       {error && <p className="error">{error}</p>}
-      <section className="card">
-        <h2>Details</h2>
-        <dl className="facts">
-          <dt>Type</dt><dd>{TYPES.find((t) => t.id === p.type)?.label ?? p.type}</dd>
-          <dt>Language</dt><dd>{author ? (
-            <select value={p.language} onChange={(e) => void patch({ language: e.target.value })}>
-              {langs.map((l) => <option key={l.code} value={l.code}>{l.flag} {l.label}</option>)}</select>) : p.language}</dd>
-          <dt>Chapters</dt><dd>{p.chapterCount}</dd>
-          <dt>Size</dt><dd>{formatBytes(p.sizeBytes)}</dd>
-          <dt>Last edited</dt><dd>{ago(p.lastEditedAt)}</dd>
-          <dt>Last snapshot</dt><dd>{ago(p.lastSnapshotAt)}{p.dirtySince && <span className="dirty"> · unsaved changes</span>}</dd>
-          <dt>Repository folder</dt><dd>{p.repoFolder}</dd>
-        </dl>
+      <section className="card details-card">
+        <Cover p={p} author={author} onChange={(card) => setP(card)} setError={setError} reload={load} />
+        <div className="details-main">
+          <EditableText value={p.title} disabled={!author} className="h1" onSave={(v) => v.trim() && patch({ title: v.trim() })} />
+          <EditableText value={p.subtitle ?? ''} placeholder="Add a subtitle" disabled={!author} className="sub" onSave={(v) => patch({ subtitle: v.trim() })} />
+          <dl className="facts">
+            <dt>Type</dt><dd>{TYPES.find((t) => t.id === p.type)?.label ?? p.type}</dd>
+            <dt>Language</dt><dd>{author ? (
+              <select value={p.language} onChange={(e) => void patch({ language: e.target.value })}>
+                {langs.map((l) => <option key={l.code} value={l.code}>{l.flag} {l.label}</option>)}</select>) : p.language}</dd>
+            <dt>Chapters</dt><dd>{p.chapterCount}</dd>
+            <dt>Size</dt><dd>{formatBytes(p.sizeBytes)}</dd>
+            <dt>Last edited</dt><dd>{ago(p.lastEditedAt)}</dd>
+            <dt>Last snapshot</dt><dd>{ago(p.lastSnapshotAt)}{p.dirtySince && <span className="dirty"> · unsaved changes</span>}</dd>
+            <dt>Repository folder</dt><dd>{p.repoFolder}</dd>
+          </dl>
+          <div className="row"><button className="primary" onClick={() => go(`/p/${p.id}/s`)}>Open script</button></div>
+        </div>
       </section>
       <MembersPanel projectId={p.id} members={members} me={me} author={author} onChange={load} setError={setError} />
       {author && <section className="card"><h2>Delete project</h2>
         <p className="muted">Removes the project and everything in it. Snapshots already in the repository are kept.</p>
         <button className="danger" onClick={() => setDeleting(true)}>Delete project…</button></section>}
       {deleting && <DeleteProject p={p} onClose={() => setDeleting(false)} />}
+    </div>
+  );
+}
+
+function Cover({ p, author, setError, reload }: { p: ProjectCard; author: boolean; onChange: (c: ProjectCard) => void; setError: (s: string) => void; reload: () => Promise<void> }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [earlier, setEarlier] = useState<string | null>(null);
+  const send = async (f: File) => {
+    setBusy(true);
+    try { await uploadFile('PUT', `/api/projects/${p.id}/cover?name=${encodeURIComponent(f.name)}`, f); setError(''); await reload(); }
+    catch (e: any) {
+      if (e.code === 'same_as_earlier_cover') setEarlier(e.body.assetId);
+      else setError(errorText(e));
+    } finally { setBusy(false); }
+  };
+  const act = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn(); setError(''); await reload(); } catch (e) { setError(errorText(e)); } finally { setBusy(false); } };
+  if (!p.coverAssetId && !author) return null;
+  return (
+    <div className={'cover' + (p.coverAssetId ? '' : ' empty')}>
+      {p.coverAssetId ? <img src={assetUrl(p.coverAssetId, true)} alt="Cover" /> : <span className="muted">No cover</span>}
+      {author && <div className="cover-actions">
+        <button disabled={busy} onClick={() => input.current?.click()}>{p.coverAssetId ? 'Replace cover' : 'Add cover'}</button>
+        {p.coverAssetId && <button disabled={busy} onClick={() => void act(() => api('DELETE', `/api/projects/${p.id}/cover`))}>Remove</button>}
+      </div>}
+      <input ref={input} type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) void send(f); e.target.value = ''; }} />
+      {earlier && <Confirm title="Earlier cover" confirmLabel="Use it again"
+        message="This image is an earlier cover of this project. Swap it back in? The current cover becomes an earlier one."
+        onConfirm={() => act(() => api('POST', `/api/projects/${p.id}/cover/use`, { assetId: earlier }))} onClose={() => setEarlier(null)} />}
     </div>
   );
 }
@@ -109,15 +139,18 @@ function MembersPanel({ projectId, members, me, author, onChange, setError }: {
 function DeleteProject({ p, onClose }: { p: ProjectCard; onClose: () => void }) {
   const [typed, setTyped] = useState('');
   const [error, setError] = useState('');
+  const [deleteFiles, setDeleteFiles] = useState(false);
   return (
     <Dialog title="Delete project" onClose={onClose}>
       <p>This cannot be undone. Type the project title to confirm:</p>
       <p><strong>{p.title}</strong></p>
       <input autoFocus value={typed} onChange={(e) => setTyped(e.target.value)} />
+      <label className="check"><input type="checkbox" checked={deleteFiles} onChange={(e) => setDeleteFiles(e.target.checked)} />
+        Also delete the project's files (library, covers, pictures) from disk. Unchecked, they are kept on the server.</label>
       {error && <p className="error">{error}</p>}
       <div className="row end"><button onClick={onClose}>Cancel</button>
         <button className="danger solid" disabled={typed !== p.title} onClick={async () => {
-          try { await api('DELETE', `/api/projects/${p.id}`, { confirmTitle: typed }); go('/'); } catch (e) { setError(errorText(e)); }
+          try { await api('DELETE', `/api/projects/${p.id}`, { confirmTitle: typed, deleteFiles }); go('/'); } catch (e) { setError(errorText(e)); }
         }}>Delete forever</button></div>
     </Dialog>
   );

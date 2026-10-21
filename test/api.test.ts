@@ -173,10 +173,12 @@ describe('projects and story', () => {
 
 describe('admin teams', () => {
   it('manages teams and guards disabling the last author', async () => {
+    // A fresh admin per run: the local database may already hold the development admin with another password.
+    process.env.ADMIN_EMAIL = `admin.${run}@t.test`;
     await withDb(async (db) => {
-      await createUser(db, { email: 'admin@example.com', displayName: 'Admin', password: 'Test-password-123!', mustChangePassword: false });
+      await createUser(db, { email: process.env.ADMIN_EMAIL!, displayName: 'Admin', password: 'Test-password-123!', mustChangePassword: false });
     });
-    await login('admin', 'admin@example.com');
+    await login('admin', process.env.ADMIN_EMAIL!);
     const made = await call('admin', 'POST', '/api/admin/teams', { name: `Crew ${run}` });
     assert.equal(made.status, 201, JSON.stringify(made.body));
     assert.equal((await call('admin', 'POST', '/api/admin/teams', { name: `Crew ${run}` })).status, 409);
