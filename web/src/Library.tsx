@@ -77,8 +77,9 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
           onDragLeave={() => setDropOn(null)}
           onDrop={(e) => { setDropOn(null); if (!readOnly && f.writable && e.dataTransfer.files.length) { e.preventDefault(); e.stopPropagation(); void upload(f.path, e.dataTransfer.files); } }}>
           <button className="tree-main" onClick={() => (isRoot ? undefined : toggle(f.path))} style={isRoot ? { cursor: 'default', fontWeight: 600 } : undefined}>
-            {!isRoot && <span className="tree-caret">{isOpen ? '▾' : '▸'}</span>}
-            <span className="tree-icon">{isOpen ? '📂' : '📁'}</span>
+            <span className="tree-icon folder">{isOpen
+              ? <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H7.2a2 2 0 0 0-1.9 1.4L3 17z" fill="#C9830A" /><path d="M5.3 11.4A2 2 0 0 1 7.2 10H21l-2.3 7.6a2 2 0 0 1-1.9 1.4H3z" fill="#EF9B0B" /></svg>
+              : <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="#EF9B0B" /></svg>}</span>
             <span className="grow lib-name">{f.name}</span>
           </button>
           {!readOnly && <MenuButton className="more show" title="Folder" items={[
@@ -95,7 +96,6 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
             {l.files.map((file) => (
               <div key={file.id} className="tree-row" style={{ paddingLeft: (depth + 1) * 14 }}>
                 <button className="tree-main" onClick={() => setPreview(file)} title={file.usage?.length ? `Used by ${file.usage.join(', ')}` : file.name}>
-                  <span className="tree-caret" />
                   <span className="tree-icon">{file.kind === 'image' ? <img src={assetUrl(file.id, file.hasLightweight)} alt="" loading="lazy" /> : KIND_ICON[file.kind]}</span>
                   <span className="grow"><span className="lib-name">{file.name}</span>
                     <span className="muted small lib-meta">{formatBytes(file.size)}{file.width ? ` · ${file.width}×${file.height}` : ''}{file.usage?.length ? ` · ${file.usage.join(', ')}` : ''}</span></span>
@@ -106,7 +106,7 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
                   ...(readOnly ? [] : ['sep' as const, { label: 'Delete…', danger: true, disabled: !!file.usage?.length, hint: file.usage?.length ? 'in use' : undefined, onClick: () => setRemoveFile(file) }]),
                 ]}>⋯</MenuButton>
               </div>))}
-          </>) : <div className="muted small" style={{ paddingLeft: (depth + 1) * 14 + 24 }}>Loading…</div>)}
+          </>) : <div className="muted small" style={{ paddingLeft: (depth + 1) * 14 + 30 }}>Loading…</div>)}
       </div>
     );
   };

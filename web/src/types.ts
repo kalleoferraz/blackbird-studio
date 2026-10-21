@@ -23,8 +23,8 @@ export interface ProjectCard {
 
 export interface Language { code: string; label: string; name: string; flag: string }
 
-export interface StoryScene { id: string; position: number; title: string; cueCount: number }
-export interface StoryChapter { id: string; position: number; index: string; title: string; introductory: boolean; scenes: StoryScene[] }
+export interface StorySegment { id: string; position: number; title: string; cueCount: number }
+export interface StoryChapter { id: string; position: number; index: string; title: string; introductory: boolean; segments: StorySegment[] }
 export interface Story { chapters: StoryChapter[]; created?: string }
 
 export type CueType = 'speech' | 'sfx' | 'music';
@@ -32,12 +32,12 @@ export interface Cue {
   id: string; laneId: string; type: CueType; characterId: string | null;
   startMs: number; lengthMs: number; lengthAuto: boolean; text: string; clipId: string | null;
 }
-export interface Segment { id: string; position: number; label: string | null; startMs: number; lengthMs: number; cues: Cue[] }
+export interface Scene { id: string; position: number; label: string | null; startMs: number; lengthMs: number; cues: Cue[] }
 export interface Lane { id: string; title: string; colour: string; characterId: string | null; position: number; auto: boolean }
-export interface SceneContent {
-  scene: { id: string; title: string; chapterId: string; chapterTitle: string; projectId: string };
+export interface SegmentContent {
+  segment: { id: string; title: string; chapterId: string; chapterTitle: string; projectId: string };
   project: { id: string; type: string; language: string };
-  segments: Segment[];
+  scenes: Scene[];
   lanes: Lane[];
   created?: string;
 }

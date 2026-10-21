@@ -7,8 +7,8 @@ export interface Rows {
   project: Record<string, unknown>;
   characters: Record<string, unknown>[];
   chapters: Record<string, unknown>[];
-  scenes: Record<string, unknown>[];
   segments: Record<string, unknown>[];
+  scenes: Record<string, unknown>[];
   lanes: Record<string, unknown>[];
   cues: Record<string, unknown>[];
   clips: Record<string, unknown>[];
@@ -59,20 +59,20 @@ export function buildProjectJson(rows: Rows): string {
     for (const r of list) (m.get(r[key]) ?? m.set(r[key], []).get(r[key])!).push(r);
     return m;
   };
-  const scenesBy = group(rows.scenes as Obj[], 'chapterId');
-  const segmentsBy = group(rows.segments as Obj[], 'sceneId');
-  const lanesBy = group(rows.lanes as Obj[], 'sceneId');
-  const cuesBy = group(rows.cues as Obj[], 'segmentId');
+  const segmentsBy = group(rows.segments as Obj[], 'chapterId');
+  const scenesBy = group(rows.scenes as Obj[], 'segmentId');
+  const lanesBy = group(rows.lanes as Obj[], 'segmentId');
+  const cuesBy = group(rows.cues as Obj[], 'sceneId');
   const tree = [...(rows.chapters as Obj[])].sort(byPosition).map((ch) => ({
     ...omit(ch, ['projectId', 'position']),
     index: indexes.get(ch.id),
-    scenes: (scenesBy.get(ch.id) ?? []).sort(byPosition).map((sc) => ({
+    segments: (segmentsBy.get(ch.id) ?? []).sort(byPosition).map((sc) => ({
       ...omit(sc, ['chapterId', 'position']),
-      lanes: (lanesBy.get(sc.id) ?? []).sort(byPosition).map((l) => omit(l, ['sceneId'])),
-      segments: (segmentsBy.get(sc.id) ?? []).sort(byPosition).map((sg) => ({
-        ...omit(sg, ['sceneId', 'position']),
+      lanes: (lanesBy.get(sc.id) ?? []).sort(byPosition).map((l) => omit(l, ['segmentId'])),
+      scenes: (scenesBy.get(sc.id) ?? []).sort(byPosition).map((sg) => ({
+        ...omit(sg, ['segmentId', 'position']),
         cues: (cuesBy.get(sg.id) ?? []).sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id)).map((q) => ({
-          ...omit(q, ['segmentId', 'title']),
+          ...omit(q, ['sceneId', 'title']),
           clips: (clipsByCue.get(q.id) ?? []).sort((a, b) => a.number - b.number).map((c) => omit(c, ['cueId'])),
         })),
       })),
@@ -89,16 +89,16 @@ export function buildProjectJson(rows: Rows): string {
 }
 
 function chapterMarkdown(ch: Obj, index: string, rows: Rows, characterName: Map<string, string>, heading: number): string {
-  const scenes = (rows.scenes as Obj[]).filter((s) => s.chapterId === ch.id).sort(byPosition);
+  const segments = (rows.segments as Obj[]).filter((s) => s.chapterId === ch.id).sort(byPosition);
   const h = (n: number) => '#'.repeat(n);
   const out: string[] = [`${h(heading)} ${index} · ${ch.title}`];
-  for (const sc of scenes) {
+  for (const sc of segments) {
     out.push('', `${h(heading + 1)} ${sc.title}`);
-    const segments = (rows.segments as Obj[]).filter((s) => s.sceneId === sc.id).sort(byPosition);
-    segments.forEach((sg, i) => {
+    const scenes = (rows.scenes as Obj[]).filter((s) => s.segmentId === sc.id).sort(byPosition);
+    scenes.forEach((sg, i) => {
       if (i > 0) out.push('', '---');
       if (sg.label) out.push('', `_${sg.label}_`);
-      const cues = (rows.cues as Obj[]).filter((q) => q.segmentId === sg.id).sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id));
+      const cues = (rows.cues as Obj[]).filter((q) => q.sceneId === sg.id).sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id));
       for (const q of cues) {
         const text = String(q.textMd ?? '').trim();
         if (!text) continue;

@@ -5,13 +5,13 @@ import type { Q } from './client.js';
  * Ordered siblings carry a dense `position` 1..n with a unique index on (parent, position). Changes
  * shift the siblings in the order that never shows the unique index a duplicate (Bible, section 5).
  */
-export type PositionTable = 'chapter' | 'scene' | 'segment' | 'lane';
+export type PositionTable = 'chapter' | 'segment' | 'scene' | 'lane';
 
 const PARENT_COLUMN: Record<PositionTable, string> = {
   chapter: 'project_id',
-  scene: 'chapter_id',
-  segment: 'scene_id',
-  lane: 'scene_id',
+  segment: 'chapter_id',
+  scene: 'segment_id',
+  lane: 'segment_id',
 };
 
 /** Parked position while a row is taken out of its list (smallint unsigned maximum). */

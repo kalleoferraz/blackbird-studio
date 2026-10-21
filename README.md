@@ -6,7 +6,7 @@ Full context: [docs/PROJECT_BIBLE.md](docs/PROJECT_BIBLE.md).
 
 ## Status
 
-First working version (everything except audio): accounts and teams, projects, members, Story Index, script writing (segments, cues, characters, lanes) and Save snapshot. Audio, notes, tasks and references come next (Bible section 2).
+First working version (everything except audio): accounts and teams, projects, members, Story Index, script writing (scenes, cues, characters, lanes) and Save snapshot. Audio, notes, tasks and references come next (Bible section 2).
 
 ## Requirements
 

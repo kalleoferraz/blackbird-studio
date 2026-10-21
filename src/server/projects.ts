@@ -4,14 +4,14 @@ import { inTransaction, withDb, type Q, type Tx } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { touchProject } from '../db/touch.js';
 import { isAdminEmail, normalizeEmail } from '../auth/accounts.js';
-import { asset, chapter, character, cue, membership, note, project, scene, segment, snapshot, teamMember, user } from '../db/schema.js';
+import { asset, chapter, character, cue, membership, note, project, segment, scene, snapshot, teamMember, user } from '../db/schema.js';
 import { NARRATOR_COLOUR } from '../shared/palette.js';
 import { LANGUAGES, languageProfile } from '../shared/languages.js';
 import { accessTo, checkId, levelOf } from './access.js';
 import { authenticate } from './auth-routes.js';
 import { blobStore } from '../storage/blob-store.js';
 import { createCharacter } from './characters.js';
-import { createScene, insertCue, narratorOf } from './content.js';
+import { createSegment, insertCue, narratorOf } from './content.js';
 import { HttpError, asBody, badRequest, forbidden, optString, reqString } from './http.js';
 
 export const PROJECT_TYPES = ['audiobook', 'textbook', 'film', 'series', 'podcast'] as const;
@@ -106,7 +106,7 @@ async function cards(q: Q, userId: string, onlyProjectId?: string) {
   }));
 }
 
-/** New media project: the project, the author membership, the Narrator and one chapter, scene, segment and empty cue. */
+/** New media project: the project, the author membership, the Narrator and one chapter, segment, scene and empty cue. */
 export async function createProject(
   tx: Tx,
   userId: string,
@@ -129,8 +129,8 @@ export async function createProject(
   await createCharacter(tx, id, { name: 'Narrator', colour: NARRATOR_COLOUR, isNarrator: true });
   const chapterId = newUlid();
   await tx.insert(chapter).values({ id: chapterId, projectId: id, position: 1, title: 'Chapter 1', introductory: false, createdAt: now, updatedAt: now });
-  const sceneId = await createScene(tx, chapterId, 'Scene 1', 1);
-  const seg = await tx.select({ id: segment.id }).from(segment).where(eq(segment.sceneId, sceneId)).limit(1);
+  const segmentId = await createSegment(tx, chapterId, 'Segment 1', 1);
+  const seg = await tx.select({ id: scene.id }).from(scene).where(eq(scene.segmentId, segmentId)).limit(1);
   await insertCue(tx, seg[0]!.id, {}, userId); // Narrator, speech, empty text
   await touchProject(tx, id, userId);
   void narratorOf;
@@ -213,7 +213,7 @@ export function registerProjectRoutes(app: FastifyInstance): void {
       const row = (await tx.select().from(project).where(eq(project.id, id)).limit(1))[0]!;
       if (body.confirmTitle !== row.title) throw new HttpError(400, 'confirm_title', 'Type the title of the media project to confirm.');
       await tx.delete(note).where(eq(note.projectId, id));
-      await tx.delete(chapter).where(eq(chapter.projectId, id)); // scenes, segments, lanes, cues and clips cascade
+      await tx.delete(chapter).where(eq(chapter.projectId, id)); // segments, scenes, lanes, cues and clips cascade
       await tx.delete(character).where(eq(character.projectId, id));
       await tx.update(project).set({ coverAssetId: null }).where(eq(project.id, id));
       await tx.delete(asset).where(eq(asset.projectId, id));

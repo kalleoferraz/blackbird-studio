@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { PALETTE } from '../../src/shared/palette.ts';
 
 export type MenuItem =
-  | { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; checked?: boolean; hint?: string }
+  | { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; checked?: boolean; hint?: string; color?: string }
   | 'sep';
 
 /** A popover menu anchored to an element; closes on outside click or Escape. */
@@ -31,7 +31,7 @@ export function Menu({ anchor, items, onClose }: { anchor: HTMLElement; items: M
         it === 'sep' ? <div key={i} className="menu-sep" /> : (
           <button key={i} className={'menu-item' + (it.danger ? ' danger' : '')} disabled={it.disabled}
             onClick={() => { onClose(); it.onClick(); }}>
-            <span className="menu-check">{it.checked ? '✓' : ''}</span>{it.label}
+            <span className="menu-check">{it.checked ? '✓' : ''}</span>{it.color ? <span style={{ color: it.color }}>{it.label}</span> : it.label}
             {it.hint && <span className="menu-hint">{it.hint}</span>}
           </button>
         ))}
@@ -86,6 +86,11 @@ export function Confirm({ title, message, confirmLabel, danger, onConfirm, onClo
   );
 }
 
+/** A plus drawn as two strokes in a square box, so it sits exactly at the centre of its circle. */
+export function PlusIcon() {
+  return <svg className="plus-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2.5v11M2.5 8h11" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>;
+}
+
 export function ColourPicker({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
   const inPalette = PALETTE.some((p) => p.hex.toLowerCase() === value.toLowerCase());
   return (
@@ -98,7 +103,7 @@ export function ColourPicker({ value, onChange }: { value: string; onChange: (he
       <label className={'swatch custom' + (!inPalette ? ' on' : '')} title="Custom colour"
         style={!inPalette ? { background: value } : undefined}>
         <input type="color" value={value} onChange={(e) => onChange(e.target.value.toUpperCase())} />
-        {inPalette && '+'}
+        {inPalette && <PlusIcon />}
       </label>
     </div>
   );

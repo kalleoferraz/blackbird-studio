@@ -41,3 +41,14 @@ test('speech estimate has a floor and grows with text', () => {
   assert.ok(estimateSpeechMs('Hello there, how are you doing today?', 'en-US') > 1000);
   assert.ok(estimateSpeechMs('**Hello** there\n\nSecond line', 'en-US') > estimateSpeechMs('Hello there', 'en-US'));
 });
+
+import { PALETTE, nextColour, COLOUR_PATTERN } from '../src/shared/palette.js';
+test('palette colours are valid, unique, and the next colour skips used ones and black', () => {
+  const hexes = PALETTE.map((c) => c.hex.toLowerCase());
+  assert.equal(new Set(hexes).size, hexes.length);
+  assert.ok(PALETTE.every((c) => COLOUR_PATTERN.test(c.hex)));
+  assert.equal(nextColour([]), '#F2605C');
+  assert.equal(nextColour(['#f2605c']), '#6FA8FF');
+  assert.ok(!PALETTE.slice(0, -1).some((c) => c.hex === '#000000'));
+  assert.notEqual(nextColour(PALETTE.filter((c) => c.hex !== '#000000').map((c) => c.hex)).toLowerCase(), '#000000');
+});

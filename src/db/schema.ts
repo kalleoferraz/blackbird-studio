@@ -12,7 +12,7 @@
  *   Create the database with DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci.
  * - Times are integer milliseconds; timestamps are DATETIME(3) in UTC, set by the app.
  * - Closed sets are ENUMs; adding a value is an additive migration.
- * - Rules the database cannot express (cue overlap on a lane, a cue's lane and segment sharing a scene,
+ * - Rules the database cannot express (cue overlap on a lane, a cue's lane and scene sharing a segment,
  *   asset immutability, reply rules for notes, one reference per ref key) are enforced by the app.
  */
 import {
@@ -206,7 +206,7 @@ export const character = mysqlTable(
   (t) => [uniqueIndex('character_project_folder_uq').on(t.projectId, t.folder)],
 );
 
-// ---- the tree: chapter > scene > segment / lane > cue > clip -------------------
+// ---- the tree: chapter > segment > scene / lane > cue > clip -------------------
 
 export const chapter = mysqlTable(
   'chapter',
@@ -225,8 +225,8 @@ export const chapter = mysqlTable(
   (t) => [uniqueIndex('chapter_project_position_uq').on(t.projectId, t.position)],
 );
 
-export const scene = mysqlTable(
-  'scene',
+export const segment = mysqlTable(
+  'segment',
   {
     id: ulid('id').primaryKey(),
     chapterId: ulid('chapter_id')
@@ -237,31 +237,31 @@ export const scene = mysqlTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex('scene_chapter_position_uq').on(t.chapterId, t.position)],
+  (t) => [uniqueIndex('segment_chapter_position_uq').on(t.chapterId, t.position)],
 );
 
-export const segment = mysqlTable(
-  'segment',
+export const scene = mysqlTable(
+  'scene',
   {
     id: ulid('id').primaryKey(),
-    sceneId: ulid('scene_id')
+    segmentId: ulid('segment_id')
       .notNull()
-      .references(() => scene.id, { onDelete: 'cascade' }),
+      .references(() => segment.id, { onDelete: 'cascade' }),
     position: position(),
     label: varchar('label', { length: 100 }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex('segment_scene_position_uq').on(t.sceneId, t.position)],
+  (t) => [uniqueIndex('scene_segment_position_uq').on(t.segmentId, t.position)],
 );
 
 export const lane = mysqlTable(
   'lane',
   {
     id: ulid('id').primaryKey(),
-    sceneId: ulid('scene_id')
+    segmentId: ulid('segment_id')
       .notNull()
-      .references(() => scene.id, { onDelete: 'cascade' }),
+      .references(() => segment.id, { onDelete: 'cascade' }),
     characterId: ulid('character_id').references(() => character.id, { onDelete: 'restrict' }),
     position: position(),
     title: varchar('title', { length: 100 }).notNull(),
@@ -270,16 +270,16 @@ export const lane = mysqlTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex('lane_scene_position_uq').on(t.sceneId, t.position)],
+  (t) => [uniqueIndex('lane_segment_position_uq').on(t.segmentId, t.position)],
 );
 
 export const cue = mysqlTable(
   'cue',
   {
     id: ulid('id').primaryKey(),
-    segmentId: ulid('segment_id')
+    sceneId: ulid('scene_id')
       .notNull()
-      .references(() => segment.id, { onDelete: 'cascade' }),
+      .references(() => scene.id, { onDelete: 'cascade' }),
     laneId: ulid('lane_id')
       .notNull()
       .references(() => lane.id, { onDelete: 'cascade' }),
@@ -288,7 +288,7 @@ export const cue = mysqlTable(
     characterId: ulid('character_id').references(() => character.id, { onDelete: 'restrict' }),
     // The chosen clip. Cyclic with clip; the constraint becomes a separate ALTER TABLE.
     clipId: ulid('clip_id').references((): AnyMySqlColumn => clip.id, { onDelete: 'set null' }),
-    startMs: ms('start_ms').notNull(), // relative to the segment
+    startMs: ms('start_ms').notNull(), // relative to the scene
     lengthMs: ms('length_ms').notNull(), // authoritative: a clip plays inside it
     // True until the length is set by hand or a clip becomes chosen. Speech: follows the text estimate; sfx and music: follows the chosen clip's audio length.
     lengthAuto: boolean('length_auto').notNull().default(true),
@@ -298,8 +298,8 @@ export const cue = mysqlTable(
     updatedAt: updatedAt(),
   },
   (t) => [
-    index('cue_segment_start_idx').on(t.segmentId, t.startMs),
-    index('cue_lane_segment_start_idx').on(t.laneId, t.segmentId, t.startMs),
+    index('cue_scene_start_idx').on(t.sceneId, t.startMs),
+    index('cue_lane_scene_start_idx').on(t.laneId, t.sceneId, t.startMs),
     index('cue_clip_idx').on(t.clipId),
   ],
 );
@@ -348,8 +348,8 @@ export const note = mysqlTable(
     doneByUserId: ulid('done_by_user_id').references(() => user.id, { onDelete: 'set null' }),
     // A root note has no other target (the project itself) or exactly one of these (checked by the app).
     chapterId: ulid('chapter_id').references(() => chapter.id, { onDelete: 'cascade' }),
-    sceneId: ulid('scene_id').references(() => scene.id, { onDelete: 'cascade' }),
     segmentId: ulid('segment_id').references(() => segment.id, { onDelete: 'cascade' }),
+    sceneId: ulid('scene_id').references(() => scene.id, { onDelete: 'cascade' }),
     cueId: ulid('cue_id').references(() => cue.id, { onDelete: 'cascade' }),
     assetId: ulid('asset_id').references(() => asset.id, { onDelete: 'cascade' }),
     // A reply is always a comment. It points at its root note (one cascade level) and may name the note it answers.
@@ -367,8 +367,8 @@ export const note = mysqlTable(
     index('note_project_type_idx').on(t.projectId, t.type),
     uniqueIndex('note_project_ref_key_uq').on(t.projectId, t.refKey), // several NULLs are allowed
     index('note_chapter_idx').on(t.chapterId),
-    index('note_scene_idx').on(t.sceneId),
     index('note_segment_idx').on(t.segmentId),
+    index('note_scene_idx').on(t.sceneId),
     index('note_cue_idx').on(t.cueId),
     index('note_asset_idx').on(t.assetId),
     index('note_root_created_idx').on(t.rootNoteId, t.createdAt),

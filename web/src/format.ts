@@ -51,3 +51,14 @@ export function formatMinSec(ms: number): string {
   const s = Math.round(ms / 1000);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
+
+/** Scene duration as "N min M s" ("M s" under one minute). */
+export function formatMinutes(ms: number): string {
+  const total = Math.round(ms / 1000);
+  const m = Math.floor(total / 60), sec = total % 60;
+  return m > 0 ? `${m} min ${sec} s` : `${sec} s`;
+}
+/** Cue duration with one decimal of a second ("4.3 s"). */
+export function formatTenths(ms: number): string {
+  return `${(Math.round(ms / 100) / 10).toFixed(1)} s`;
+}

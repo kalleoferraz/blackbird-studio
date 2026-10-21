@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { Q } from '../db/client.js';
 import { ULID_PATTERN } from '../db/ids.js';
-import { chapter, cue, membership, scene, segment, character } from '../db/schema.js';
+import { chapter, cue, membership, segment, scene, character } from '../db/schema.js';
 import { HttpError, notFound } from './http.js';
 
 /** In v1 only authors edit; every other role is a viewer (Bible, section 5, Membership rules). */
@@ -37,7 +37,7 @@ export async function accessTo(q: Q, userId: string, projectId: string, { edit =
   return { projectId, role: row.role, level, canEdit: level === 'author' };
 }
 
-export type EntityKind = 'chapter' | 'scene' | 'segment' | 'cue' | 'character';
+export type EntityKind = 'chapter' | 'segment' | 'scene' | 'cue' | 'character';
 
 /** The media project an entity belongs to (the tree tables carry no project_id), or a 404. */
 export async function projectOf(q: Q, kind: EntityKind, id: string): Promise<string> {
@@ -46,30 +46,30 @@ export async function projectOf(q: Q, kind: EntityKind, id: string): Promise<str
     case 'chapter':
       rows = await q.select({ projectId: chapter.projectId }).from(chapter).where(eq(chapter.id, id)).limit(1);
       break;
-    case 'scene':
-      rows = await q
-        .select({ projectId: chapter.projectId })
-        .from(scene)
-        .innerJoin(chapter, eq(chapter.id, scene.chapterId))
-        .where(eq(scene.id, id))
-        .limit(1);
-      break;
     case 'segment':
       rows = await q
         .select({ projectId: chapter.projectId })
         .from(segment)
-        .innerJoin(scene, eq(scene.id, segment.sceneId))
-        .innerJoin(chapter, eq(chapter.id, scene.chapterId))
+        .innerJoin(chapter, eq(chapter.id, segment.chapterId))
         .where(eq(segment.id, id))
+        .limit(1);
+      break;
+    case 'scene':
+      rows = await q
+        .select({ projectId: chapter.projectId })
+        .from(scene)
+        .innerJoin(segment, eq(segment.id, scene.segmentId))
+        .innerJoin(chapter, eq(chapter.id, segment.chapterId))
+        .where(eq(scene.id, id))
         .limit(1);
       break;
     case 'cue':
       rows = await q
         .select({ projectId: chapter.projectId })
         .from(cue)
-        .innerJoin(segment, eq(segment.id, cue.segmentId))
-        .innerJoin(scene, eq(scene.id, segment.sceneId))
-        .innerJoin(chapter, eq(chapter.id, scene.chapterId))
+        .innerJoin(scene, eq(scene.id, cue.sceneId))
+        .innerJoin(segment, eq(segment.id, scene.segmentId))
+        .innerJoin(chapter, eq(chapter.id, segment.chapterId))
         .where(eq(cue.id, id))
         .limit(1);
       break;

@@ -134,6 +134,13 @@
       "when": 1792509683475,
       "tag": "0018_character_is_narrator",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1792580460242,
+      "tag": "0019_swap_scene_segment",
+      "breakpoints": true
     }
   ]
 }

@@ -3,7 +3,7 @@ import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { inTransaction, withDb, type Tx, type Q } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { touchProject } from '../db/touch.js';
-import { chapter, character, cue, lane, segment, scene } from '../db/schema.js';
+import { chapter, character, cue, lane, scene, segment } from '../db/schema.js';
 import { COLOUR_PATTERN, nextColour } from '../shared/palette.js';
 import { accessTo, accessToEntity, checkId } from './access.js';
 import { authenticate } from './auth-routes.js';
@@ -57,7 +57,7 @@ export async function createCharacter(
   return row;
 }
 
-function view(c: typeof character.$inferSelect, usage?: { cues: number; scenes: number }) {
+function view(c: typeof character.$inferSelect, usage?: { cues: number; segments: number }) {
   return {
     id: c.id,
     name: c.name,
@@ -70,13 +70,13 @@ function view(c: typeof character.$inferSelect, usage?: { cues: number; scenes: 
   };
 }
 
-async function usageOf(q: Q, characterId: string): Promise<{ cues: number; scenes: number }> {
+async function usageOf(q: Q, characterId: string): Promise<{ cues: number; segments: number }> {
   const rows = await q
-    .select({ cues: sql<number>`COUNT(${cue.id})`, scenes: sql<number>`COUNT(DISTINCT ${segment.sceneId})` })
+    .select({ cues: sql<number>`COUNT(${cue.id})`, segments: sql<number>`COUNT(DISTINCT ${scene.segmentId})` })
     .from(cue)
-    .innerJoin(segment, eq(segment.id, cue.segmentId))
+    .innerJoin(scene, eq(scene.id, cue.sceneId))
     .where(eq(cue.characterId, characterId));
-  return { cues: Number(rows[0]?.cues ?? 0), scenes: Number(rows[0]?.scenes ?? 0) };
+  return { cues: Number(rows[0]?.cues ?? 0), segments: Number(rows[0]?.segments ?? 0) };
 }
 
 export function registerCharacterRoutes(app: FastifyInstance): void {
@@ -94,9 +94,9 @@ export function registerCharacterRoutes(app: FastifyInstance): void {
       const counts = await db
         .select({ characterId: cue.characterId, cues: sql<number>`COUNT(${cue.id})` })
         .from(cue)
-        .innerJoin(segment, eq(segment.id, cue.segmentId))
-        .innerJoin(scene, eq(scene.id, segment.sceneId))
-        .innerJoin(chapter, eq(chapter.id, scene.chapterId))
+        .innerJoin(scene, eq(scene.id, cue.sceneId))
+        .innerJoin(segment, eq(segment.id, scene.segmentId))
+        .innerJoin(chapter, eq(chapter.id, segment.chapterId))
         .where(eq(chapter.projectId, projectId))
         .groupBy(cue.characterId);
       const cueCount = new Map(counts.map((c) => [c.characterId, Number(c.cues)]));
@@ -159,7 +159,7 @@ export function registerCharacterRoutes(app: FastifyInstance): void {
       if (current.isNarrator) throw new HttpError(400, 'narrator_required', 'The Narrator cannot be removed.');
       const usage = await usageOf(tx, id);
       if (usage.cues > 0) {
-        throw new HttpError(409, 'in_use', `Used by ${usage.cues} cue${usage.cues === 1 ? '' : 's'} in ${usage.scenes} scene${usage.scenes === 1 ? '' : 's'}.`, { usage });
+        throw new HttpError(409, 'in_use', `Used by ${usage.cues} cue${usage.cues === 1 ? '' : 's'} in ${usage.segments} segment${usage.segments === 1 ? '' : 's'}.`, { usage });
       }
       await tx.delete(lane).where(eq(lane.characterId, id)); // lanes left empty by earlier edits
       await tx.delete(character).where(and(eq(character.id, id)));

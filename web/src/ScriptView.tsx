@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState, type CSSProperties, type PointerEvent as RPointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from 'react';
 import { api } from './api.ts';
 import { go } from './App.tsx';
-import type { Character, Me, ProjectCard, SceneContent, Story } from './types.ts';
+import type { Character, Me, ProjectCard, SegmentContent, Story } from './types.ts';
 import { StoryIndex } from './StoryIndex.tsx';
 import { Writing } from './Writing.tsx';
 import { CharacterDialog, RightPanel, type CharacterDialogState } from './RightPanel.tsx';
@@ -9,10 +9,10 @@ import { ago } from './format.ts';
 import { BlackbirdIcon } from './Brand.tsx';
 import { errorText, useLocalState } from './ui.tsx';
 
-export function ScriptView({ me, projectId, sceneId }: { me: Me; projectId: string; sceneId?: string }) {
+export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: string; segmentId?: string }) {
   const [project, setProject] = useState<ProjectCard | null>(null);
   const [story, setStory] = useState<Story | null>(null);
-  const [content, setContent] = useState<SceneContent | null>(null);
+  const [content, setContent] = useState<SegmentContent | null>(null);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [error, setError] = useState('');
   const [leftW, setLeftW] = useLocalState('rs.leftW', 280);
@@ -27,24 +27,28 @@ export function ScriptView({ me, projectId, sceneId }: { me: Me; projectId: stri
 
   useEffect(() => { void loadProject(); void loadCharacters(); void loadStory().catch((e) => setError(errorText(e))); }, [loadProject, loadCharacters, loadStory]);
 
-  // Without a scene in the address, open the first one.
+  // Without a segment in the address, open the first one.
   useEffect(() => {
-    if (!sceneId && story) { const first = story.chapters.flatMap((c) => c.scenes)[0]; if (first) location.replace(`#/p/${projectId}/s/${first.id}`); }
-  }, [sceneId, story, projectId]);
+    if (!segmentId && story) { const first = story.chapters.flatMap((c) => c.segments)[0]; if (first) location.replace(`#/p/${projectId}/s/${first.id}`); }
+  }, [segmentId, story, projectId]);
   useEffect(() => {
-    if (!sceneId) { setContent(null); return; }
+    if (!segmentId) { setContent(null); return; }
     let live = true;
-    api<SceneContent>('GET', `/api/scenes/${sceneId}`).then((c) => live && setContent(c)).catch((e) => live && setError(errorText(e)));
+    api<SegmentContent>('GET', `/api/segments/${segmentId}`).then((c) => live && setContent(c)).catch((e) => live && setError(errorText(e)));
     return () => { live = false; };
-  }, [sceneId]);
+  }, [segmentId]);
+
+  // Opening another segment starts at its top; re-clicking the open one leaves the scroll where it is.
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => { mainRef.current?.scrollTo({ top: 0 }); }, [segmentId]);
 
   const readOnly = project?.role === 'viewer';
   const refreshAfterEdit = () => { void loadProject(); void loadStory(); };
-  const onContent = (c: SceneContent) => { setContent(c); refreshAfterEdit(); };
-  const openScene = (id: string) => go(`/p/${projectId}/s/${id}`);
+  const onContent = (c: SegmentContent) => { setContent(c); refreshAfterEdit(); };
+  const openSegment = (id: string) => go(`/p/${projectId}/s/${id}`);
 
-  const renameTitle = async (kind: 'chapter' | 'scene', id: string, title: string) => {
-    try { await api(`PATCH`, `/api/${kind === 'chapter' ? 'chapters' : 'scenes'}/${id}`, { title }); await loadStory(); if (sceneId) setContent(await api<SceneContent>('GET', `/api/scenes/${sceneId}`)); }
+  const renameTitle = async (kind: 'chapter' | 'segment', id: string, title: string) => {
+    try { await api(`PATCH`, `/api/${kind === 'chapter' ? 'chapters' : 'segments'}/${id}`, { title }); await loadStory(); if (segmentId) setContent(await api<SegmentContent>('GET', `/api/segments/${segmentId}`)); }
     catch (e) { setError(errorText(e)); }
   };
 
@@ -72,23 +76,23 @@ export function ScriptView({ me, projectId, sceneId }: { me: Me; projectId: stri
       <div className="script-body" style={{ '--lw': `${leftW}px`, '--rw': `${rightW}px` } as CSSProperties}>
         <Splitter side="left" width={leftW} onChange={setLeftW} />
         <Splitter side="right" width={rightW} onChange={setRightW} />
-        <StoryIndex projectId={projectId} story={story} currentSceneId={sceneId} readOnly={!!readOnly}
-          onStory={setStory} onOpenScene={openScene} onError={setError} onChanged={() => { void loadProject(); if (sceneId) void api<SceneContent>('GET', `/api/scenes/${sceneId}`).then(setContent).catch(() => setContent(null)); }} />
-        <main className="center-col">
+        <StoryIndex projectId={projectId} story={story} currentSegmentId={segmentId} readOnly={!!readOnly}
+          onStory={setStory} onOpenSegment={openSegment} onError={setError} onChanged={() => { void loadProject(); if (segmentId) void api<SegmentContent>('GET', `/api/segments/${segmentId}`).then(setContent).catch(() => setContent(null)); }} />
+        <main className="center-col" ref={mainRef}>
           {content ? (
             <div className="doc">
-              <TitleEdit className="chapter-title" value={content.scene.chapterTitle} disabled={!!readOnly} onSave={(v) => renameTitle('chapter', content.scene.chapterId, v)} />
-              <TitleEdit className="scene-title" value={content.scene.title} disabled={!!readOnly} onSave={(v) => renameTitle('scene', content.scene.id, v)} />
+              <TitleEdit className="chapter-title" value={content.segment.chapterTitle} disabled={!!readOnly} onSave={(v) => renameTitle('chapter', content.segment.chapterId, v)} />
+              <TitleEdit className="segment-title" value={content.segment.title} disabled={!!readOnly} onSave={(v) => renameTitle('segment', content.segment.id, v)} />
               <Writing content={content} characters={characters} readOnly={!!readOnly} onContent={onContent} onError={setError}
                 onNewCharacter={(then) => setDialog({ then })} />
             </div>
-          ) : <p className="muted">Select or add a scene.</p>}
+          ) : <p className="muted">Select or add a segment.</p>}
         </main>
         <RightPanel projectId={projectId} characters={characters} readOnly={!!readOnly}
           onCharacters={() => void loadCharacters()} onError={setError} openDialog={setDialog} />
       </div>
       {dialog && <CharacterDialog projectId={projectId} state={dialog} characters={characters} onClose={() => setDialog(null)}
-        onSaved={() => { void loadCharacters(); if (sceneId) void api<SceneContent>('GET', `/api/scenes/${sceneId}`).then(setContent); }} onError={setError} />}
+        onSaved={() => { void loadCharacters(); if (segmentId) void api<SegmentContent>('GET', `/api/segments/${segmentId}`).then(setContent); }} onError={setError} />}
     </div>
   );
 }

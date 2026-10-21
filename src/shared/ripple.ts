@@ -1,5 +1,5 @@
 /**
- * The ripple rule (Bible, section 5, Lane rules): when a cue's length changes, every cue of the segment
+ * The ripple rule (Bible, section 5, Lane rules): when a cue's length changes, every cue of the scene
  * that starts at or after the changed cue's old end moves by the change, so gaps are kept; cues that start
  * earlier stay. The lane rule wins: a moved cue never overlaps a cue on its own lane that stayed.
  */

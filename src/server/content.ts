@@ -1,23 +1,23 @@
 /**
- * The content of a scene: segments, cues and the lanes created for them (Bible, section 5: Cue types and
+ * The content of a segment: scenes, cues and the lanes created for them (Bible, section 5: Cue types and
  * lanes, Lane rules, Cue length and clip playback). All functions run inside the caller's transaction.
  */
 import { and, asc, desc, eq, inArray, max } from 'drizzle-orm';
 import type { Tx } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { closeGap, openGap, PARKED } from '../db/positions.js';
-import { chapter, character, cue, lane, project, scene, segment } from '../db/schema.js';
+import { chapter, character, cue, lane, project, segment, scene } from '../db/schema.js';
 import { MIN_CUE_MS, estimateSpeechMs } from '../shared/estimate.js';
 import { ripple, type RippleCue } from '../shared/ripple.js';
 import { HttpError, notFound } from './http.js';
 
 export type CueType = 'speech' | 'sfx' | 'music';
-export const MAX_SEGMENT_MS = 99 * 60 * 1000; // 99 minutes within a segment (Bible, section 5, Limits)
-export const MAX_SEGMENTS = 99;
+export const MAX_SCENE_MS = 99 * 60 * 1000; // 99 minutes within a scene (Bible, section 5, Limits)
+export const MAX_SCENES = 99;
 
 export interface CueRow {
   id: string;
-  segmentId: string;
+  sceneId: string;
   laneId: string;
   type: CueType;
   characterId: string | null;
@@ -30,7 +30,7 @@ export interface CueRow {
 
 const cueColumns = {
   id: cue.id,
-  segmentId: cue.segmentId,
+  sceneId: cue.sceneId,
   laneId: cue.laneId,
   type: cue.type,
   characterId: cue.characterId,
@@ -43,21 +43,21 @@ const cueColumns = {
 
 // ---- loading ----------------------------------------------------------------------
 
-export async function sceneContext(tx: Tx, sceneId: string): Promise<{ projectId: string; language: string; sceneId: string }> {
+export async function segmentContext(tx: Tx, segmentId: string): Promise<{ projectId: string; language: string; segmentId: string }> {
   const rows = await tx
     .select({ projectId: project.id, language: project.language })
-    .from(scene)
-    .innerJoin(chapter, eq(chapter.id, scene.chapterId))
+    .from(segment)
+    .innerJoin(chapter, eq(chapter.id, segment.chapterId))
     .innerJoin(project, eq(project.id, chapter.projectId))
-    .where(eq(scene.id, sceneId))
+    .where(eq(segment.id, segmentId))
     .limit(1);
   const row = rows[0];
   if (!row) throw notFound();
-  return { ...row, sceneId };
+  return { ...row, segmentId };
 }
 
-export async function segmentRow(tx: Tx, segmentId: string) {
-  const rows = await tx.select().from(segment).where(eq(segment.id, segmentId)).limit(1);
+export async function sceneRow(tx: Tx, sceneId: string) {
+  const rows = await tx.select().from(scene).where(eq(scene.id, sceneId)).limit(1);
   if (!rows[0]) throw notFound();
   return rows[0];
 }
@@ -68,13 +68,13 @@ export async function cueRow(tx: Tx, cueId: string): Promise<CueRow> {
   return rows[0];
 }
 
-/** The cues of a segment in script order: start time, then lane order. */
-export async function segmentCues(tx: Tx, segmentId: string): Promise<CueRow[]> {
+/** The cues of a scene in script order: start time, then lane order. */
+export async function sceneCues(tx: Tx, sceneId: string): Promise<CueRow[]> {
   return tx
     .select(cueColumns)
     .from(cue)
     .innerJoin(lane, eq(lane.id, cue.laneId))
-    .where(eq(cue.segmentId, segmentId))
+    .where(eq(cue.sceneId, sceneId))
     .orderBy(asc(cue.startMs), asc(lane.position), asc(cue.id));
 }
 
@@ -102,27 +102,27 @@ async function characterIn(tx: Tx, projectId: string, characterId: string) {
 const LANE_COLOURS: Record<CueType, string> = { speech: '#B5A89F', sfx: '#8C7F78', music: '#CFC3B8' };
 const LANE_TITLES: Record<CueType, string> = { speech: 'Speech', sfx: 'SFX', music: 'Music' };
 
-/** The lane a cue belongs on, created when the scene has none that fits (Cue types and lanes). */
+/** The lane a cue belongs on, created when the segment has none that fits (Cue types and lanes). */
 export async function laneFor(
   tx: Tx,
-  ctx: { projectId: string; sceneId: string },
-  spec: { type: CueType; characterId: string | null; segmentId: string; startMs: number; lengthMs: number; excludeCueId?: string },
+  ctx: { projectId: string; segmentId: string },
+  spec: { type: CueType; characterId: string | null; sceneId: string; startMs: number; lengthMs: number; excludeCueId?: string },
 ): Promise<string> {
-  const lanes = await tx.select().from(lane).where(eq(lane.sceneId, ctx.sceneId)).orderBy(asc(lane.position));
+  const lanes = await tx.select().from(lane).where(eq(lane.segmentId, ctx.segmentId)).orderBy(asc(lane.position));
   const typeRows = await tx
     .select({ laneId: cue.laneId, type: cue.type })
     .from(cue)
-    .innerJoin(segment, eq(segment.id, cue.segmentId))
-    .where(and(eq(segment.sceneId, ctx.sceneId)))
+    .innerJoin(scene, eq(scene.id, cue.sceneId))
+    .where(and(eq(scene.segmentId, ctx.segmentId)))
     .groupBy(cue.laneId, cue.type);
   const typesOf = new Map<string, Set<string>>();
   for (const r of typeRows) {
     if (!typesOf.has(r.laneId)) typesOf.set(r.laneId, new Set());
     typesOf.get(r.laneId)!.add(r.type);
   }
-  const sameSegment = await tx.select(cueColumns).from(cue).where(eq(cue.segmentId, spec.segmentId));
+  const sameScene = await tx.select(cueColumns).from(cue).where(eq(cue.sceneId, spec.sceneId));
   const busy = (laneId: string) =>
-    sameSegment.some(
+    sameScene.some(
       (c) =>
         c.laneId === laneId &&
         c.id !== spec.excludeCueId &&
@@ -155,12 +155,12 @@ export async function laneFor(
   const [{ maxPosition }] = (await tx
     .select({ maxPosition: max(lane.position) })
     .from(lane)
-    .where(eq(lane.sceneId, ctx.sceneId))) as [{ maxPosition: number | null }];
+    .where(eq(lane.segmentId, ctx.segmentId))) as [{ maxPosition: number | null }];
   const now = new Date();
   const id = newUlid();
   await tx.insert(lane).values({
     id,
-    sceneId: ctx.sceneId,
+    segmentId: ctx.segmentId,
     characterId: spec.type === 'speech' ? spec.characterId : null,
     position: (maxPosition ?? 0) + 1,
     title,
@@ -172,9 +172,9 @@ export async function laneFor(
   return id;
 }
 
-/** Deletes the automatic lanes of a scene that no cue uses any more, and closes the gaps in the order. */
-export async function pruneLanes(tx: Tx, sceneId: string): Promise<void> {
-  const lanes = await tx.select().from(lane).where(eq(lane.sceneId, sceneId)).orderBy(asc(lane.position));
+/** Deletes the automatic lanes of a segment that no cue uses any more, and closes the gaps in the order. */
+export async function pruneLanes(tx: Tx, segmentId: string): Promise<void> {
+  const lanes = await tx.select().from(lane).where(eq(lane.segmentId, segmentId)).orderBy(asc(lane.position));
   const used = await tx
     .selectDistinct({ laneId: cue.laneId })
     .from(cue)
@@ -197,25 +197,25 @@ export async function pruneLanes(tx: Tx, sceneId: string): Promise<void> {
 
 async function applyRipple(
   tx: Tx,
-  segmentId: string,
+  sceneId: string,
   oldEndMs: number,
   delta: number,
   excludeIds: string[],
   dropIds: string[] = [],
 ): Promise<void> {
-  const cues = (await segmentCues(tx, segmentId)).filter((c) => !dropIds.includes(c.id));
+  const cues = (await sceneCues(tx, sceneId)).filter((c) => !dropIds.includes(c.id));
   const moved = ripple(cues as RippleCue[], oldEndMs, delta, excludeIds);
   for (const [id, startMs] of moved) await tx.update(cue).set({ startMs, updatedAt: new Date() }).where(eq(cue.id, id));
 }
 
 /** Pushes a start past any cue on the same lane that overlaps it (the lane rule wins). */
-async function clearLaneConflicts(tx: Tx, c: { id: string; segmentId: string; laneId: string; startMs: number; lengthMs: number }): Promise<number> {
+async function clearLaneConflicts(tx: Tx, c: { id: string; sceneId: string; laneId: string; startMs: number; lengthMs: number }): Promise<number> {
   let start = c.startMs;
   for (let i = 0; i < 1000; i++) {
     const others = await tx
       .select({ startMs: cue.startMs, lengthMs: cue.lengthMs })
       .from(cue)
-      .where(and(eq(cue.segmentId, c.segmentId), eq(cue.laneId, c.laneId)));
+      .where(and(eq(cue.sceneId, c.sceneId), eq(cue.laneId, c.laneId)));
     const clash = others.find((o) => o.startMs < start + c.lengthMs && start < o.startMs + o.lengthMs);
     if (!clash) return start;
     start = clash.startMs + clash.lengthMs;
@@ -224,8 +224,8 @@ async function clearLaneConflicts(tx: Tx, c: { id: string; segmentId: string; la
 }
 
 function checkSpan(startMs: number, lengthMs: number): void {
-  if (startMs + lengthMs > MAX_SEGMENT_MS) {
-    throw new HttpError(400, 'segment_too_long', 'A segment holds at most 99 minutes.');
+  if (startMs + lengthMs > MAX_SCENE_MS) {
+    throw new HttpError(400, 'scene_too_long', 'A scene holds at most 99 minutes.');
   }
 }
 
@@ -238,12 +238,12 @@ export interface NewCue {
   text?: string;
 }
 
-/** Inserts a cue after another one (or first in the segment), rippling the later cues by its length. */
-export async function insertCue(tx: Tx, segmentId: string, input: NewCue, userId: string): Promise<CueRow> {
+/** Inserts a cue after another one (or first in the scene), rippling the later cues by its length. */
+export async function insertCue(tx: Tx, sceneId: string, input: NewCue, userId: string): Promise<CueRow> {
   void userId;
-  const seg = await segmentRow(tx, segmentId);
-  const ctx = await sceneContext(tx, seg.sceneId);
-  const cues = await segmentCues(tx, segmentId);
+  const seg = await sceneRow(tx, sceneId);
+  const ctx = await segmentContext(tx, seg.segmentId);
+  const cues = await sceneCues(tx, sceneId);
 
   let after: CueRow | undefined;
   if (input.afterCueId) {
@@ -257,14 +257,14 @@ export async function insertCue(tx: Tx, segmentId: string, input: NewCue, userId
     if (cues[0]) previous = cues[0];
     else {
       const earlier = await tx
-        .select({ id: segment.id })
-        .from(segment)
-        .where(and(eq(segment.sceneId, seg.sceneId)))
-        .orderBy(desc(segment.position));
+        .select({ id: scene.id })
+        .from(scene)
+        .where(and(eq(scene.segmentId, seg.segmentId)))
+        .orderBy(desc(scene.position));
       for (const s of earlier) {
-        if (s.id === segmentId) continue;
-        const sc = await segmentCues(tx, s.id);
-        if (sc.length && (await segmentRow(tx, s.id)).position < seg.position) {
+        if (s.id === sceneId) continue;
+        const sc = await sceneCues(tx, s.id);
+        if (sc.length && (await sceneRow(tx, s.id)).position < seg.position) {
           previous = sc[sc.length - 1];
           break;
         }
@@ -282,15 +282,15 @@ export async function insertCue(tx: Tx, segmentId: string, input: NewCue, userId
   const text = input.text ?? '';
   const lengthMs = type === 'speech' ? estimateSpeechMs(text, ctx.language) : MIN_CUE_MS;
   const desired = after ? after.startMs + after.lengthMs : 0;
-  const laneId = await laneFor(tx, ctx, { type, characterId, segmentId, startMs: desired, lengthMs });
+  const laneId = await laneFor(tx, ctx, { type, characterId, sceneId, startMs: desired, lengthMs });
   const id = newUlid();
   const now = new Date();
   checkSpan(desired, lengthMs);
-  await applyRipple(tx, segmentId, desired, lengthMs, []);
-  const startMs = await clearLaneConflicts(tx, { id, segmentId, laneId, startMs: desired, lengthMs });
+  await applyRipple(tx, sceneId, desired, lengthMs, []);
+  const startMs = await clearLaneConflicts(tx, { id, sceneId, laneId, startMs: desired, lengthMs });
   await tx.insert(cue).values({
     id,
-    segmentId,
+    sceneId,
     laneId,
     type,
     characterId,
@@ -314,8 +314,8 @@ export interface CuePatch {
 
 export async function updateCue(tx: Tx, cueId: string, patch: CuePatch): Promise<CueRow> {
   const current = await cueRow(tx, cueId);
-  const seg = await segmentRow(tx, current.segmentId);
-  const ctx = await sceneContext(tx, seg.sceneId);
+  const seg = await sceneRow(tx, current.sceneId);
+  const ctx = await segmentContext(tx, seg.segmentId);
 
   const type: CueType = patch.type ?? current.type;
   let characterId = patch.characterId !== undefined ? patch.characterId : current.characterId;
@@ -348,7 +348,7 @@ export async function updateCue(tx: Tx, cueId: string, patch: CuePatch): Promise
     laneId = await laneFor(tx, ctx, {
       type,
       characterId,
-      segmentId: current.segmentId,
+      sceneId: current.sceneId,
       startMs: current.startMs,
       lengthMs,
       excludeCueId: cueId,
@@ -359,31 +359,31 @@ export async function updateCue(tx: Tx, cueId: string, patch: CuePatch): Promise
     .update(cue)
     .set({ type, characterId, laneId, lengthMs, lengthAuto, textMd: text, updatedAt: new Date() })
     .where(eq(cue.id, cueId));
-  if (delta !== 0) await applyRipple(tx, current.segmentId, current.startMs + current.lengthMs, delta, [cueId]);
-  if (laneId !== current.laneId) await pruneLanes(tx, seg.sceneId);
+  if (delta !== 0) await applyRipple(tx, current.sceneId, current.startMs + current.lengthMs, delta, [cueId]);
+  if (laneId !== current.laneId) await pruneLanes(tx, seg.segmentId);
   return cueRow(tx, cueId);
 }
 
 export async function deleteCue(tx: Tx, cueId: string): Promise<void> {
   const current = await cueRow(tx, cueId);
-  const seg = await segmentRow(tx, current.segmentId);
+  const seg = await sceneRow(tx, current.sceneId);
   await tx.delete(cue).where(eq(cue.id, cueId));
-  await applyRipple(tx, current.segmentId, current.startMs + current.lengthMs, -current.lengthMs, []);
-  await pruneLanes(tx, seg.sceneId);
+  await applyRipple(tx, current.sceneId, current.startMs + current.lengthMs, -current.lengthMs, []);
+  await pruneLanes(tx, seg.segmentId);
 }
 
-/** Moves a cue (drag and drop): placed after another cue of any segment of the same scene, or first in a segment. */
-export async function moveCue(tx: Tx, cueId: string, targetSegmentId: string, afterCueId: string | null): Promise<CueRow> {
+/** Moves a cue (drag and drop): placed after another cue of any scene of the same segment, or first in a scene. */
+export async function moveCue(tx: Tx, cueId: string, targetSceneId: string, afterCueId: string | null): Promise<CueRow> {
   const current = await cueRow(tx, cueId);
-  const fromSeg = await segmentRow(tx, current.segmentId);
-  const toSeg = await segmentRow(tx, targetSegmentId);
-  if (fromSeg.sceneId !== toSeg.sceneId) throw new HttpError(400, 'different_scene');
+  const fromSeg = await sceneRow(tx, current.sceneId);
+  const toSeg = await sceneRow(tx, targetSceneId);
+  if (fromSeg.segmentId !== toSeg.segmentId) throw new HttpError(400, 'different_segment');
   if (afterCueId === cueId) throw new HttpError(400, 'invalid_after_cue');
 
   // Take the cue out: the later cues close the gap.
-  await applyRipple(tx, current.segmentId, current.startMs + current.lengthMs, -current.lengthMs, [], [cueId]);
+  await applyRipple(tx, current.sceneId, current.startMs + current.lengthMs, -current.lengthMs, [], [cueId]);
   // Park it so it does not take part while the target is arranged.
-  const cues = (await segmentCues(tx, targetSegmentId)).filter((c) => c.id !== cueId);
+  const cues = (await sceneCues(tx, targetSceneId)).filter((c) => c.id !== cueId);
   let desired = 0;
   if (afterCueId) {
     const after = cues.find((c) => c.id === afterCueId);
@@ -391,11 +391,11 @@ export async function moveCue(tx: Tx, cueId: string, targetSegmentId: string, af
     desired = after.startMs + after.lengthMs;
   }
   checkSpan(desired, current.lengthMs);
-  await tx.update(cue).set({ segmentId: targetSegmentId, startMs: MAX_SEGMENT_MS * 2 }).where(eq(cue.id, cueId));
-  await applyRipple(tx, targetSegmentId, desired, current.lengthMs, [cueId]);
+  await tx.update(cue).set({ sceneId: targetSceneId, startMs: MAX_SCENE_MS * 2 }).where(eq(cue.id, cueId));
+  await applyRipple(tx, targetSceneId, desired, current.lengthMs, [cueId]);
   const startMs = await clearLaneConflicts(tx, {
     id: cueId,
-    segmentId: targetSegmentId,
+    sceneId: targetSceneId,
     laneId: current.laneId,
     startMs: desired,
     lengthMs: current.lengthMs,
@@ -404,76 +404,77 @@ export async function moveCue(tx: Tx, cueId: string, targetSegmentId: string, af
   return cueRow(tx, cueId);
 }
 
-// ---- segments ---------------------------------------------------------------------
+// ---- scenes ---------------------------------------------------------------------
 
-export async function newSegment(tx: Tx, sceneId: string, atPosition?: number, label: string | null = null): Promise<string> {
-  const existing = await tx.select({ id: segment.id }).from(segment).where(eq(segment.sceneId, sceneId));
-  if (existing.length >= MAX_SEGMENTS) throw new HttpError(400, 'too_many_segments', 'A scene holds at most 99 segments.');
+export async function newScene(tx: Tx, segmentId: string, atPosition?: number, label: string | null = null): Promise<string> {
+  const existing = await tx.select({ id: scene.id }).from(scene).where(eq(scene.segmentId, segmentId));
+  if (existing.length >= MAX_SCENES) throw new HttpError(400, 'too_many_scenes', 'A segment holds at most 99 scenes.');
   const position = atPosition ?? existing.length + 1;
-  await openGap(tx, 'segment', sceneId, position);
+  await openGap(tx, 'scene', segmentId, position);
   const id = newUlid();
   const now = new Date();
-  await tx.insert(segment).values({ id, sceneId, position, label, createdAt: now, updatedAt: now });
+  // A new scene is titled "Scene " + its number; the author can change or clear the title.
+  await tx.insert(scene).values({ id, segmentId, position, label: label ?? `Scene ${position}`, createdAt: now, updatedAt: now });
   return id;
 }
 
-/** Splits a segment before a cue: that cue and the ones after it move to a new segment right after. */
-export async function splitSegment(tx: Tx, segmentId: string, beforeCueId: string): Promise<string> {
-  const seg = await segmentRow(tx, segmentId);
-  const cues = await segmentCues(tx, segmentId);
+/** Splits a scene before a cue: that cue and the ones after it move to a new scene right after. */
+export async function splitScene(tx: Tx, sceneId: string, beforeCueId: string): Promise<string> {
+  const seg = await sceneRow(tx, sceneId);
+  const cues = await sceneCues(tx, sceneId);
   const index = cues.findIndex((c) => c.id === beforeCueId);
   if (index < 0) throw new HttpError(400, 'invalid_cue');
   const moving = cues.slice(index);
   const base = moving[0]!.startMs;
-  const id = await newSegment(tx, seg.sceneId, seg.position + 1);
+  const id = await newScene(tx, seg.segmentId, seg.position + 1);
   for (const c of moving) {
-    await tx.update(cue).set({ segmentId: id, startMs: c.startMs - base, updatedAt: new Date() }).where(eq(cue.id, c.id));
+    await tx.update(cue).set({ sceneId: id, startMs: c.startMs - base, updatedAt: new Date() }).where(eq(cue.id, c.id));
   }
   return id;
 }
 
-export async function segmentLength(tx: Tx, segmentId: string): Promise<number> {
-  const cues = await segmentCues(tx, segmentId);
+export async function sceneLength(tx: Tx, sceneId: string): Promise<number> {
+  const cues = await sceneCues(tx, sceneId);
   return cues.reduce((m, c) => Math.max(m, c.startMs + c.lengthMs), 0);
 }
 
-/** Merges a segment into the one before it; its cues keep their order after the previous segment's cues. */
-export async function mergeWithPrevious(tx: Tx, segmentId: string): Promise<void> {
-  const seg = await segmentRow(tx, segmentId);
-  if (seg.position <= 1) throw new HttpError(400, 'no_previous_segment');
+/** Merges a scene into the one before it; its cues keep their order after the previous scene's cues. */
+export async function mergeWithPrevious(tx: Tx, sceneId: string): Promise<void> {
+  const seg = await sceneRow(tx, sceneId);
+  if (seg.position <= 1) throw new HttpError(400, 'no_previous_scene');
   const prev = (
     await tx
       .select()
-      .from(segment)
-      .where(and(eq(segment.sceneId, seg.sceneId), eq(segment.position, seg.position - 1)))
+      .from(scene)
+      .where(and(eq(scene.segmentId, seg.segmentId), eq(scene.position, seg.position - 1)))
       .limit(1)
   )[0];
-  if (!prev) throw new HttpError(400, 'no_previous_segment');
-  const offset = await segmentLength(tx, prev.id);
-  const cues = await segmentCues(tx, segmentId);
-  if (cues.length) checkSpan(offset, (await segmentLength(tx, segmentId)));
+  if (!prev) throw new HttpError(400, 'no_previous_scene');
+  const offset = await sceneLength(tx, prev.id);
+  const cues = await sceneCues(tx, sceneId);
+  if (cues.length) checkSpan(offset, (await sceneLength(tx, sceneId)));
   for (const c of cues) {
-    await tx.update(cue).set({ segmentId: prev.id, startMs: c.startMs + offset, updatedAt: new Date() }).where(eq(cue.id, c.id));
+    await tx.update(cue).set({ sceneId: prev.id, startMs: c.startMs + offset, updatedAt: new Date() }).where(eq(cue.id, c.id));
   }
-  await tx.delete(segment).where(eq(segment.id, segmentId));
-  await closeGap(tx, 'segment', seg.sceneId, seg.position);
+  await tx.delete(scene).where(eq(scene.id, sceneId));
+  await closeGap(tx, 'scene', seg.segmentId, seg.position);
 }
 
-export async function deleteSegment(tx: Tx, segmentId: string): Promise<void> {
-  const seg = await segmentRow(tx, segmentId);
-  const count = await tx.select({ id: segment.id }).from(segment).where(eq(segment.sceneId, seg.sceneId));
-  if (count.length <= 1) throw new HttpError(400, 'last_segment', 'A scene needs at least one segment.');
-  await tx.delete(segment).where(eq(segment.id, segmentId));
-  await closeGap(tx, 'segment', seg.sceneId, seg.position);
-  await pruneLanes(tx, seg.sceneId);
+export async function deleteScene(tx: Tx, sceneId: string): Promise<void> {
+  const seg = await sceneRow(tx, sceneId);
+  const count = await tx.select({ id: scene.id }).from(scene).where(eq(scene.segmentId, seg.segmentId));
+  if (count.length <= 1) throw new HttpError(400, 'last_scene', 'A segment needs at least one scene.');
+  await tx.delete(scene).where(eq(scene.id, sceneId));
+  await closeGap(tx, 'scene', seg.segmentId, seg.position);
+  await pruneLanes(tx, seg.segmentId);
 }
 
-/** A new scene always has one segment. */
-export async function createScene(tx: Tx, chapterId: string, title: string, position: number): Promise<string> {
-  await openGap(tx, 'scene', chapterId, position);
+/** A new segment always has one scene. */
+export async function createSegment(tx: Tx, chapterId: string, title: string, position: number): Promise<string> {
+  await openGap(tx, 'segment', chapterId, position);
   const id = newUlid();
   const now = new Date();
-  await tx.insert(scene).values({ id, chapterId, position, title, createdAt: now, updatedAt: now });
-  await newSegment(tx, id);
+  await tx.insert(segment).values({ id, chapterId, position, title, createdAt: now, updatedAt: now });
+  await newScene(tx, id);
   return id;
 }

@@ -55,10 +55,10 @@ describe('projects and story', () => {
     const s = await call('ann', 'GET', `/api/projects/${ids.p}/story`);
     assert.equal(s.body.chapters.length, 1);
     assert.equal(s.body.chapters[0].index, '01');
-    assert.equal(s.body.chapters[0].scenes.length, 1);
-    assert.equal(s.body.chapters[0].scenes[0].cueCount, 1);
+    assert.equal(s.body.chapters[0].segments.length, 1);
+    assert.equal(s.body.chapters[0].segments[0].cueCount, 1);
     ids.ch1 = s.body.chapters[0].id;
-    ids.sc1 = s.body.chapters[0].scenes[0].id;
+    ids.sc1 = s.body.chapters[0].segments[0].id;
   });
 
   it('hides the project from non-members', async () => {
@@ -81,65 +81,65 @@ describe('projects and story', () => {
     assert.deepEqual(m.body.chapters.map((c: any) => c.position), [1, 2, 3]);
   });
 
-  it('adds, renames, moves and deletes scenes', async () => {
-    const a = await call('ann', 'POST', `/api/chapters/${ids.ch1}/scenes`, { title: 'Second' });
+  it('adds, renames, moves and deletes segments', async () => {
+    const a = await call('ann', 'POST', `/api/chapters/${ids.ch1}/segments`, { title: 'Second' });
     assert.equal(a.status, 201, JSON.stringify(a.body));
     const second = a.body.created;
-    const mv = await call('ann', 'POST', `/api/scenes/${second}/move`, { chapterId: ids.ch2, position: 1 });
+    const mv = await call('ann', 'POST', `/api/segments/${second}/move`, { chapterId: ids.ch2, position: 1 });
     const ch2 = mv.body.chapters.find((c: any) => c.id === ids.ch2);
-    assert.equal(ch2.scenes.length, 2 - 1 + 1 > 0 ? ch2.scenes.length : 0);
-    assert.ok(ch2.scenes.some((s: any) => s.id === second));
-    await call('ann', 'PATCH', `/api/scenes/${second}`, { title: 'Renamed' });
-    const del = await call('ann', 'DELETE', `/api/scenes/${second}`);
+    assert.equal(ch2.segments.length, 2 - 1 + 1 > 0 ? ch2.segments.length : 0);
+    assert.ok(ch2.segments.some((s: any) => s.id === second));
+    await call('ann', 'PATCH', `/api/segments/${second}`, { title: 'Renamed' });
+    const del = await call('ann', 'DELETE', `/api/segments/${second}`);
     assert.equal(del.status, 200);
-    assert.ok(!del.body.chapters.some((c: any) => c.scenes.some((s: any) => s.id === second)));
+    assert.ok(!del.body.chapters.some((c: any) => c.segments.some((s: any) => s.id === second)));
   });
 
   it('writes cues with ripple and lanes', async () => {
-    const scn = await call('ann', 'GET', `/api/scenes/${ids.sc1}`);
+    const scn = await call('ann', 'GET', `/api/segments/${ids.sc1}`);
     assert.equal(scn.status, 200);
-    const seg = scn.body.segments[0];
+    const seg = scn.body.scenes[0];
     const first = seg.cues[0];
     const chars = await call('ann', 'GET', `/api/projects/${ids.p}/characters`);
     const narrator = (chars.body.characters ?? chars.body)[0];
     const upd = await call('ann', 'PATCH', `/api/cues/${first.id}`, { text: 'Hello there, this is the first line.', characterId: narrator.id });
     assert.equal(upd.status, 200, JSON.stringify(upd.body));
-    const second = await call('ann', 'POST', `/api/segments/${seg.id}/cues`, { afterCueId: first.id, type: 'speech', characterId: narrator.id, text: 'Second line.' });
+    const second = await call('ann', 'POST', `/api/scenes/${seg.id}/cues`, { afterCueId: first.id, type: 'speech', characterId: narrator.id, text: 'Second line.' });
     assert.equal(second.status, 201, JSON.stringify(second.body));
-    const cues = second.body.segments[0].cues;
+    const cues = second.body.scenes[0].cues;
     assert.equal(cues.length, 2);
     assert.ok(cues[1].startMs >= cues[0].startMs + cues[0].lengthMs);
     const end0 = cues[0].startMs + cues[0].lengthMs;
     // lengthen the first cue: the second shifts by the delta
     const longer = await call('ann', 'PATCH', `/api/cues/${cues[0].id}`, { lengthMs: cues[0].lengthMs + 5000 });
-    assert.equal(longer.body.segments[0].cues[1].startMs, cues[1].startMs + 5000);
+    assert.equal(longer.body.scenes[0].cues[1].startMs, cues[1].startMs + 5000);
     assert.ok(end0 > 0);
-    assert.equal(longer.body.segments[0].cues[0].lengthAuto, false);
+    assert.equal(longer.body.scenes[0].cues[0].lengthAuto, false);
   });
 
   it('adds sfx cue on its own lane and prunes it', async () => {
-    const scn = await call('ann', 'GET', `/api/scenes/${ids.sc1}`);
-    const seg = scn.body.segments[0];
-    const r = await call('ann', 'POST', `/api/segments/${seg.id}/cues`, { type: 'sfx', text: 'door slam' });
+    const scn = await call('ann', 'GET', `/api/segments/${ids.sc1}`);
+    const seg = scn.body.scenes[0];
+    const r = await call('ann', 'POST', `/api/scenes/${seg.id}/cues`, { type: 'sfx', text: 'door slam' });
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    const sfx = r.body.segments[0].cues.find((c: any) => c.id === r.body.created);
+    const sfx = r.body.scenes[0].cues.find((c: any) => c.id === r.body.created);
     assert.equal(sfx.characterId, null);
     assert.ok(r.body.lanes.some((l: any) => l.id === sfx.laneId && /^SFX/.test(l.title)));
     const d = await call('ann', 'DELETE', `/api/cues/${sfx.id}`);
     assert.ok(!d.body.lanes.some((l: any) => l.id === sfx.laneId));
   });
 
-  it('splits and merges segments', async () => {
-    const scn = await call('ann', 'GET', `/api/scenes/${ids.sc1}`);
-    const seg = scn.body.segments[0];
+  it('splits and merges scenes', async () => {
+    const scn = await call('ann', 'GET', `/api/segments/${ids.sc1}`);
+    const seg = scn.body.scenes[0];
     const second = seg.cues[1];
-    const sp = await call('ann', 'POST', `/api/segments/${seg.id}/split`, { beforeCueId: second.id });
+    const sp = await call('ann', 'POST', `/api/scenes/${seg.id}/split`, { beforeCueId: second.id });
     assert.equal(sp.status, 201, JSON.stringify(sp.body));
-    assert.equal(sp.body.segments.length, 2);
-    const mg = await call('ann', 'POST', `/api/segments/${sp.body.created}/merge-previous`);
-    assert.equal(mg.body.segments.length, 1);
-    assert.equal(mg.body.segments[0].cues.length, 2);
-    const last = await call('ann', 'DELETE', `/api/segments/${mg.body.segments[0].id}`);
+    assert.equal(sp.body.scenes.length, 2);
+    const mg = await call('ann', 'POST', `/api/scenes/${sp.body.created}/merge-previous`);
+    assert.equal(mg.body.scenes.length, 1);
+    assert.equal(mg.body.scenes[0].cues.length, 2);
+    const last = await call('ann', 'DELETE', `/api/scenes/${mg.body.scenes[0].id}`);
     assert.equal(last.status, 400);
   });
 
@@ -209,10 +209,10 @@ describe('snapshots', () => {
       },
     }));
     const p = await call('ann', 'POST', '/api/projects', { type: 'audiobook', title: `Snap ${run}`, language: 'en-US' });
-    const sc = (await call('ann', 'GET', `/api/projects/${p.body.id}/story`)).body.chapters[0].scenes[0].id;
-    const seg = (await call('ann', 'GET', `/api/scenes/${sc}`)).body.segments[0];
+    const sc = (await call('ann', 'GET', `/api/projects/${p.body.id}/story`)).body.chapters[0].segments[0].id;
+    const seg = (await call('ann', 'GET', `/api/segments/${sc}`)).body.scenes[0];
     await call('ann', 'PATCH', `/api/cues/${seg.cues[0].id}`, { text: 'Opening line.' });
-    await call('ann', 'POST', `/api/segments/${seg.id}/cues`, { type: 'sfx', text: 'door slam' });
+    await call('ann', 'POST', `/api/scenes/${seg.id}/cues`, { type: 'sfx', text: 'door slam' });
     assert.ok((await call('ann', 'GET', `/api/projects/${p.body.id}`)).body.dirtySince);
 
     const r1 = await call('ann', 'POST', `/api/projects/${p.body.id}/snapshot`, { label: 'first' });

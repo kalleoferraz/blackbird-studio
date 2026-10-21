@@ -34,26 +34,30 @@ export function ProjectView({ me, projectId, onLogout }: { me: Me; projectId: st
       <section className="card details-card">
         <Cover p={p} author={author} onChange={(card) => setP(card)} setError={setError} reload={load} />
         <div className="details-main">
+          <button className="primary open-script" onClick={() => go(`/p/${p.id}/s`)}>Open script</button>
           <EditableText value={p.title} disabled={!author} className="h1" onSave={(v) => v.trim() && patch({ title: v.trim() })} />
           <EditableText value={p.subtitle ?? ''} placeholder="Add a subtitle" disabled={!author} className="sub" onSave={(v) => patch({ subtitle: v.trim() })} />
-          <dl className="facts">
-            <dt>Type</dt><dd>{TYPES.find((t) => t.id === p.type)?.label ?? p.type}</dd>
-            <dt>Language</dt><dd>{author ? (
-              <select value={p.language} onChange={(e) => void patch({ language: e.target.value })}>
-                {langs.map((l) => <option key={l.code} value={l.code}>{l.flag} {l.label}</option>)}</select>) : p.language}</dd>
-            <dt>Chapters</dt><dd>{p.chapterCount}</dd>
-            <dt>Size</dt><dd>{formatBytes(p.sizeBytes)}</dd>
-            <dt>Last edited</dt><dd>{ago(p.lastEditedAt)}</dd>
-            <dt>Last snapshot</dt><dd>{ago(p.lastSnapshotAt)}{p.dirtySince && <span className="dirty"> · unsaved changes</span>}</dd>
-            <dt>Repository folder</dt><dd>{p.repoFolder}</dd>
-          </dl>
-          <div className="row"><button className="primary" onClick={() => go(`/p/${p.id}/s`)}>Open script</button></div>
+          <div className="facts-cols">
+            <dl className="facts">
+              <dt>Type</dt><dd>{TYPES.find((t) => t.id === p.type)?.label ?? p.type}</dd>
+              <dt>Language</dt><dd>{author ? (
+                <select value={p.language} onChange={(e) => void patch({ language: e.target.value })}>
+                  {langs.map((l) => <option key={l.code} value={l.code}>{l.flag} {l.label}</option>)}</select>) : p.language}</dd>
+              <dt>Repository folder</dt><dd>{p.repoFolder}</dd>
+            </dl>
+            <dl className="facts">
+              <dt>Chapters</dt><dd>{p.chapterCount}</dd>
+              <dt>Size</dt><dd>{formatBytes(p.sizeBytes)}</dd>
+              <dt>Last edited</dt><dd>{ago(p.lastEditedAt)}</dd>
+              <dt>Last snapshot</dt><dd>{ago(p.lastSnapshotAt)}{p.dirtySince && <span className="dirty"> · unsaved changes</span>}</dd>
+            </dl>
+          </div>
         </div>
       </section>
       <MembersPanel projectId={p.id} members={members} me={me} author={author} onChange={load} setError={setError} />
       {author && <section className="card"><h2>Delete project</h2>
         <p className="muted">Removes the project and everything in it. Snapshots already in the repository are kept.</p>
-        <button className="danger" onClick={() => setDeleting(true)}>Delete project…</button></section>}
+        <button className="danger solid delete-project" onClick={() => setDeleting(true)}>Delete project</button></section>}
       {deleting && <DeleteProject p={p} onClose={() => setDeleting(false)} />}
     </div>
   );

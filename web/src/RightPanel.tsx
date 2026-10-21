@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, assetUrl, uploadFile } from './api.ts';
 import { LibraryPanel } from './Library.tsx';
 import type { Character } from './types.ts';
-import { ColourPicker, Confirm, Dialog, MenuButton, errorText, useLocalState } from './ui.tsx';
+import { ColourPicker, Confirm, Dialog, MenuButton, PlusIcon, errorText, useLocalState } from './ui.tsx';
 import { nextColour } from '../../src/shared/palette.ts';
 
 export type CharacterDialogState = null | { character?: Character; then?: (c: Character) => void };
@@ -50,7 +50,7 @@ export function CharacterDialog({ projectId, state, characters, onClose, onSaved
   if (askLanes) {
     return (
       <Dialog title="Update lane colours?" onClose={() => setAskLanes(false)}>
-        <p>Change the colour of this character's lanes in all scenes as well? Lanes you recoloured by hand will be reset too.</p>
+        <p>Change the colour of this character's lanes in all segments as well? Lanes you recoloured by hand will be reset too.</p>
         <div className="row end"><button onClick={() => void save(false)}>Keep lane colours</button><button className="primary" onClick={() => void save(true)}>Update lanes</button></div>
       </Dialog>);
   }
@@ -93,7 +93,7 @@ export function RightPanel({ projectId, characters, readOnly, onCharacters, onEr
       {tab === 'characters' && (
         <div className="panel-body">
           {characters.map((c) => (
-            <div key={c.id} className="char-row">
+            <div key={c.id} className="char-row" onDoubleClick={() => !readOnly && openDialog({ character: c })}>
               {c.pictureAssetId
                 ? <span className="avatar" style={{ borderColor: c.colour }}><img src={assetUrl(c.pictureAssetId, true)} alt="" /></span>
                 : <span className={'dot' + (c.colour === '#000000' ? ' outlined' : '')} style={{ background: c.colour }} />}
@@ -103,7 +103,7 @@ export function RightPanel({ projectId, characters, readOnly, onCharacters, onEr
                 { label: 'Remove', danger: true, disabled: c.isNarrator, onClick: () => setRemove(c) },
               ]}>⋯</MenuButton>}
             </div>))}
-          {!readOnly && <button className="add-chapter" title="Add character" onClick={() => openDialog({})}>+</button>}
+          {!readOnly && <button className="add-chapter" title="Add character" onClick={() => openDialog({})}><PlusIcon /></button>}
         </div>)}
       {remove && <Confirm title="Remove character" danger confirmLabel="Remove" message={`Remove ${remove.name}?`}
         onConfirm={async () => {
