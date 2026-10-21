@@ -189,6 +189,20 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     });
   });
 
+  /** The project's audio files that are ready to be used in a cue (the picker's list). */
+  app.get('/api/projects/:id/audio', auth, async (request) => {
+    const projectId = checkId((request.params as { id: string }).id);
+    return withDb(async (db) => {
+      await accessTo(db, request.account!.id, projectId);
+      const rows = await db
+        .select()
+        .from(asset)
+        .where(and(eq(asset.projectId, projectId), eq(asset.mediaKind, 'audio'), eq(asset.status, 'ready')));
+      rows.sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: 'base' }));
+      return { files: rows.map((a) => assetView(a)) };
+    });
+  });
+
   app.post('/api/projects/:id/library/folders', { ...auth, bodyLimit: 2048 }, async (request, reply) => {
     const projectId = checkId((request.params as { id: string }).id);
     const body = asBody(request.body);

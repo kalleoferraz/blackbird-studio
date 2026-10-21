@@ -241,3 +241,25 @@ textarea.cue-text { cursor: text; }
 .lib-status.failed { color: #e5675f; }
 .spinner { display: inline-block; width: 9px; height: 9px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -1px; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Audio piece picker */
+.pk-sub { margin: 0 0 10px; }
+.pk-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; font-size: 12.5px; color: var(--muted); }
+.pk-line select { flex: 1; min-width: 0; max-width: 100%; }
+.pk-line label.rb { display: flex; gap: 5px; align-items: center; color: var(--text); cursor: pointer; }
+.pk-line label.rb input { width: auto; flex: none; accent-color: var(--primary); }
+.pk-line .num { font-family: ui-monospace, monospace; min-width: 74px; text-align: center; padding: 3px 8px; font-size: 12.5px; }
+span.num { background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; color: var(--text); }
+.wvlabel { font-size: 12.5px; color: var(--muted); margin: 12px 0 4px; }
+.wv { position: relative; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; touch-action: none; user-select: none; }
+.wv canvas { display: block; }
+.wv .shade { position: absolute; top: 0; bottom: 0; background: rgba(0,0,0,.6); pointer-events: none; }
+.wv .win { position: absolute; top: 0; bottom: 0; border-left: 2px solid var(--c); border-right: 2px solid var(--c); background: color-mix(in srgb, var(--c) 10%, transparent); cursor: grab; }
+.wv .hd { position: absolute; top: 0; bottom: 0; width: 11px; cursor: ew-resize; z-index: 2; }
+.wv .hd::after { content: ""; position: absolute; top: calc(50% - 12px); left: 3px; width: 5px; height: 24px; border-radius: 3px; background: var(--c); }
+.wv.locked .hd { display: none; }
+.wv .pp { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; pointer-events: none; }
+.axis { position: relative; height: 16px; font: 10px ui-monospace, monospace; color: var(--faint); }
+.axis span { position: absolute; top: 2px; transform: translateX(-50%); }
+.pk-btns { margin-top: 14px; align-items: center; }
+.cue-clip { font-size: 11.5px; color: var(--muted); margin-top: 2px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
