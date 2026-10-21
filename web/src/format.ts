@@ -32,3 +32,22 @@ export function ink(hex: string): string {
   const r = n >> 16, g = (n >> 8) & 255, b = n & 255;
   return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#111' : '#f4f1ee';
 }
+/** Start time as mm:ss. */
+export function formatClock(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+/** Length as "8.4 s", or m:ss.s from one minute up. */
+export function formatSeconds(ms: number): string {
+  return ms < 60000 ? `${(Math.round(ms / 100) / 10).toFixed(1)} s` : formatMs(ms);
+}
+/** Length in whole seconds ("4 s"), m:ss from one minute up. */
+export function formatRounded(ms: number): string {
+  const s = Math.max(1, Math.round(ms / 1000));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+/** m:ss without decimals (rounded to the second). */
+export function formatMinSec(ms: number): string {
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}

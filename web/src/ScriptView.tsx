@@ -6,6 +6,7 @@ import { StoryIndex } from './StoryIndex.tsx';
 import { Writing } from './Writing.tsx';
 import { CharacterDialog, RightPanel, type CharacterDialogState } from './RightPanel.tsx';
 import { ago } from './format.ts';
+import { BlackbirdIcon } from './Brand.tsx';
 import { errorText } from './ui.tsx';
 
 export function ScriptView({ me, projectId, sceneId }: { me: Me; projectId: string; sceneId?: string }) {
@@ -58,7 +59,8 @@ export function ScriptView({ me, projectId, sceneId }: { me: Me; projectId: stri
   return (
     <div className="script">
       <header className="topbar">
-        <a href={`#/p/${projectId}`}>← {project.title}</a><span className="grow" />
+        <a href="#/" className="brand" title="Projects"><BlackbirdIcon /></a>
+        <a href={`#/p/${projectId}`}>{project.title}</a><span className="grow" />
         {error && <span className="error inline-error" onClick={() => setError('')}>{error}</span>}
         {saved && <span className="muted">{saved}</span>}
         <span className="muted small">{project.dirtySince ? 'Unsaved changes' : `Snapshot ${ago(project.lastSnapshotAt)}`}</span>
@@ -70,16 +72,16 @@ export function ScriptView({ me, projectId, sceneId }: { me: Me; projectId: stri
           onStory={setStory} onOpenScene={openScene} onError={setError} onChanged={() => { void loadProject(); if (sceneId) void api<SceneContent>('GET', `/api/scenes/${sceneId}`).then(setContent).catch(() => setContent(null)); }} />
         <main className="center-col">
           {content ? (
-            <>
+            <div className="doc">
               <TitleEdit className="chapter-title" value={content.scene.chapterTitle} disabled={!!readOnly} onSave={(v) => renameTitle('chapter', content.scene.chapterId, v)} />
               <TitleEdit className="scene-title" value={content.scene.title} disabled={!!readOnly} onSave={(v) => renameTitle('scene', content.scene.id, v)} />
               <Writing content={content} characters={characters} readOnly={!!readOnly} onContent={onContent} onError={setError}
                 onNewCharacter={(then) => setDialog({ then })} />
-            </>
+            </div>
           ) : <p className="muted">Select or add a scene.</p>}
         </main>
-        <RightPanel projectId={projectId} characters={characters} content={content} readOnly={!!readOnly}
-          onCharacters={() => void loadCharacters()} onContent={onContent} onError={setError} openDialog={setDialog} />
+        <RightPanel characters={characters} readOnly={!!readOnly}
+          onCharacters={() => void loadCharacters()} onError={setError} openDialog={setDialog} />
       </div>
       {dialog && <CharacterDialog projectId={projectId} state={dialog} characters={characters} onClose={() => setDialog(null)}
         onSaved={() => { void loadCharacters(); if (sceneId) void api<SceneContent>('GET', `/api/scenes/${sceneId}`).then(setContent); }} onError={setError} />}

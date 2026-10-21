@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import type { Character, Cue, CueType, Lane, SceneContent, Segment } from './types.ts';
-import { formatMs, ink, parseLength } from './format.ts';
+import { formatClock, formatMinSec, formatMs, formatRounded, formatSeconds, parseLength } from './format.ts';
 import { Confirm, MenuButton, errorText, type MenuItem } from './ui.tsx';
 
 interface Props {
@@ -13,7 +13,16 @@ interface Props {
   onNewCharacter: (then: (c: Character) => void) => void;
 }
 
-const TYPE_GLYPH: Record<CueType, string> = { speech: '“', sfx: '✦', music: '♪' };
+/** Simple monochrome type icons: a mouth for speech, a waveform for sfx, a note for music. */
+function TypeIcon({ type }: { type: CueType }) {
+  return (
+    <svg className="type-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {type === 'speech' && <><path d="M1.800 8c2.200-2.800 4.200-3.300 6.200-1.800 2-1.500 4-1 6.200 1.800-2.200 3.200-4.200 4-6.200 4S4 11.200 1.800 8Z" /><path d="M2 8h12" /></>}
+      {type === 'sfx' && <path d="M2 7v2M4.500 5v6M7 2.500v11M9.500 4.500v7M12 6v4M14 7.500v1" />}
+      {type === 'music' && <><path d="M6.200 12V3.500L13 2v8.500" /><circle cx="4.600" cy="12" r="1.700" /><circle cx="11.400" cy="10.500" r="1.700" /></>}
+    </svg>
+  );
+}
 const TYPE_LABEL: Record<CueType, string> = { speech: 'Speech', sfx: 'Sound effect', music: 'Music' };
 
 export function Writing({ content, characters, readOnly, onContent, onError, onNewCharacter }: Props) {
@@ -68,29 +77,34 @@ function SegmentBlock({ seg, index, total, lanes, characters, readOnly, focusCue
             onBlur={() => label !== (seg.label ?? '') && void call('PATCH', `/api/segments/${seg.id}`, { label: label.trim() || null })}
             onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />)}
         <span className="line" />
-        <span className="seg-length">{formatMs(seg.lengthMs)}</span>
+        <span className="seg-length">{formatMinSec(seg.lengthMs)}</span>
         {!readOnly && <MenuButton className="icon" items={menu} title="Segment">⋯</MenuButton>}
       </div>
-      {seg.cues.length === 0 && !readOnly && <Gap seg={seg} afterId={null} canSplit={false} call={call} always />}
+      {seg.cues.length === 0 && !readOnly && <Gap seg={seg} afterId={null} canSplit={false} call={call} last always />}
       {seg.cues.map((c, i) => (
         <div key={c.id}>
           {i === 0 && !readOnly && <Gap seg={seg} afterId={null} canSplit={false} call={call} before />}
           <CueBlock cue={c} lane={lanes.get(c.laneId)} characters={characters} readOnly={readOnly} call={call}
             autoFocus={focusCue === c.id} clearFocus={clearFocus} setConfirm={setConfirm} onNewCharacter={onNewCharacter} />
-          {!readOnly && <Gap seg={seg} afterId={c.id} canSplit={i < seg.cues.length - 1} nextId={seg.cues[i + 1]?.id} call={call} />}
+          {!readOnly && <Gap seg={seg} afterId={c.id} canSplit={i < seg.cues.length - 1} nextId={seg.cues[i + 1]?.id} call={call} last={i === seg.cues.length - 1} />}
         </div>
       ))}
     </section>
   );
 }
 
-function Gap({ seg, afterId, canSplit, nextId, call, always, before }: {
-  seg: Segment; afterId: string | null; canSplit: boolean; nextId?: string; call: Call; always?: boolean; before?: boolean;
+function Gap({ seg, afterId, canSplit, nextId, call, last, before, always }: {
+  seg: Segment; afterId: string | null; canSplit: boolean; nextId?: string; call: Call; last?: boolean; before?: boolean; always?: boolean;
 }) {
+  // The space is reserved, so the layout does not move when the buttons appear on hover.
   return (
-    <div className={'gap' + (always ? ' always' : '') + (before ? ' before' : '')}>
-      <button onClick={() => void call('POST', `/api/segments/${seg.id}/cues`, { afterCueId: afterId }, true)}>+ Cue</button>
-      {canSplit && nextId && <button onClick={() => void call('POST', `/api/segments/${seg.id}/split`, { beforeCueId: nextId })}>Split segment here</button>}
+    <div className={'gap' + (last ? ' last' : '') + (before ? ' before' : '') + (always ? ' always' : '')}>
+      <div className="gap-inner">
+        <span className="gap-line" />
+        <button onClick={() => void call('POST', `/api/segments/${seg.id}/cues`, { afterCueId: afterId }, true)}>Add cue</button>
+        {canSplit && nextId && <button onClick={() => void call('POST', `/api/segments/${seg.id}/split`, { beforeCueId: nextId })}>Split segment here</button>}
+        <span className="gap-line" />
+      </div>
     </div>
   );
 }
@@ -140,26 +154,20 @@ function CueBlock({ cue, lane, characters, readOnly, call, autoFocus, clearFocus
   ];
 
   const placeholder = cue.type === 'speech' ? 'Spoken text (Markdown)…' : cue.type === 'sfx' ? 'Describe the sound effect…' : 'Describe the music…';
+  const black = colour.toLowerCase() === '#000000';
+  const name = cue.type === 'speech' ? (character?.name ?? lane?.title ?? 'No character') : (lane?.title ?? TYPE_LABEL[cue.type]);
+  const nameStyle = { color: black ? 'var(--text)' : colour };
   return (
-    <div className={'cue ' + cue.type}>
-      <div className="cue-left" style={{ background: colour, color: ink(colour), outline: colour.toLowerCase() === '#000000' ? '1px solid #666' : undefined }}>
-        {editLen !== null ? (
-          <input className="len-input" autoFocus value={editLen} onChange={(e) => setEditLen(e.target.value)} onBlur={commitLen}
-            onKeyDown={(e) => { if (e.key === 'Enter') commitLen(); if (e.key === 'Escape') setEditLen(null); }} />
-        ) : readOnly ? <span className="len">{formatMs(cue.lengthMs)}</span> : (
-          <MenuButton className="len" items={lengthMenu} title="Length">{formatMs(cue.lengthMs)}{cue.lengthAuto && <sup> auto</sup>}</MenuButton>)}
-        <span className="start" title="Start within the segment">{formatMs(cue.startMs)}</span>
+    <div className={'cue ' + cue.type + (editing ? ' editing' : '')}>
+      <span className={'strip' + (black ? ' black' : '')} style={{ background: colour }} />
+      <div className="tag">
+        {readOnly ? <span className="type-btn"><TypeIcon type={cue.type} /></span> :
+          <MenuButton className="type-btn" items={typeMenu} title={TYPE_LABEL[cue.type]}><TypeIcon type={cue.type} /></MenuButton>}
+        {cue.type === 'speech' && !readOnly ?
+          <MenuButton className="name" items={charMenu} title="Character"><b style={nameStyle}>{name}</b></MenuButton> :
+          <span className="name"><b style={nameStyle}>{name}</b></span>}
       </div>
       <div className="cue-main">
-        <div className="cue-tools">
-          {readOnly ? <span className="type-circle">{TYPE_GLYPH[cue.type]}</span> :
-            <MenuButton className="type-circle" items={typeMenu} title={TYPE_LABEL[cue.type]}>{TYPE_GLYPH[cue.type]}</MenuButton>}
-          {cue.type === 'speech' && (readOnly ? <span className="char-chip">{character?.name ?? 'No character'}</span> :
-            <MenuButton className="char-chip" items={charMenu} title="Character">{character?.name ?? 'No character'}</MenuButton>)}
-          {cue.type !== 'speech' && <span className="char-chip plain">{lane?.title ?? TYPE_LABEL[cue.type]}</span>}
-          <span className="grow" />
-          {!readOnly && <MenuButton className="icon" items={moreMenu} title="More">⋯</MenuButton>}
-        </div>
         {editing ? (
           <textarea ref={area} className="cue-text" value={text} placeholder={placeholder} onChange={(e) => setText(e.target.value)} onBlur={commitText}
             onKeyDown={(e) => { if (e.key === 'Escape') { setText(cue.text); setEditing(false); } if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) commitText(); }} />
@@ -167,6 +175,16 @@ function CueBlock({ cue, lane, characters, readOnly, call, autoFocus, clearFocus
           <div className={'cue-text' + (cue.text ? '' : ' empty')} onDoubleClick={() => !readOnly && setEditing(true)}>
             {cue.text || placeholder}</div>)}
       </div>
+      <div className="times">
+        <span className="start" title="Start within the segment">{formatClock(cue.startMs)}</span>
+        {editLen !== null ? (
+          <input className="len-input" autoFocus value={editLen} onChange={(e) => setEditLen(e.target.value)} onBlur={commitLen}
+            onKeyDown={(e) => { if (e.key === 'Enter') commitLen(); if (e.key === 'Escape') setEditLen(null); }} />
+        ) : readOnly ? <span className="len">{formatRounded(cue.lengthMs)}</span> : (
+          <MenuButton className="len" items={lengthMenu} title={`${formatSeconds(cue.lengthMs)}${cue.lengthAuto ? ' · follows the text (auto)' : ''}`}>{formatRounded(cue.lengthMs)}</MenuButton>)}
+        {cue.lengthAuto && <span className="auto" title="The length follows the text until you set it by hand">auto</span>}
+      </div>
+      {readOnly ? <span /> : <MenuButton className="icon more-cue" items={moreMenu} title="More">⋯</MenuButton>}
     </div>
   );
 }

@@ -29,6 +29,11 @@ export function registerUi(app: FastifyInstance): void {
   };
   app.get('/app', async (_req, reply) => send(reply, 'index.html'));
   app.get('/app/', async (_req, reply) => send(reply, 'index.html'));
+  app.get('/app/:name', async (req, reply) => {
+    const name = (req.params as { name: string }).name;
+    if (!/^[\w-]+\.(svg|png|ico)$/.test(name)) return reply.code(404).send({ error: 'not_found' });
+    return send(reply, name);
+  });
   app.get('/app/assets/:name', async (req, reply) => {
     const name = (req.params as { name: string }).name;
     if (!/^[\w.-]+$/.test(name) || name.includes('..')) return reply.code(404).send({ error: 'not_found' });

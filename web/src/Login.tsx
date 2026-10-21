@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from './api.ts';
 import type { Me } from './types.ts';
+import { BlackbirdIcon } from './Brand.tsx';
 import { errorText } from './ui.tsx';
 
 export function Login({ onLogin }: { onLogin: (me: Me) => void }) {
@@ -17,7 +18,7 @@ export function Login({ onLogin }: { onLogin: (me: Me) => void }) {
   };
   return (
     <form className="card narrow" onSubmit={submit}>
-      <h1>Redaction Studio</h1>
+      <h1 className="brand"><BlackbirdIcon />Blackbird Studio</h1>
       <label>Email<input type="email" autoFocus autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
       <label>Password<input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
       {error && <p className="error">{error}</p>}

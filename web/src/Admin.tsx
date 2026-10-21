@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api.ts';
 import type { Me } from './types.ts';
+import { Brand } from './Brand.tsx';
 import { Confirm, Dialog, errorText } from './ui.tsx';
 
 interface AdminUser { id: string; email: string; displayName: string; isAdmin: boolean; disabled: boolean; mustChangePassword: boolean; memberships: { projectId: string; title: string; role: string }[] }
@@ -32,7 +33,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
   return (
     <div className="page">
-      <header className="topbar"><strong>Redaction Studio · Administration</strong><span className="grow" />
+      <header className="topbar"><Brand /><span className="muted">Administration</span><span className="grow" />
         <span className="muted">{me.user.email}</span><button onClick={onLogout}>Sign out</button></header>
       {message && <p className="error">{message}</p>}
       <section className="card">
@@ -87,13 +88,33 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
       {secret && (
         <Dialog title="Temporary password" onClose={() => setSecret(null)}>
           <p>For <strong>{secret.email}</strong>. It is shown only now; the person must choose their own at first sign-in.</p>
-          <p><code className="secret">{secret.password}</code></p>
+          <div className="copy-row"><code className="secret">{secret.password}</code><CopyButton text={secret.password} /></div>
           <div className="row end"><button className="primary" onClick={() => setSecret(null)}>Done</button></div>
         </Dialog>)}
       {confirmTeam && <Confirm title="Delete team" danger confirmLabel="Delete" message={`Delete "${confirmTeam.name}"? Existing project members keep their access.`}
         onConfirm={act(() => api('DELETE', `/api/admin/teams/${confirmTeam.id}`))} onClose={() => setConfirmTeam(null)} />}
       {rename && <RenameTeam team={rename} onClose={() => setRename(null)} onSave={(n) => act(() => api('PATCH', `/api/admin/teams/${rename.id}`, { name: n }))()} />}
     </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(text); }
+    catch {
+      const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select();
+      try { document.execCommand('copy'); } catch { /* ignore */ }
+      document.body.removeChild(t);
+    }
+    setDone(true); setTimeout(() => setDone(false), 2000);
+  };
+  return (
+    <button type="button" className="copy-btn" onClick={() => void copy()} title="Copy to clipboard">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true">
+        {done ? <path d="m3.500 8.500 3 3 6-7" /> : <><rect x="5.500" y="5.500" width="8" height="9" rx="1.500" /><path d="M10.500 5.500v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h2" /></>}
+      </svg>{done ? 'Copied' : 'Copy'}
+    </button>
   );
 }
 

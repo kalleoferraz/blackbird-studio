@@ -4,6 +4,7 @@ import { go } from './App.tsx';
 import { ChangePassword } from './Login.tsx';
 import type { Language, Me, ProjectCard } from './types.ts';
 import { ago, formatBytes } from './format.ts';
+import { Brand } from './Brand.tsx';
 import { Dialog, errorText } from './ui.tsx';
 
 export const TYPES = [
@@ -20,7 +21,7 @@ export function Projects({ me, onLogout, onMe }: { me: Me; onLogout: () => void;
   if (password) return <ChangePassword onDone={(m) => { onMe(m); setPassword(false); }} onCancel={() => setPassword(false)} />;
   return (
     <div className="page">
-      <header className="topbar"><strong>Redaction Studio</strong><span className="grow" />
+      <header className="topbar"><Brand /><span className="grow" />
         <span className="muted">{me.user.displayName}</span>
         <button onClick={() => setPassword(true)}>Password</button><button onClick={onLogout}>Sign out</button></header>
       <div className="row"><h1 className="grow">Projects</h1><button className="primary" onClick={() => setCreating(true)}>New project</button></div>

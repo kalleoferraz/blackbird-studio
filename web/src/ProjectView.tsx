@@ -4,6 +4,7 @@ import { go } from './App.tsx';
 import { TYPES } from './Projects.tsx';
 import type { Language, Me, Member, ProjectCard } from './types.ts';
 import { ago, formatBytes } from './format.ts';
+import { BlackbirdIcon } from './Brand.tsx';
 import { Dialog, errorText } from './ui.tsx';
 
 export function ProjectView({ me, projectId, onLogout }: { me: Me; projectId: string; onLogout: () => void }) {
@@ -27,7 +28,7 @@ export function ProjectView({ me, projectId, onLogout }: { me: Me; projectId: st
 
   return (
     <div className="page">
-      <header className="topbar"><a href="#/">← Projects</a><span className="grow" />
+      <header className="topbar"><a href="#/" className="brand" title="Projects"><BlackbirdIcon /></a><a href="#/">← Projects</a><span className="grow" />
         <span className="muted">{me.user.displayName}</span><button onClick={onLogout}>Sign out</button></header>
       <div className="row"><div className="grow">
         <EditableText value={p.title} disabled={!author} className="h1" onSave={(v) => v.trim() && patch({ title: v.trim() })} />
