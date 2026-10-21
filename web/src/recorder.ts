@@ -43,21 +43,34 @@ export class MicRecorder {
     void this.ctx.close().catch(() => undefined);
   }
 
-  /** Stops, releases the microphone and encodes what was recorded. */
-  async finish(): Promise<{ mp3: Blob; durationMs: number }> {
+  /** Stops, releases the microphone and hands over what was recorded. */
+  async stop(): Promise<Take> {
     this.keeping = false;
     await new Promise((r) => setTimeout(r, 60)); // the last block is on its way from the audio thread
     const chunks = this.chunks;
     const rate = this.ctx.sampleRate;
     this.close();
     const frames = chunks.reduce((n, c) => n + c.length, 0);
-    const { createMp3Encoder } = await import('wasm-media-encoders');
-    const enc = await createMp3Encoder();
-    enc.configure({ sampleRate: rate, channels: 1, bitrate: MP3_KBPS as never });
-    const parts: Uint8Array[] = [];
-    for (const c of chunks) { const out = enc.encode([c]); if (out.length) parts.push(out.slice()); }
-    const tail = enc.finalize();
-    if (tail.length) parts.push(tail.slice());
-    return { mp3: new Blob(parts as BlobPart[], { type: 'audio/mpeg' }), durationMs: Math.round((frames / rate) * 1000) };
+    const samples = new Float32Array(frames);
+    let at = 0;
+    for (const c of chunks) { samples.set(c, at); at += c.length; }
+    return { samples, rate, durationMs: Math.round((frames / rate) * 1000) };
   }
+}
+
+/** A finished recording, before it is encoded. */
+export interface Take { samples: Float32Array; rate: number; durationMs: number }
+
+/** Encodes the part of a take between two times as an MP3. */
+export async function encodeMp3(take: Take, fromMs: number, toMs: number): Promise<Blob> {
+  const a = Math.max(0, Math.floor((fromMs / 1000) * take.rate)), b = Math.min(take.samples.length, Math.ceil((toMs / 1000) * take.rate));
+  const { createMp3Encoder } = await import('wasm-media-encoders');
+  const enc = await createMp3Encoder();
+  enc.configure({ sampleRate: take.rate, channels: 1, bitrate: MP3_KBPS as never });
+  const parts: Uint8Array[] = [];
+  const BLOCK = 16384;
+  for (let i = a; i < b; i += BLOCK) { const out = enc.encode([take.samples.subarray(i, Math.min(b, i + BLOCK))]); if (out.length) parts.push(out.slice()); }
+  const tail = enc.finalize();
+  if (tail.length) parts.push(tail.slice());
+  return new Blob(parts as BlobPart[], { type: 'audio/mpeg' });
 }

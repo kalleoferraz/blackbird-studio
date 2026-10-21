@@ -1,5 +1,5 @@
 // Recording a take for a cue: ask for the microphone, count 3-2-1, record until stopped, then hand the MP3 over.
-import { MicRecorder } from './recorder.ts';
+import { MicRecorder, encodeMp3, type Take } from './recorder.ts';
 import type { PlaybackStore } from './playback.ts';
 import { errorText } from './ui.tsx';
 
@@ -11,6 +11,8 @@ export async function recordTake(o: {
   store: PlaybackStore; cueId: string;
   /** Puts the playhead at the start of the cue. */
   seek: () => void;
+  /** Shows the recording for trimming; resolves with the part to keep, or null to throw the take away. */
+  review: (take: Take) => Promise<{ fromMs: number; toMs: number } | null>;
   upload: (mp3: Blob) => Promise<void>;
   onError: (message: string) => void;
 }): Promise<void> {
@@ -50,9 +52,12 @@ export async function recordTake(o: {
   store.pause();
   set('saving');
   try {
-    const { mp3, durationMs } = await mic.finish();
-    if (durationMs < MIN_TAKE_MS) o.onError('That recording was too short to keep.');
-    else await o.upload(mp3);
+    const take = await mic.stop();
+    if (take.durationMs < MIN_TAKE_MS) o.onError('That recording was too short to keep.');
+    else {
+      const keep = await o.review(take);
+      if (keep) await o.upload(await encodeMp3(take, keep.fromMs, keep.toMs));
+    }
   } catch (e) {
     o.onError(`The take could not be saved: ${errorText(e)}`);
   } finally {

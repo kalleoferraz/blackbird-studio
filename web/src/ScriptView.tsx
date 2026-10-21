@@ -12,6 +12,7 @@ import { NavBar } from './NavBar.tsx';
 import { NavContext, PlaybackStore } from './playback.ts';
 import { toNav } from './nav.ts';
 import { recordTake } from './recording.ts';
+import { TrimDialog, type TrimRequest } from './TrimDialog.tsx';
 import { AudioPlayer } from './audio-playback.ts';
 
 export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: string; segmentId?: string }) {
@@ -69,6 +70,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   const setEditing = useCallback((on: boolean) => setEditingN((n) => Math.max(0, n + (on ? 1 : -1))), []);
   const contentRef = useRef(content); contentRef.current = content;
   const onContentRef = useRef(onContent); onContentRef.current = onContent;
+  const [trim, setTrim] = useState<TrimRequest | null>(null);
   const record = useCallback((cueId: string) => {
     const c = contentRef.current;
     const si = c ? c.scenes.findIndex((s) => s.cues.some((q) => q.id === cueId)) : -1;
@@ -77,6 +79,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
     void recordTake({
       store: playback, cueId,
       seek: () => playback.seek({ segmentId: c.segment.id, scene: si, ms: q.startMs }),
+      review: (take) => new Promise((resolve) => setTrim({ take, text: q.text, resolve })),
       upload: async (mp3) => {
         onContentRef.current(await uploadFile<SegmentContent>('POST', `/api/cues/${cueId}/recording`, mp3));
         window.dispatchEvent(new Event('library-changed'));
@@ -169,6 +172,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
           onCharacters={() => void loadCharacters()} onError={setError} openDialog={setDialog} />
       </div>
       <NavBar store={playback} story={story} follow={follow} onFollow={setFollow} editing={editing} />
+      {trim && <TrimDialog req={trim} onDone={(keep) => { trim.resolve(keep); setTrim(null); }} />}
       {dialog && <CharacterDialog projectId={projectId} state={dialog} characters={characters} onClose={() => setDialog(null)}
         onSaved={() => { void loadCharacters(); if (segmentId) void api<SegmentContent>('GET', `/api/segments/${segmentId}`).then(setContent); }} onError={setError} />}
     </div>

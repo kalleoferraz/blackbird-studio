@@ -285,3 +285,10 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .remove-cue { padding: 2px; line-height: 0; color: var(--muted); } .remove-cue:hover { color: var(--danger); }
 .times .len.est { color: var(--faint); } .times .len.est:hover { color: var(--primary); }
 .audio-btn.has { color: #7ba167; } button.audio-btn.has:hover { color: #94bb7f; }
+
+/* Review of a new take: waveform with trim handles */
+.trim-text { margin: 0 0 12px; color: var(--text); font-style: italic; max-height: 4.5em; overflow: auto; }
+.trim-wave { position: relative; background: var(--bg, #0E0B10); border-radius: 6px; margin-bottom: 8px; touch-action: none; }
+.trim-wave canvas { display: block; }
+.trim-handle { position: absolute; top: 0; bottom: 0; width: 14px; margin-left: -7px; cursor: ew-resize; }
+.trim-handle::after { content: ''; position: absolute; left: 6px; top: 0; bottom: 0; width: 2px; background: #F6CF3D; }

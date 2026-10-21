@@ -100,6 +100,15 @@ export class PlaybackStore {
     this.last = now;
     const d = this.current();
     if (!d || !this.pos) return; // loading: the clock waits
+    if (this.rec?.phase === 'rec') {
+      // Recording: the playhead stays inside the cue, however long the take runs.
+      this.flat(d);
+      const f = this.flatFor?.byId.get(this.rec.cueId);
+      if (f) {
+        const hold = f.cue.startMs + Math.max(1, f.cue.lengthMs) - 1;
+        if (this.pos.scene === f.scene && this.pos.ms + dt > hold) { this.pos = { ...this.pos, ms: Math.max(this.pos.ms, hold) }; this.emit(); return; }
+      }
+    }
     const s = advance(d, this.pos, dt, this.order);
     if ('pos' in s) this.pos = s.pos;
     else if ('move' in s) this.apply(s.move);
