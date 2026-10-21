@@ -109,7 +109,7 @@ describe('library', () => {
   it('lists the managed folders at the root', async () => {
     const r = await call('ann', 'GET', `/api/projects/${ids.p}/library`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.deepEqual(r.body.folders.map((f: any) => f.name), ['characters', 'storyline']);
+    assert.deepEqual(r.body.folders.map((f: any) => f.name), ['Characters', 'Storyline']);
     assert.ok(r.body.folders.every((f: any) => f.managed));
     assert.equal((await call('cy', 'GET', `/api/projects/${ids.p}/library`)).status, 404);
   });
@@ -159,7 +159,7 @@ describe('library', () => {
     const wav = await post('ann', `/api/projects/${ids.p}/library/files?folder=&name=take.wav`, Buffer.from('RIFFxxxxWAVE'));
     assert.equal(wav.status, 415);
     assert.equal(wav.body.error, 'audio_later');
-    const bad = await post('ann', `/api/projects/${ids.p}/library/files?folder=storyline&name=a.txt`, Buffer.from('x'));
+    const bad = await post('ann', `/api/projects/${ids.p}/library/files?folder=Storyline&name=a.txt`, Buffer.from('x'));
     assert.equal(bad.status, 400);
     assert.equal((await post('cy', `/api/projects/${ids.p}/library/files?folder=&name=a.txt`, Buffer.from('y'))).status, 404);
   });
@@ -168,7 +168,7 @@ describe('library', () => {
     const f = await call('ann', 'POST', `/api/projects/${ids.p}/library/folders`, { parent: '', name: 'Research' });
     assert.equal(f.status, 201, JSON.stringify(f.body));
     assert.equal((await call('ann', 'POST', `/api/projects/${ids.p}/library/folders`, { parent: '', name: 'research' })).status, 409);
-    assert.equal((await call('ann', 'POST', `/api/projects/${ids.p}/library/folders`, { parent: 'storyline', name: 'x' })).status, 400);
+    assert.equal((await call('ann', 'POST', `/api/projects/${ids.p}/library/folders`, { parent: 'Storyline', name: 'x' })).status, 400);
     assert.equal((await call('ann', 'POST', `/api/projects/${ids.p}/library/folders`, { parent: '', name: '..' })).status, 400);
     await post('ann', `/api/projects/${ids.p}/library/files?folder=Research&name=a.txt`, Buffer.from('aaa'));
     const list = await call('ann', 'GET', `/api/projects/${ids.p}/library?folder=Research`);
@@ -179,7 +179,7 @@ describe('library', () => {
     const gone = await call('ann', 'DELETE', `/api/projects/${ids.p}/library/folders?path=Research&recursive=1`);
     assert.equal(gone.status, 200, JSON.stringify(gone.body));
     assert.equal(existsSync(path.join(root, ids.p!, 'Research')), false);
-    assert.equal((await call('ann', 'DELETE', `/api/projects/${ids.p}/library/folders?path=storyline`)).status, 400);
+    assert.equal((await call('ann', 'DELETE', `/api/projects/${ids.p}/library/folders?path=Storyline`)).status, 400);
   });
 
   it('deletes a file', async () => {
@@ -250,17 +250,17 @@ describe('cover', () => {
 });
 
 describe('character pictures', () => {
-  it('stores the picture under characters/{name}/pictures and reuses identical images', async () => {
+  it('stores the picture under Characters/{name}/pictures and reuses identical images', async () => {
     const ch = await call('ann', 'POST', `/api/projects/${ids.p}/characters`, { name: 'Marta' });
     ids.marta = ch.body.id;
     const r = await put('ann', `/api/characters/${ids.marta}/picture?name=marta.png`, png(300, 300, 7));
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.ok(existsSync(path.join(root, ids.p!, 'characters', 'Marta', 'pictures', 'marta.png')));
+    assert.ok(existsSync(path.join(root, ids.p!, 'Characters', 'Marta', 'pictures', 'marta.png')));
     const list = await call('ann', 'GET', `/api/projects/${ids.p}/characters`);
     assert.equal(list.body.characters.find((c: any) => c.id === ids.marta).pictureAssetId, r.body.pictureAssetId);
     const again = await put('ann', `/api/characters/${ids.marta}/picture?name=other.png`, png(300, 300, 7));
     assert.equal(again.body.pictureAssetId, r.body.pictureAssetId);
-    const tree = await call('ann', 'GET', `/api/projects/${ids.p}/library?folder=characters`);
+    const tree = await call('ann', 'GET', `/api/projects/${ids.p}/library?folder=Characters`);
     assert.deepEqual(tree.body.folders.map((f: any) => f.name), ['Marta', 'Narrator']);
     assert.equal((await call('ann', 'DELETE', `/api/assets/${r.body.pictureAssetId}`)).status, 409);
     assert.equal((await call('ann', 'DELETE', `/api/characters/${ids.marta}/picture`)).status, 200);
@@ -296,8 +296,36 @@ describe('folder rename', () => {
     assert.ok(existsSync(path.join(root, pid, 'New', 'big.png')) && existsSync(path.join(root, pid, 'New', 'big_600x467.png')));
     assert.equal((await call('ann', 'GET', `/api/assets/${list.body.files[0].id}/file?variant=light`)).status, 200);
     assert.equal((await call('ann', 'PATCH', `/api/projects/${pid}/library/folders`, { path: 'New', name: 'other' })).status, 409);
-    assert.equal((await call('ann', 'PATCH', `/api/projects/${pid}/library/folders`, { path: 'storyline', name: 'x' })).status, 400);
+    assert.equal((await call('ann', 'PATCH', `/api/projects/${pid}/library/folders`, { path: 'Storyline', name: 'x' })).status, 400);
     assert.equal((await call('ann', 'PATCH', `/api/projects/${pid}/library/folders`, { path: 'New', name: 'NEW' })).status, 200);
     assert.equal((await call('cy', 'PATCH', `/api/projects/${pid}/library/folders`, { path: 'NEW', name: 'z' })).status, 404);
+  });
+});
+
+describe('managed folder names', () => {
+  it('renames lower-case managed folders from older libraries, on disk and in the file paths', async () => {
+    const { renameSync } = await import('node:fs');
+    const { sql } = await import('drizzle-orm');
+    const { normalizeManagedFolders } = await import('../src/library/managed.js');
+    const pr = await call('ann', 'POST', '/api/projects', { type: 'audiobook', title: `Old ${run}`, language: 'en-US' });
+    const pid = pr.body.id;
+    const ch = await call('ann', 'POST', `/api/projects/${pid}/characters`, { name: 'Rita' });
+    const up = await put('ann', `/api/characters/${ch.body.id}/picture?name=rita.png`, png(300, 300, 9));
+    assert.equal(up.status, 200, JSON.stringify(up.body));
+    // Make the library look like one written before the rename.
+    renameSync(path.join(root, pid, 'Characters'), path.join(root, pid, 'characters'));
+    await withDb((db) => db.execute(sql`UPDATE asset SET path = CONCAT('characters', SUBSTRING(path, 11)), lightweight_path = IF(lightweight_path IS NULL, NULL, CONCAT('characters', SUBSTRING(lightweight_path, 11))) WHERE project_id = ${pid}`));
+    assert.ok(readdirSync(path.join(root, pid)).includes('characters'));
+    const done = await withDb((db) => normalizeManagedFolders(db, pid));
+    assert.equal(done.folders, 1);
+    assert.ok(done.files >= 1);
+    assert.ok(readdirSync(path.join(root, pid)).includes('Characters'));
+    assert.ok(existsSync(path.join(root, pid, 'Characters', 'Rita', 'pictures', 'rita.png')));
+    const rows = await withDb((db) => db.execute(sql`SELECT path FROM asset WHERE project_id = ${pid}`));
+    for (const r of (rows as unknown as [{ path: string }[]])[0]) assert.ok(r.path.startsWith('Characters/'), r.path);
+    const again = await withDb((db) => normalizeManagedFolders(db, pid));
+    assert.deepEqual(again, { folders: 0, files: 0 });
+    const list = await call('ann', 'GET', `/api/projects/${pid}/library`);
+    assert.deepEqual(list.body.folders.map((f: any) => f.name), ['Characters', 'Storyline']);
   });
 });

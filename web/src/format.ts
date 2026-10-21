@@ -62,3 +62,15 @@ export function formatMinutes(ms: number): string {
 export function formatTenths(ms: number): string {
   return `${(Math.round(ms / 100) / 10).toFixed(1)} s`;
 }
+
+/** Ids ordered by number of cues, most first; ties keep creation order. */
+export const cueCountOrder = (list: { id: string; cueCount?: number }[]): string[] =>
+  [...list].sort((a, b) => (b.cueCount ?? 0) - (a.cueCount ?? 0)).map((c) => c.id);
+/** The list in a remembered order; anything not in it (added since) goes last, in its own order. */
+export function inOrder<T extends { id: string }>(list: T[], ids: string[]): T[] {
+  const rank = new Map(ids.map((id, i) => [id, i] as const));
+  return [...list].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
+}
+
+/** "01" shows as "1" and "00A" as "A": the stored chapter index is padded for folder names, the screen is not. */
+export const plainIndex = (index: string) => index.replace(/^0+/, '') || index;

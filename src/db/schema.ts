@@ -199,7 +199,7 @@ export const character = mysqlTable(
     defaultColour: asciiChar('default_colour', { length: 7 }).notNull(), // #rrggbb
     pictureAssetId: ulid('picture_asset_id').references(() => asset.id, { onDelete: 'restrict' }),
     description: text('description'),
-    folder: varchar('folder', { length: 30 }).notNull(), // sanitized folder name under characters/, a number added on collision
+    folder: varchar('folder', { length: 30 }).notNull(), // sanitized folder name under Characters/, a number added on collision
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent as RMouseEvent } from 'react';
 import { api } from './api.ts';
 import type { Character, Cue, CueType, Lane, SegmentContent, Scene } from './types.ts';
 import { formatClock, formatMinutes, formatMs, formatSeconds, formatTenths, parseLength } from './format.ts';
 import { Confirm, MenuButton, errorText, type MenuItem } from './ui.tsx';
+import { useNav, useStoreValue } from './playback.ts';
 
 interface Props {
   content: SegmentContent;
@@ -56,7 +57,7 @@ export function Writing({ content, characters, readOnly, onContent, onError, onN
   return (
     <div className="writing">
       {content.scenes.map((seg, i) => (
-        <SceneBlock key={seg.id} seg={seg} index={i} total={total} lanes={lanes} characters={characters} readOnly={readOnly}
+        <SceneBlock key={seg.id} seg={seg} index={i} total={total} segmentId={content.segment.id} lanes={lanes} characters={characters} readOnly={readOnly}
           draft={draft} setDraft={setDraft} startDraft={startDraft} saveDraft={saveDraft}
           call={call} setConfirm={setConfirm} onNewCharacter={onNewCharacter} />
       ))}
@@ -73,8 +74,8 @@ interface DraftApi {
   startDraft: (sceneId: string, afterCueId: string | null) => void; saveDraft: (text: string, more: boolean) => Promise<boolean>;
 }
 
-function SceneBlock({ seg, index, total, lanes, characters, readOnly, draft, setDraft, startDraft, saveDraft, call, setConfirm, onNewCharacter }: DraftApi & {
-  seg: Scene; index: number; total: number; lanes: Map<string, Lane>; characters: Character[]; readOnly: boolean; call: Call;
+function SceneBlock({ seg, index, total, segmentId, lanes, characters, readOnly, draft, setDraft, startDraft, saveDraft, call, setConfirm, onNewCharacter }: DraftApi & {
+  seg: Scene; index: number; total: number; segmentId: string; lanes: Map<string, Lane>; characters: Character[]; readOnly: boolean; call: Call;
   setConfirm: (c: any) => void; onNewCharacter: Props['onNewCharacter'];
 }) {
   // The scene's title is stored in `label`; it is edited from the scene's "⋯" menu.
@@ -85,6 +86,7 @@ function SceneBlock({ seg, index, total, lanes, characters, readOnly, draft, set
     setEditingTitle(false);
     if (label.trim() !== (seg.label ?? '')) void call('PATCH', `/api/scenes/${seg.id}`, { label: label.trim() || null });
   };
+  const nav = useNav();
   const menu: MenuItem[] = [
     { label: seg.label ? 'Edit title' : 'Add title', onClick: () => setEditingTitle(true) },
     { label: 'Merge with previous', disabled: index === 0, onClick: () => void call('POST', `/api/scenes/${seg.id}/merge-previous`) },
@@ -94,7 +96,7 @@ function SceneBlock({ seg, index, total, lanes, characters, readOnly, draft, set
       run: async () => { await call('DELETE', `/api/scenes/${seg.id}`); } }) },
   ];
   return (
-    <section className="scene">
+    <section className="scene" data-scene-id={seg.id}>
       <div className="scene-head">
         {editingTitle ? (
           <input className="seg-label" autoFocus placeholder="Scene title" maxLength={100} value={label} onChange={(e) => setLabel(e.target.value)}
@@ -129,7 +131,8 @@ function SceneBlock({ seg, index, total, lanes, characters, readOnly, draft, set
               {i === 0 && draftAfter(null)}
               {i === 0 && !readOnly && <Gap seg={seg} afterId={null} canSplit={false} call={call} onAdd={add} before />}
               <CueBlock cue={c} lane={lanes.get(c.laneId)} characters={characters} readOnly={readOnly} call={call} isLast={i === seg.cues.length - 1}
-                startDraft={() => startDraft(seg.id, c.id)} setConfirm={setConfirm} onNewCharacter={onNewCharacter} />
+                startDraft={() => startDraft(seg.id, c.id)} setConfirm={setConfirm} onNewCharacter={onNewCharacter}
+                onSeek={() => nav?.store.seek({ segmentId, scene: index, ms: c.startMs })} />
               {draftAfter(c.id)}
               {!readOnly && <Gap seg={seg} afterId={c.id} canSplit={i < seg.cues.length - 1} nextId={seg.cues[i + 1]?.id} call={call} onAdd={add} last={i === seg.cues.length - 1} />}
             </div>
@@ -156,11 +159,13 @@ function Gap({ seg, afterId, canSplit, nextId, call, onAdd, last, before, always
   );
 }
 
-function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, drafting, setConfirm, onNewCharacter }: {
+function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, drafting, setConfirm, onNewCharacter, onSeek }: {
   cue: Cue; lane?: Lane; characters: Character[]; readOnly: boolean; call: Call; isLast: boolean; startDraft: () => void;
   /** Present for a cue that only exists in the browser so far. */
   drafting?: { patch: (b: Partial<Draft>) => void; save: (text: string, more: boolean) => Promise<boolean>; cancel: () => void };
   setConfirm: (c: any) => void; onNewCharacter: Props['onNewCharacter'];
+  /** A click on the cue puts the playhead at its start. */
+  onSeek?: () => void;
 }) {
   const [editing, setEditing] = useState(!!drafting);
   const [text, setText] = useState(cue.text);
@@ -176,6 +181,27 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
   useEffect(() => {
     if (editing && area.current) { area.current.style.height = 'auto'; area.current.style.height = area.current.scrollHeight + 'px'; }
   }, [editing, text]);
+
+  // While a cue is being edited, the navigation bar's Follow pauses (the script must not scroll away from the text field).
+  const nav = useNav();
+  const setNavEditing = nav?.setEditing;
+  useEffect(() => {
+    if (!editing || !setNavEditing) return;
+    setNavEditing(true);
+    return () => setNavEditing(false);
+  }, [editing, setNavEditing]);
+  // The playhead, per cue: -1 waiting, 0..1000 while playing (overlapping cues play side by side), 2000 once finished.
+  const play = useStoreValue(nav?.store, (st) => st.cueState(cue.id), -1);
+  const isNow = play >= 0 && play <= 1000, played = play === 2000;
+  // A click puts the playhead at the cue, but a double click (which starts editing) must not move it, so the seek waits a moment.
+  const seekTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(seekTimer.current), []);
+  const onCueClick = (e: RMouseEvent) => {
+    if (editing || drafting || !onSeek) return;
+    if ((e.target as HTMLElement).closest('button, input, textarea, a, .menu')) return;
+    clearTimeout(seekTimer.current);
+    seekTimer.current = setTimeout(onSeek, 220);
+  };
 
   const character = characters.find((c) => c.id === cue.characterId);
   const colour = lane?.colour ?? character?.colour ?? '#888888';
@@ -219,7 +245,8 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
   const name = cue.type === 'speech' ? (character?.name ?? lane?.title ?? 'No character') : (lane?.title ?? TYPE_LABEL[cue.type]);
   const nameStyle = { color: black ? 'var(--text)' : colour };
   return (
-    <div className={'cue ' + cue.type + (editing ? ' editing' : '')}>
+    <div className={'cue ' + cue.type + (editing ? ' editing' : '') + (isNow ? ' playhead' : '') + (played ? ' played' : '')} data-cue-id={cue.id} onClick={onCueClick}>
+      {isNow && <span className="progress" style={{ height: `${play / 10}%` }} />}
       <span className={'strip' + (black ? ' black' : '')} style={{ background: colour }} />
       <div className="tagcol">
       <div className="tag">
@@ -229,6 +256,7 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
           <MenuButton className="name" items={charMenu} title="Character"><b style={nameStyle}>{name}</b></MenuButton> :
           <span className="name"><b style={nameStyle}>{name}</b></span>}
       </div>
+      {isNow && !editing && <span className="now-tag">now</span>}
       {editing && (
         <div className="edit-actions">
           <button className="round cancel" title="Cancel (Esc)" onMouseDown={(e) => e.preventDefault()} onClick={cancel}>
@@ -247,7 +275,7 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (drafting && !text.trim()) cancel(); else void save(true); }
             }} />
         ) : (
-          <div className={'cue-text' + (cue.text ? '' : ' empty')} onDoubleClick={() => !readOnly && setEditing(true)}>
+          <div className={'cue-text' + (cue.text ? '' : ' empty')} onDoubleClick={() => { clearTimeout(seekTimer.current); if (!readOnly) setEditing(true); }}>
             {cue.text ? (cue.type === 'speech' && !character?.isNarrator ? '— ' : '') + cue.text : placeholder}</div>)}
       </div>
       <div className="times">

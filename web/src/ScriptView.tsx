@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as RPointerEvent } from 'react';
 import { api } from './api.ts';
 import { go } from './App.tsx';
 import type { Character, Me, ProjectCard, SegmentContent, Story } from './types.ts';
 import { StoryIndex } from './StoryIndex.tsx';
 import { Writing } from './Writing.tsx';
 import { CharacterDialog, RightPanel, type CharacterDialogState } from './RightPanel.tsx';
-import { ago } from './format.ts';
+import { ago, cueCountOrder, inOrder } from './format.ts';
 import { BlackbirdIcon } from './Brand.tsx';
 import { errorText, useLocalState } from './ui.tsx';
+import { NavBar } from './NavBar.tsx';
+import { NavContext, PlaybackStore } from './playback.ts';
+import { toNav } from './nav.ts';
 
 export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: string; segmentId?: string }) {
   const [project, setProject] = useState<ProjectCard | null>(null);
@@ -22,7 +25,14 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   const [saved, setSaved] = useState('');
 
   const loadProject = useCallback(async () => { try { setProject(await api<ProjectCard>('GET', `/api/projects/${projectId}`)); } catch (e) { setError(errorText(e)); } }, [projectId]);
-  const loadCharacters = useCallback(async () => setCharacters((await api<{ characters: Character[] }>('GET', `/api/projects/${projectId}/characters`)).characters), [projectId]);
+  // The Characters tab lists the most used first. The order is taken once, when the page loads the list, and kept after that.
+  const charOrder = useRef<{ projectId: string; ids: string[] } | null>(null);
+  const loadCharacters = useCallback(async () => {
+    const list = (await api<{ characters: Character[] }>('GET', `/api/projects/${projectId}/characters`)).characters;
+    if (charOrder.current?.projectId !== projectId) charOrder.current = { projectId, ids: cueCountOrder(list) };
+    setCharacters(list);
+  }, [projectId]);
+  const panelCharacters = useMemo(() => inOrder(characters, charOrder.current?.ids ?? []), [characters]);
   const loadStory = useCallback(async () => setStory(await api<Story>('GET', `/api/projects/${projectId}/story`)), [projectId]);
 
   useEffect(() => { void loadProject(); void loadCharacters(); void loadStory().catch((e) => setError(errorText(e))); }, [loadProject, loadCharacters, loadStory]);
@@ -47,6 +57,52 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   const onContent = (c: SegmentContent) => { setContent(c); refreshAfterEdit(); };
   const openSegment = (id: string) => go(`/p/${projectId}/s/${id}`);
 
+  // ---- navigation bar: one playhead for the whole script view ----
+  const [playback] = useState(() => new PlaybackStore());
+  useEffect(() => () => playback.dispose(), [playback]);
+  const [follow, setFollow] = useLocalState('rs.follow', true);
+  const [editingN, setEditingN] = useState(0);
+  const editing = editingN > 0;
+  const setEditing = useCallback((on: boolean) => setEditingN((n) => Math.max(0, n + (on ? 1 : -1))), []);
+  const nav = useMemo(() => ({ store: playback, setEditing }), [playback, setEditing]);
+  const order = useMemo(() => (story ? story.chapters.flatMap((c) => c.segments.map((x) => x.id)) : []), [story]);
+  useEffect(() => playback.setOrder(order), [playback, order]);
+  const sub = playback.subscribe;
+  const wanted = useSyncExternalStore(sub, () => playback.wantedSegment() ?? '');
+  const curCue = useSyncExternalStore(sub, () => playback.currentCueId());
+  const curScene = useSyncExternalStore(sub, () => playback.currentSceneId());
+  // Opening a segment yourself (index, address, back button) puts the playhead at its start. Moves the bar makes
+  // itself are marked in `expectedNav` so they are not mistaken for that.
+  const expectedNav = useRef<string | null>(null);
+  useEffect(() => {
+    if (!segmentId) return;
+    if (expectedNav.current === segmentId) { expectedNav.current = null; return; }
+    if (playback.wantedSegment() !== segmentId) playback.jump(segmentId, 'start', false);
+  }, [segmentId, playback]);
+  // Follow: the open segment goes where the playhead goes (not while a cue is being edited).
+  useEffect(() => {
+    const w = playback.wantedSegment();
+    if (follow && !editing && w && segmentId && w !== segmentId) { expectedNav.current = w; openSegment(w); }
+  }, [follow, editing, wanted, segmentId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The playhead's segment: the open one when its content is loaded, otherwise fetched for the bar alone.
+  useEffect(() => {
+    if (!wanted) return;
+    if (content && content.segment.id === wanted) { playback.setData(toNav(content)); return; }
+    if (follow && !editing) return; // the view is on its way there and supplies the content
+    let live = true;
+    api<SegmentContent>('GET', `/api/segments/${wanted}`).then((c) => live && playback.setData(toNav(c))).catch(() => undefined);
+    return () => { live = false; };
+  }, [wanted, content, follow, editing, playback]);
+  // Follow: scroll to the cue (or empty scene) under the playhead when it changes, and when Follow is switched on.
+  const scrolled = useRef('');
+  useEffect(() => {
+    if (!follow || editing) return;
+    const id = `${follow}|${curCue || curScene}`;
+    if (scrolled.current === id) return;
+    const el = (curCue && document.querySelector(`[data-cue-id="${curCue}"]`)) || (curScene && document.querySelector(`[data-scene-id="${curScene}"]`));
+    if (el) { scrolled.current = id; (el as HTMLElement).scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+  }, [follow, editing, curCue, curScene, content]);
+
   const renameTitle = async (kind: 'chapter' | 'segment', id: string, title: string) => {
     try { await api(`PATCH`, `/api/${kind === 'chapter' ? 'chapters' : 'segments'}/${id}`, { title }); await loadStory(); if (segmentId) setContent(await api<SegmentContent>('GET', `/api/segments/${segmentId}`)); }
     catch (e) { setError(errorText(e)); }
@@ -63,6 +119,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   if (!project || !story) return <div className="center muted">Loading…</div>;
 
   return (
+    <NavContext.Provider value={nav}>
     <div className="script">
       <header className="topbar">
         <a href="#/" className="brand" title="Projects"><BlackbirdIcon /></a>
@@ -88,12 +145,14 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
             </div>
           ) : <p className="muted">Select or add a segment.</p>}
         </main>
-        <RightPanel projectId={projectId} characters={characters} readOnly={!!readOnly}
+        <RightPanel projectId={projectId} characters={panelCharacters} readOnly={!!readOnly}
           onCharacters={() => void loadCharacters()} onError={setError} openDialog={setDialog} />
       </div>
+      <NavBar store={playback} story={story} follow={follow} onFollow={setFollow} editing={editing} />
       {dialog && <CharacterDialog projectId={projectId} state={dialog} characters={characters} onClose={() => setDialog(null)}
         onSaved={() => { void loadCharacters(); if (segmentId) void api<SegmentContent>('GET', `/api/segments/${segmentId}`).then(setContent); }} onError={setError} />}
     </div>
+    </NavContext.Provider>
   );
 }
 

@@ -2,6 +2,7 @@ import { buildApp } from './app.js';
 import { bootstrapAccounts } from '../auth/accounts.js';
 import { sessionConfigured } from '../auth/session.js';
 import { runMigrations } from '../db/migrate.js';
+import { normalizeAllManagedFolders } from '../library/managed.js';
 
 const app = buildApp();
 
@@ -12,6 +13,8 @@ try {
     await runMigrations();
     app.log.info('Database migrations are up to date');
     await bootstrapAccounts(app.log);
+    // Libraries made before the managed folders were spelled Characters and Storyline are renamed here.
+    await normalizeAllManagedFolders(app.log);
   } else {
     app.log.warn('DB_HOST is not set: skipping database migrations');
   }

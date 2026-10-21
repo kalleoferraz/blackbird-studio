@@ -1,0 +1,136 @@
+// Navigation logic for the Script View, with no React in it so it can be tested on its own.
+//
+// The playhead is a position inside the open segment: a scene and a time inside that scene (ms).
+// Four levels exist in the story (chapter > segment > scene > cue); the bar moves by cue, scene and segment.
+import type { SegmentContent } from './types.ts';
+
+/** Past this much time inside a unit, "previous" goes to the unit's own start; before it, to the previous unit. */
+export const RESTART_MS = 3000;
+
+export type Level = 'cue' | 'scene' | 'segment';
+export interface NavCue { id: string; startMs: number; lengthMs: number }
+export interface NavScene { id: string; startMs: number; lengthMs: number; cues: NavCue[] }
+export interface NavSegment { id: string; scenes: NavScene[] }
+/** `ms` is counted from the start of the scene. */
+export interface Pos { segmentId: string; scene: number; ms: number }
+/** Where to land when a move enters another segment (whose content is not loaded yet). */
+export type Arrive = 'start' | 'first-cue' | 'last-cue' | 'last-scene';
+export type Move = { pos: Pos } | { segmentId: string; arrive: Arrive };
+export type Step = { pos: Pos } | { move: Move } | { end: Pos };
+
+export function toNav(c: SegmentContent): NavSegment {
+  return {
+    id: c.segment.id,
+    scenes: c.scenes.map((s) => ({
+      id: s.id, startMs: s.startMs, lengthMs: s.lengthMs,
+      cues: s.cues.map((q) => ({ id: q.id, startMs: q.startMs, lengthMs: q.lengthMs })).sort((a, b) => a.startMs - b.startMs),
+    })),
+  };
+}
+
+// A scene index and a time in one number, so positions compare with < and >. A scene is at most 99 minutes (< 1e8 ms).
+const key = (scene: number, ms: number) => scene * 1e8 + ms;
+export const posKey = (p: Pos) => key(p.scene, p.ms);
+
+export interface FlatCue { scene: number; cue: NavCue; k: number }
+/** Every cue of the segment in script order. */
+export function flatCues(seg: NavSegment): FlatCue[] {
+  const out: FlatCue[] = [];
+  seg.scenes.forEach((s, i) => s.cues.forEach((cue) => out.push({ scene: i, cue, k: key(i, cue.startMs) })));
+  return out;
+}
+/** Index of the last cue that starts at or before the position; -1 before the first cue. */
+export function currentIndex(flat: FlatCue[], p: Pos): number {
+  const k = posKey(p);
+  let r = -1;
+  for (let i = 0; i < flat.length; i++) { if (flat[i]!.k <= k) r = i; else break; }
+  return r;
+}
+/** Keeps a position inside the segment (after edits that shorten or remove scenes). */
+export function clampPos(seg: NavSegment, p: Pos): Pos {
+  const scene = Math.min(Math.max(p.scene, 0), Math.max(0, seg.scenes.length - 1));
+  const len = seg.scenes[scene]?.lengthMs ?? 0;
+  return { segmentId: seg.id, scene, ms: Math.max(0, Math.min(p.ms, len)) };
+}
+
+function around(order: string[], id: string): { prev?: string; next?: string } {
+  const i = order.indexOf(id);
+  if (i < 0) return {};
+  return { prev: order[i - 1], next: order[i + 1] };
+}
+
+/** Where "previous" goes at the given level, or null when there is nowhere to go (the very beginning). */
+export function prevMove(level: Level, seg: NavSegment, p: Pos, order: string[]): Move | null {
+  const { prev } = around(order, seg.id);
+  const here = (scene: number, ms: number): Move => ({ pos: { segmentId: seg.id, scene, ms } });
+  const atStart = p.scene === 0 && p.ms === 0;
+  if (level === 'cue') {
+    const flat = flatCues(seg), cur = currentIndex(flat, p), k = posKey(p);
+    if (cur >= 0) {
+      const c = flat[cur]!;
+      if (k - c.k > RESTART_MS) return here(c.scene, c.cue.startMs);
+      for (let j = cur - 1; j >= 0; j--) if (flat[j]!.k < c.k) return here(flat[j]!.scene, flat[j]!.cue.startMs);
+      if (prev) return { segmentId: prev, arrive: 'last-cue' };
+      return k > c.k ? here(c.scene, c.cue.startMs) : null;
+    }
+    if (prev) return { segmentId: prev, arrive: 'last-cue' };
+    return atStart ? null : here(0, 0);
+  }
+  if (level === 'scene') {
+    if (p.ms > RESTART_MS) return here(p.scene, 0);
+    if (p.scene > 0) return here(p.scene - 1, 0);
+    if (prev) return { segmentId: prev, arrive: 'last-scene' };
+    return p.ms > 0 ? here(p.scene, 0) : null;
+  }
+  const elapsed = (seg.scenes[p.scene]?.startMs ?? 0) + p.ms;
+  if (elapsed > RESTART_MS) return here(0, 0);
+  if (prev) return { segmentId: prev, arrive: 'start' };
+  return atStart ? null : here(0, 0);
+}
+
+/** Where "next" goes at the given level, or null at the very end. */
+export function nextMove(level: Level, seg: NavSegment, p: Pos, order: string[]): Move | null {
+  const { next } = around(order, seg.id);
+  const here = (scene: number, ms: number): Move => ({ pos: { segmentId: seg.id, scene, ms } });
+  if (level === 'cue') {
+    const k = posKey(p);
+    const f = flatCues(seg).find((x) => x.k > k);
+    if (f) return here(f.scene, f.cue.startMs);
+    return next ? { segmentId: next, arrive: 'first-cue' } : null;
+  }
+  if (level === 'scene') {
+    if (p.scene + 1 < seg.scenes.length) return here(p.scene + 1, 0);
+    return next ? { segmentId: next, arrive: 'start' } : null;
+  }
+  return next ? { segmentId: next, arrive: 'start' } : null;
+}
+
+/** The position a move into this (now loaded) segment lands on. */
+export function arrive(seg: NavSegment, how: Arrive): Pos {
+  const start: Pos = { segmentId: seg.id, scene: 0, ms: 0 };
+  if (how === 'start') return start;
+  if (how === 'last-scene') return { segmentId: seg.id, scene: Math.max(0, seg.scenes.length - 1), ms: 0 };
+  const flat = flatCues(seg);
+  const f = how === 'first-cue' ? flat[0] : flat[flat.length - 1];
+  return f ? { segmentId: seg.id, scene: f.scene, ms: f.cue.startMs } : start;
+}
+
+/** Walks the clock forward by cue lengths, so time passes with or without audio. */
+export function advance(seg: NavSegment, p: Pos, dtMs: number, order: string[]): Step {
+  let scene = p.scene, ms = p.ms + dtMs;
+  for (;;) {
+    const len = seg.scenes[scene]?.lengthMs ?? 0;
+    if (ms < len) return { pos: { segmentId: seg.id, scene, ms } };
+    if (scene + 1 < seg.scenes.length) { ms -= len; scene++; continue; }
+    const { next } = around(order, seg.id);
+    if (next) return { move: { segmentId: next, arrive: 'start' } };
+    return { end: { segmentId: seg.id, scene, ms: len } };
+  }
+}
+
+/** Numbers for the position readout: scene n of N, cue n of N (cue 0 = none started yet in this scene). */
+export function where(seg: NavSegment, p: Pos) {
+  const sc = seg.scenes[p.scene];
+  const cues = sc?.cues ?? [];
+  return { scene: p.scene + 1, scenes: seg.scenes.length, cue: cues.filter((c) => c.startMs <= p.ms).length, cues: cues.length, sceneMs: p.ms, sceneLengthMs: sc?.lengthMs ?? 0 };
+}

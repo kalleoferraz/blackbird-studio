@@ -2,9 +2,8 @@ import { useRef, useState } from 'react';
 import { api } from './api.ts';
 import type { Story, StoryChapter } from './types.ts';
 import { Confirm, MenuButton, PlusIcon, errorText, useLocalState, type MenuItem } from './ui.tsx';
+import { plainIndex } from './format.ts';
 
-/** "01" shows as "1" and "00A" as "A": the stored index is padded for folder names, the screen is not. */
-const plainIndex = (index: string) => index.replace(/^0+/, '') || index;
 
 type Drag = { kind: 'chapter'; id: string } | { kind: 'segment'; id: string } | null;
 

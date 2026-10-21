@@ -8,6 +8,7 @@ import {
   type AssetRow,
 } from '../library/files.js';
 import { blobStore, cleanPath, PATH_MAX } from '../storage/blob-store.js';
+import { CHARACTERS, MANAGED_ROOTS, isCharactersRoot, isStoryline, pictureFolder } from '../library/managed.js';
 import { accessTo, accessToEntity, checkId } from './access.js';
 import { authenticate } from './auth-routes.js';
 import { HttpError, asBody, badRequest } from './http.js';
@@ -62,17 +63,15 @@ async function characterFolders(q: Q, projectId: string): Promise<string[]> {
 }
 
 const lower = (s: string) => s.toLowerCase();
-const isStoryline = (p: string) => p === 'storyline' || lower(p).startsWith('storyline/');
 
-/** Folders the app manages: nothing can be uploaded to, created in or removed from storyline or the characters root. */
+/** Folders the app manages: nothing can be uploaded to, created in or removed from Storyline or the Characters root. */
 function lockedForWrite(folder: string): boolean {
-  return isStoryline(folder) || lower(folder) === 'characters';
+  return isStoryline(folder) || isCharactersRoot(folder);
 }
 function lockedForDelete(folder: string, characterDirs: string[]): boolean {
-  const l = lower(folder);
-  if (isStoryline(folder) || l === 'characters') return true;
-  const parts = l.split('/');
-  return parts[0] === 'characters' && parts.length === 2 && characterDirs.some((c) => lower(c) === parts[1]);
+  if (isStoryline(folder) || isCharactersRoot(folder)) return true;
+  const parts = lower(folder).split('/');
+  return parts[0] === lower(CHARACTERS) && parts.length === 2 && characterDirs.some((c) => lower(c) === parts[1]);
 }
 
 function rawBody(request: FastifyRequest): Buffer {
@@ -161,10 +160,10 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       }
       for (const d of await blobStore().listDirs(projectId, folder)) addFolder(d);
       if (!folder) {
-        addFolder('storyline');
-        addFolder('characters');
+        // The managed folders are named first, so their spelling wins over any older one on disk or in the rows.
+        MANAGED_ROOTS.forEach((n) => names.set(lower(n), n));
       }
-      if (lower(folder) === 'characters') charDirs.forEach(addFolder);
+      if (isCharactersRoot(folder)) charDirs.forEach(addFolder);
       const usage = await usageOf(db, projectId, here.map((a) => a.id));
       const folders = [...names.values()]
         .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
@@ -193,8 +192,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       const rows = await assetsUnder(db, projectId, parent);
       const taken = new Set([...siblings, ...rows.map((a) => a.path.slice(parent ? parent.length + 1 : 0).split('/')[0]!)].map(lower));
       if (!parent) {
-        taken.add('storyline');
-        taken.add('characters');
+        MANAGED_ROOTS.forEach((n) => taken.add(lower(n)));
       }
       if (taken.has(lower(name))) throw new HttpError(409, 'name_taken', 'A file or folder with that name already exists here.');
       await blobStore().mkdir(projectId, path);
@@ -247,8 +245,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       const rows = await assetsUnder(db, projectId, parent);
       const taken = new Set([...siblings, ...rows.map((a) => a.path.slice(parent ? parent.length + 1 : 0).split('/')[0]!)].map(lower));
       if (!parent) {
-        taken.add('storyline');
-        taken.add('characters');
+        MANAGED_ROOTS.forEach((n) => taken.add(lower(n)));
       }
       taken.delete(lower(from.slice(parent ? parent.length + 1 : 0)));
       if (taken.has(lower(name))) throw new HttpError(409, 'name_taken', 'A file or folder with that name already exists here.');
@@ -376,7 +373,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
         assetId = dup.id; // the same image is simply used again
       } else {
         const stored = await storeFile(db, {
-          projectId: access.projectId, folder: `characters/${c.folder}/pictures`, name: cleanFileName(name), data, only: ['image'], maxBytes: MAX_PICTURE,
+          projectId: access.projectId, folder: pictureFolder(c.folder), name: cleanFileName(name), data, only: ['image'], maxBytes: MAX_PICTURE,
         });
         assetId = stored.asset.id;
       }

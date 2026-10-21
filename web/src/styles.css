@@ -150,6 +150,8 @@ body.resizing { user-select: none; cursor: col-resize; }
 .tree-main { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; border: 0; background: none; padding: 3px 4px; color: var(--text); text-align: left; }
 .tree-icon { flex: none; width: 22px; height: 22px; border-radius: 4px; overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: .95rem; }
 .tree-icon img { width: 100%; height: 100%; object-fit: cover; }
+/* Folder icons are a quiet yolk, not the loudest thing in the tree; a hovered row brings them up */
+.tree-icon.folder svg { opacity: .55; transition: opacity .12s; } .tree-row:hover .tree-icon.folder svg { opacity: .9; }
 .details-card { position: relative; display: flex; gap: 22px; align-items: flex-start; } .details-main { flex: 1; min-width: 0; } .details-main .row { margin-top: 16px; }
 .library.panel-body { padding-left: 4px; padding-right: 6px; }
 .open-script { position: absolute; top: 16px; right: 18px; }
@@ -197,3 +199,39 @@ label.check input[type=checkbox] { width: auto; flex: none; }
 .story .row-item:hover .more { background: var(--primary); color: var(--on-primary); font-weight: 700; }
 /* Character names wrap instead of being cut off */
 .name { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
+
+/* ---- Navigation bar (Script View): position left, controls centre, clock and Follow right ---- */
+.navbar { flex: none; container-type: inline-size; background: var(--panel2); border-top: 1px solid var(--line); }
+.nav { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 8px 14px; }
+.nav-pos { position: relative; min-width: 0; overflow: hidden; white-space: nowrap; font-size: .8rem; color: var(--muted); }
+.nav-pos .measure { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; white-space: nowrap; }
+.nav-pos .lv { display: inline-block; margin-right: 6px; }
+.nav-pos .measure .lv::before, .nav-pos .shown .lv + .lv::before { content: "›"; margin-right: 6px; color: var(--faint); }
+.nav-pos b { color: var(--text); font-weight: 600; } .nav-pos .lv.last b { color: var(--primary); }
+.nav-ctrls { display: flex; align-items: center; gap: 2px; }
+.nav-ctrls button { width: 36px; height: 36px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text); display: grid; place-items: center; }
+.nav-ctrls button:hover:not(:disabled) { background: var(--line); }
+.nav-ctrls button:disabled { color: var(--faint); opacity: .55; }
+.nav-ctrls button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.nav-ctrls svg { width: 22px; height: 22px; fill: currentColor; }
+.nav-ctrls button.play { width: 44px; height: 44px; border-radius: 50%; background: var(--primary); color: var(--on-primary); margin: 0 8px; }
+.nav-ctrls button.play:hover:not(:disabled) { background: #f6ad32; } .nav-ctrls button.play:disabled { background: var(--line); color: var(--faint); }
+.nav-right { display: flex; justify-content: flex-end; align-items: center; gap: 12px; min-width: 0; font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nav-clock b { color: var(--text); }
+.nav-follow { display: flex; align-items: center; gap: 6px; margin: 0; font-size: inherit; color: inherit; cursor: pointer; user-select: none; }
+.nav-follow input { width: auto; padding: 0; margin: 0; accent-color: var(--primary); }
+.nav-follow.paused { opacity: .5; }
+@container (max-width: 640px) { .nav-clock { display: none; } }
+@container (max-width: 470px) { .nav-right { display: none; } .nav { grid-template-columns: 1fr; gap: 6px; justify-items: center; } .nav-pos { text-align: center; max-width: 100%; } .nav-ctrls { justify-content: center; } }
+
+/* The cue under the playhead (yolk edge, soft fill that grows) and cues already passed */
+.cue { cursor: pointer; }
+.cue > .tagcol, .cue > .cue-main, .cue > .times { position: relative; }
+.cue .progress { position: absolute; left: 0; right: 0; top: 0; background: rgba(239, 155, 11, .14); border-radius: 5px 5px 0 0; pointer-events: none; } /* fills from the top down */
+/* A cue that has finished sinks into the shadow; hovering or editing it brings it back */
+.cue.played { opacity: .5; transition: opacity .15s; }
+.cue.played:hover, .cue.played.editing { opacity: 1; }
+.cue.playhead::after { content: ""; position: absolute; inset: 0; border: 2px solid var(--primary); border-radius: 5px; pointer-events: none; }
+.cue.playhead .strip { background: var(--primary) !important; outline: 0; }
+.now-tag { align-self: flex-start; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: var(--primary); color: var(--on-primary); }
+textarea.cue-text { cursor: text; }

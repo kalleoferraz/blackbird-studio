@@ -1,4 +1,4 @@
-/** The Blackbird logo (docs: "Logo design"), cropped to the badge. */
+/** The Blackbird logo (docs: "Logo design"), the whole original canvas so the rim is not cut off. */
 export function BlackbirdIcon() {
   return <img className="logo" src="/app/logo.svg" alt="Blackbird" width="28" height="28" />;
 }
