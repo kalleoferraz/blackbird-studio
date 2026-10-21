@@ -17,6 +17,7 @@ import {
   addClip,
   chooseClip,
   clipsOfCues,
+  learnSpeechRate,
   createSegment,
   deleteCue,
   deleteScene,
@@ -466,10 +467,11 @@ export function registerStoryRoutes(app: FastifyInstance): void {
     });
     const stored = await withDb((db) => storeFile(db, { projectId, folder, name, data, only: ['audio'], maxBytes: MAX_UPLOAD }));
     if (stored.asset.status === 'pending') kickAudioJobs(request.log);
-    const result = await segmentWrite(request, 'cue', id, async (tx) => ({
-      created: await addClip(tx, id, { assetId: stored.asset.id, keepCueLength: false, choose: true, origin: 'human-recorded' }),
-      path: stored.asset.path,
-    }));
+    const result = await segmentWrite(request, 'cue', id, async (tx) => {
+      const created = await addClip(tx, id, { assetId: stored.asset.id, keepCueLength: false, choose: true, origin: 'human-recorded' });
+      await learnSpeechRate(tx, id, created); // a speech take teaches the project how fast it is spoken
+      return { created, path: stored.asset.path };
+    });
     return reply.code(201).send(result);
   });
 

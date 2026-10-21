@@ -8,6 +8,7 @@ import type { FastifyInstance } from 'fastify';
 const root = mkdtempSync(path.join(tmpdir(), 'clip-'));
 process.env.LIBRARY_ROOT = root;
 
+const { sql } = await import('drizzle-orm');
 const { buildApp } = await import('../src/server/app.js');
 const { audioJobsIdle, stopAudioJobs } = await import('../src/audio/jobs.js');
 const { wavFile } = await import('./support/wav.js');
@@ -185,5 +186,30 @@ describe('clips', () => {
     const left = cueOf(await content(), cueId);
     assert.deepEqual(left.clips.map((k: any) => k.id), [second.body.created]);
     void first;
+  });
+
+  it('learns the speech rate from recorded speech takes, and only from them', async () => {
+    const { encodeWavToMp3 } = await import('../src/audio/encode.js');
+    const { estimateSpeechMs } = await import('../src/shared/estimate.js');
+    const proj = async () => (await withDb((db) => db.execute(sql`SELECT speech_units AS u, speech_ms AS m FROM project WHERE id = ${ids.p}`)) as any)[0][0];
+    const before = await proj();
+    const c = await content();
+    const made = await call('ann', 'POST', `/api/scenes/${c.scenes[0].id}/cues`, { type: 'speech', text: 'Once upon a time there was a quiet little house by the sea.' });
+    const cueId = made.body.created;
+    const mp3 = Buffer.from(await encodeWavToMp3(wavFile({ seconds: 6, seed: 41, sampleRate: 44100, channels: 1 })));
+    const r = await call('ann', 'POST', `/api/cues/${cueId}/recording`, mp3, { 'content-type': 'application/octet-stream' });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    const after = await proj();
+    assert.ok(Number(after.u) > Number(before.u) + 10, JSON.stringify([before, after]));
+    assert.ok(Math.abs(Number(after.m) - Number(before.m) - 6000) < 150);
+    // An sfx take teaches nothing.
+    const sfx = await sfxCue('wind');
+    await call('ann', 'POST', `/api/cues/${sfx}/recording`, Buffer.from(await encodeWavToMp3(wavFile({ seconds: 2, seed: 42, sampleRate: 44100, channels: 1 }))), { 'content-type': 'application/octet-stream' });
+    assert.equal(Number((await proj()).u), Number(after.u));
+    // New estimates use the learned rate; the language's rate alone would give another number.
+    const text = 'A new line of speech for this project, about the same length.';
+    const again = await call('ann', 'POST', `/api/scenes/${c.scenes[0].id}/cues`, { type: 'speech', text });
+    const len = cueOf(again.body, again.body.created).lengthMs;
+    assert.notEqual(len, estimateSpeechMs(text, 'en-US'));
   });
 });

@@ -17,6 +17,7 @@
  */
 import {
   bigint,
+  double,
   boolean,
   customType,
   datetime,
@@ -120,6 +121,9 @@ export const project = mysqlTable('project', {
   subtitle: varchar('subtitle', { length: 200 }),
   visibility: mysqlEnum('visibility', ['private', 'public']).notNull().default('private'),
   language: varchar('language', { length: 10 }).notNull(), // BCP 47, such as pt-BR
+  // What the recorded speech takes taught the speech-length estimate: speaking units and the milliseconds they took (see src/shared/estimate.ts).
+  speechUnits: double('speech_units').notNull().default(0),
+  speechMs: bigint('speech_ms', { mode: 'number', unsigned: true }).notNull().default(0),
   // Cyclic with asset: the constraint is emitted as a separate ALTER TABLE by drizzle-kit.
   coverAssetId: ulid('cover_asset_id').references((): AnyMySqlColumn => asset.id, {
     onDelete: 'set null',

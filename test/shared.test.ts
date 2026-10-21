@@ -52,3 +52,18 @@ test('palette colours are valid, unique, and the next colour skips used ones and
   assert.ok(!PALETTE.slice(0, -1).some((c) => c.hex === '#000000'));
   assert.notEqual(nextColour(PALETTE.filter((c) => c.hex !== '#000000').map((c) => c.hex)).toLowerCase(), '#000000');
 });
+
+test('the speech estimate follows what the project has recorded', async () => {
+  const { msPerUnit, speechUnits } = await import('../src/shared/estimate.js');
+  const text = 'Hello there, how are you doing today my friend?';
+  const base = estimateSpeechMs(text, 'en-US');
+  assert.equal(estimateSpeechMs(text, 'en-US', { units: 0, ms: 0 }), base);
+  const units = speechUnits(text, 'en-US');
+  // A slower speaker: the same text took 50 % longer, over a lot of recordings.
+  const slow = { units: 1000, ms: 1000 * 300 };
+  assert.ok(msPerUnit('en-US', slow) > 270 && msPerUnit('en-US', slow) < 300);
+  assert.ok(estimateSpeechMs(text, 'en-US', slow) > base * 1.3);
+  // A line break is worth the syllables its pause is worth.
+  assert.ok(speechUnits('One\n\nTwo', 'en-US') > speechUnits('One Two', 'en-US'));
+  assert.ok(units > 8);
+});

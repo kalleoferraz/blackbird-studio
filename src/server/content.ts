@@ -2,13 +2,13 @@
  * The content of a segment: scenes, cues and the lanes created for them (Bible, section 5: Cue types and
  * lanes, Lane rules, Cue length and clip playback). All functions run inside the caller's transaction.
  */
-import { and, asc, desc, eq, inArray, max } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, max, sql } from 'drizzle-orm';
 import { basename } from 'node:path';
 import type { Q, Tx } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { closeGap, openGap, PARKED } from '../db/positions.js';
 import { asset, assetPeaks, chapter, character, clip, cue, lane, project, segment, scene } from '../db/schema.js';
-import { MIN_CUE_MS, estimateSpeechMs } from '../shared/estimate.js';
+import { MIN_CUE_MS, estimateSpeechMs, msPerUnit, speechUnits, type LearnedSpeech } from '../shared/estimate.js';
 import { ripple, type RippleCue } from '../shared/ripple.js';
 import { HttpError, badRequest, notFound } from './http.js';
 
@@ -44,9 +44,12 @@ const cueColumns = {
 
 // ---- loading ----------------------------------------------------------------------
 
-export async function segmentContext(tx: Tx, segmentId: string): Promise<{ projectId: string; language: string; segmentId: string }> {
+export async function segmentContext(
+  tx: Tx,
+  segmentId: string,
+): Promise<{ projectId: string; language: string; segmentId: string; speech: LearnedSpeech }> {
   const rows = await tx
-    .select({ projectId: project.id, language: project.language })
+    .select({ projectId: project.id, language: project.language, units: project.speechUnits, ms: project.speechMs })
     .from(segment)
     .innerJoin(chapter, eq(chapter.id, segment.chapterId))
     .innerJoin(project, eq(project.id, chapter.projectId))
@@ -54,7 +57,7 @@ export async function segmentContext(tx: Tx, segmentId: string): Promise<{ proje
     .limit(1);
   const row = rows[0];
   if (!row) throw notFound();
-  return { ...row, segmentId };
+  return { projectId: row.projectId, language: row.language, segmentId, speech: { units: row.units, ms: row.ms } };
 }
 
 export async function sceneRow(tx: Tx, sceneId: string) {
@@ -281,7 +284,7 @@ export async function insertCue(tx: Tx, sceneId: string, input: NewCue, userId: 
   if (characterId) await characterIn(tx, ctx.projectId, characterId);
 
   const text = input.text ?? '';
-  const lengthMs = type === 'speech' ? estimateSpeechMs(text, ctx.language) : MIN_CUE_MS;
+  const lengthMs = type === 'speech' ? estimateSpeechMs(text, ctx.language, ctx.speech) : MIN_CUE_MS;
   const desired = after ? after.startMs + after.lengthMs : 0;
   const laneId = await laneFor(tx, ctx, { type, characterId, sceneId, startMs: desired, lengthMs });
   const id = newUlid();
@@ -334,11 +337,11 @@ export async function updateCue(tx: Tx, cueId: string, patch: CuePatch): Promise
     lengthAuto = false;
   } else if (patch.lengthAuto === true) {
     lengthAuto = true;
-    lengthMs = type === 'speech' ? estimateSpeechMs(text, ctx.language) : MIN_CUE_MS;
+    lengthMs = type === 'speech' ? estimateSpeechMs(text, ctx.language, ctx.speech) : MIN_CUE_MS;
   } else if (patch.lengthAuto === false) {
     lengthAuto = false;
   } else if (lengthAuto && type === 'speech' && (patch.text !== undefined || patch.type !== undefined)) {
-    lengthMs = estimateSpeechMs(text, ctx.language);
+    lengthMs = estimateSpeechMs(text, ctx.language, ctx.speech);
   } else if (lengthAuto && type !== 'speech' && patch.type !== undefined) {
     lengthMs = MIN_CUE_MS; // sfx and music follow their clip; with none they start at the minimum
   }
@@ -697,3 +700,26 @@ export async function removeClip(tx: Tx, clipId: string): Promise<void> {
 }
 
 export const CLIP_ORIGIN_LIST: readonly string[] = CLIP_ORIGINS;
+
+/**
+ * Teaches the project's speech-length estimate from a recorded take: the take's length and the speaking units of the
+ * cue's text are added to the project's totals, so later estimates follow how this project is actually spoken.
+ * The whole take counts, pauses included, since pauses are part of natural speech. Only speech cues with text teach;
+ * a take far from the current rate (a take left running, a test click) is ignored.
+ */
+export async function learnSpeechRate(tx: Tx, cueId: string, clipId: string): Promise<void> {
+  const { current, projectId } = await cueProject(tx, cueId);
+  if (current.type !== 'speech') return;
+  const take = (await tx.select({ lengthMs: clip.lengthMs }).from(clip).where(eq(clip.id, clipId)).limit(1))[0];
+  const proj = (await tx.select({ language: project.language, units: project.speechUnits, ms: project.speechMs }).from(project).where(eq(project.id, projectId)).limit(1))[0];
+  if (!take || !proj) return;
+  const units = speechUnits(current.textMd, proj.language);
+  if (units <= 0) return;
+  const rate = take.lengthMs / units;
+  const now = msPerUnit(proj.language, { units: proj.units, ms: proj.ms });
+  if (rate < now * 0.4 || rate > now * 2.5) return;
+  await tx
+    .update(project)
+    .set({ speechUnits: sql`${project.speechUnits} + ${units}`, speechMs: sql`${project.speechMs} + ${take.lengthMs}` })
+    .where(eq(project.id, projectId));
+}
