@@ -2,6 +2,7 @@ import { buildApp } from './app.js';
 import { bootstrapAccounts } from '../auth/accounts.js';
 import { sessionConfigured } from '../auth/session.js';
 import { runMigrations } from '../db/migrate.js';
+import { startAudioJobs } from '../audio/jobs.js';
 import { normalizeAllManagedFolders } from '../library/managed.js';
 
 const app = buildApp();
@@ -15,6 +16,8 @@ try {
     await bootstrapAccounts(app.log);
     // Libraries made before the managed folders were spelled Characters and Storyline are renamed here.
     await normalizeAllManagedFolders(app.log);
+    // MP3 playback copies: put back what a restart interrupted and run the queue.
+    await startAudioJobs(app.log);
   } else {
     app.log.warn('DB_HOST is not set: skipping database migrations');
   }

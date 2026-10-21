@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, assetUrl, uploadFile } from './api.ts';
-import { formatBytes } from './format.ts';
+import { formatBytes, formatDuration } from './format.ts';
 import type { LibFile, LibFolder, LibListing } from './types.ts';
 import { Confirm, Dialog, MenuButton, errorText, useLocalState } from './ui.tsx';
 
@@ -39,6 +39,19 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
   }, [fetchList]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { void reloadOpen(['', ...open]); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // While an audio file is still being encoded, look again every two seconds (Bible: the browser polls the status).
+  const working = Object.entries(lists).filter(([, l]) => l.files.some((f) => f.status === 'pending' || f.status === 'processing')).map(([p]) => p);
+  const workingKey = working.join('\n');
+  useEffect(() => {
+    if (!working.length) return;
+    const timer = setTimeout(() => { for (const p of working) void fetchList(p); }, 2000);
+    return () => clearTimeout(timer);
+  }, [workingKey, lists]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const retry = async (file: LibFile, folder: string) => {
+    try { await api('POST', `/api/assets/${file.id}/retry`); await fetchList(folder); } catch (e) { onError(errorText(e)); }
+  };
 
   const toggle = (path: string) => {
     if (expanded.has(path)) { setOpen(open.filter((o) => o !== path)); return; }
@@ -98,11 +111,15 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
                 <button className="tree-main" onClick={() => setPreview(file)} title={file.usage?.length ? `Used by ${file.usage.join(', ')}` : file.name}>
                   <span className="tree-icon">{file.kind === 'image' ? <img src={assetUrl(file.id, file.hasLightweight)} alt="" loading="lazy" /> : KIND_ICON[file.kind]}</span>
                   <span className="grow"><span className="lib-name">{file.name}</span>
-                    <span className="muted small lib-meta">{formatBytes(file.size)}{file.width ? ` · ${file.width}×${file.height}` : ''}{file.usage?.length ? ` · ${file.usage.join(', ')}` : ''}</span></span>
+                    <span className="muted small lib-meta">{formatBytes(file.size)}{file.width ? ` · ${file.width}×${file.height}` : ''}{file.durationMs ? ` · ${formatDuration(file.durationMs)}` : ''}{file.usage?.length ? ` · ${file.usage.join(', ')}` : ''}
+                    {(file.status === 'pending' || file.status === 'processing') && <span className="lib-status working"> · <span className="spinner" aria-hidden /> {file.format === 'wav' ? 'making the MP3…' : 'preparing…'}</span>}
+                    {file.status === 'failed' && <span className="lib-status failed" title={file.error ?? ''}> · encoding failed</span>}</span></span>
                 </button>
                 <MenuButton className="more show" title="File" items={[
-                  { label: file.kind === 'image' ? 'Preview' : 'Details', onClick: () => setPreview(file) },
-                  { label: 'Download', onClick: () => { window.location.href = assetUrl(file.id, false, true); } },
+                  { label: file.kind === 'image' ? 'Preview' : file.kind === 'audio' ? 'Play' : 'Details', onClick: () => setPreview(file) },
+                  { label: file.kind === 'audio' && file.format === 'wav' ? 'Download WAV' : 'Download', onClick: () => { window.location.href = assetUrl(file.id, false, true); } },
+                  ...(file.kind === 'audio' && file.hasLightweight ? [{ label: 'Download MP3', onClick: () => { window.location.href = assetUrl(file.id, true, true); } }] : []),
+                  ...(file.status === 'failed' && !readOnly ? [{ label: 'Retry encoding', onClick: () => void retry(file, l.folder) }] : []),
                   ...(readOnly ? [] : ['sep' as const, { label: 'Delete…', danger: true, disabled: !!file.usage?.length, hint: file.usage?.length ? 'in use' : undefined, onClick: () => setRemoveFile(file) }]),
                 ]}>⋯</MenuButton>
               </div>))}
@@ -119,9 +136,14 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
 
       {preview && <Dialog title={preview.name} wide onClose={() => setPreview(null)}>
         {preview.kind === 'image' ? <div className="preview"><img src={assetUrl(preview.id)} alt={preview.name} /></div>
+          : preview.kind === 'audio' ? (
+            preview.status === 'ready' || preview.format === 'mp3'
+              ? <audio controls preload="none" style={{ width: '100%' }} src={assetUrl(preview.id, preview.hasLightweight)} />
+              : <p className="muted">{preview.status === 'failed' ? `The MP3 could not be made: ${preview.error ?? 'unknown error'}` : 'The MP3 playback copy is being made…'}</p>)
           : <p className="muted">No preview for this kind of file.</p>}
         <p className="muted small">{preview.path} · {formatBytes(preview.size)}{preview.width ? ` · ${preview.width}×${preview.height}` : ''}
-          {preview.sizeLightweight ? ` · reduced copy ${formatBytes(preview.sizeLightweight)}` : ''}</p>
+          {preview.durationMs ? ` · ${formatDuration(preview.durationMs)}` : ''}{preview.sampleRate ? ` · ${(preview.sampleRate / 1000).toString().replace(/\.0+$/, '')} kHz ${preview.channels === 1 ? 'mono' : 'stereo'}` : ''}
+          {preview.sizeLightweight ? ` · ${preview.kind === 'audio' ? 'MP3 copy' : 'reduced copy'} ${formatBytes(preview.sizeLightweight)}` : ''}</p>
         <div className="row end"><a className="button" href={assetUrl(preview.id, false, true)}>Download</a><button onClick={() => setPreview(null)}>Close</button></div>
       </Dialog>}
 

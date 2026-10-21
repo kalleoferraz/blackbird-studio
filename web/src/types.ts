@@ -52,6 +52,8 @@ export interface LibFolder { name: string; path: string; managed: boolean; writa
 export interface LibFile {
   id: string; name: string; path: string; kind: 'audio' | 'image' | 'video' | 'document' | 'other';
   size: number; sizeLightweight: number | null; hasLightweight: boolean; width: number | null; height: number | null;
+  status: 'pending' | 'processing' | 'ready' | 'failed'; hasPeaks: boolean; error: string | null;
+  format: string | null; durationMs: number | null; sampleRate: number | null; channels: number | null;
   fileState: 'ok' | 'missing' | 'changed'; earlierCover: boolean; createdAt: string; usage?: string[];
 }
 export interface LibListing { folder: string; canEdit: boolean; writable: boolean; folders: LibFolder[]; files: LibFile[] }

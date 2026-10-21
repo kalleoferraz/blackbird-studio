@@ -3,6 +3,9 @@ import { and, eq, like, sql } from 'drizzle-orm';
 import type { Q } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { asset } from '../db/schema.js';
+import { AudioError } from '../audio/errors.js';
+import { parseMp3 } from '../audio/mp3.js';
+import { parseWav, wavSamples } from '../audio/wav.js';
 import { inspectImage } from '../images/inspect.js';
 import { lightweightName } from '../images/naming.js';
 import { processImage } from '../images/process.js';
@@ -97,6 +100,9 @@ function finalName(name: string, d: Detected): string {
 
 export const sha256 = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
 
+/** The playback copy of a WAV: the same base name with .mp3 (Bible, section 6). */
+export const mp3Name = (name: string): string => splitName(name).base + '.mp3';
+
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, '\\$&');
 
 /** A path not used by any asset (master or lightweight) in this project: `name`, then `name (2)`, ... */
@@ -152,21 +158,42 @@ export async function storeFile(q: Q, o: StoreOptions): Promise<Stored> {
   if (o.data.byteLength > o.maxBytes) {
     throw new HttpError(413, 'too_large', `The file is larger than ${Math.round(o.maxBytes / (1024 * 1024))} MB.`);
   }
-  const hash = sha256(o.data);
-  const existing = await findByHash(q, o.projectId, hash);
+  const bytesHash = sha256(o.data);
+  const existing = await findByHash(q, o.projectId, bytesHash);
   if (existing) return { duplicate: true, asset: existing };
 
   const d = await detect(o.name, o.data);
-  if (d.kind === 'audio') {
-    throw new HttpError(415, 'audio_later', 'Audio files are not supported yet; they come with the audio iteration.');
-  }
   if (o.only && !o.only.includes(d.kind)) {
     throw new HttpError(415, 'unsupported_type', o.only.includes('image') ? 'Choose a JPEG, PNG, WebP, SVG or GIF image.' : 'This kind of file is not accepted here.');
   }
 
+  let hash = bytesHash;
   let light: { data: Uint8Array; width: number; height: number; format: string } | null = null;
   let info: Record<string, unknown> = {};
-  if (d.kind === 'image' && d.format !== 'svg') {
+  let wavMaster = false;
+  if (d.kind === 'audio') {
+    const ext = d.ext.toLowerCase();
+    if (ext !== '.wav' && ext !== '.mp3') throw new HttpError(415, 'unsupported_audio', 'Only WAV and MP3 files are accepted for now.');
+    try {
+      if (ext === '.wav') {
+        const w = parseWav(o.data);
+        wavMaster = true;
+        // The hash covers the samples only (Bible, section 6), so the same recording with other tags is the same file.
+        hash = sha256(wavSamples(o.data, w));
+        info = { format: 'wav', durationMs: w.durationMs, sampleRate: w.sampleRate, channels: w.channels, bitDepth: w.bitDepth, sampleFormat: w.sampleFormat };
+      } else {
+        const m = parseMp3(o.data);
+        info = { format: 'mp3', durationMs: m.durationMs, sampleRate: m.sampleRate, channels: m.channels, bitrateKbps: m.bitrateKbps };
+      }
+    } catch (e) {
+      if (e instanceof AudioError) throw new HttpError(e.status, e.code, e.message);
+      throw e;
+    }
+    if (hash !== bytesHash) {
+      const same = await findByHash(q, o.projectId, hash);
+      if (same) return { duplicate: true, asset: same };
+    }
+  } else if (d.kind === 'image' && d.format !== 'svg') {
     const r = await processImage(o.data, { lib: 'wasm-vips', name: o.name, pool: resizePool() });
     if (r.status === 'failed') throw new HttpError(422, 'image_unreadable', `The image could not be read: ${r.error.message}.`);
     const i = r.inspection;
@@ -177,7 +204,7 @@ export async function storeFile(q: Q, o: StoreOptions): Promise<Stored> {
   }
 
   const wanted = finalName(cleanFileName(o.name), d);
-  const derived = (n: string) => (light ? lightweightName(n, light.width, light.height) : null);
+  const derived = (n: string) => (light ? lightweightName(n, light.width, light.height) : wavMaster ? mp3Name(n) : null);
   let name = wanted;
   if (o.exactName) {
     const free = await freeName(q, o.projectId, o.folder, wanted, derived);
@@ -209,7 +236,7 @@ export async function storeFile(q: Q, o: StoreOptions): Promise<Stored> {
       sizeLightweight: light ? light.data.byteLength : null,
       lightweightPath: lightPath,
       mediaInfo: info,
-      status: 'ready',
+      status: d.kind === 'audio' ? 'pending' : 'ready', // audio waits for its peaks, and a WAV for its MP3 copy (audio/jobs.ts)
       fileState: 'ok',
       claimedBy: null,
       claimedAt: null,
@@ -240,14 +267,15 @@ export async function removeFiles(a: Pick<AssetRow, 'projectId' | 'path' | 'ligh
 /** Moves a master (and its derived copy) to a new path, in the database and on disk. */
 export async function moveAsset(q: Q, a: AssetRow, toPath: string): Promise<void> {
   const blobs = blobStore();
-  const toLight = a.lightweightPath ? join(dirOf(toPath), renameDerived(a.lightweightPath.slice(a.lightweightPath.lastIndexOf('/') + 1), toPath)) : null;
+  const toLight = a.lightweightPath ? join(dirOf(toPath), renameDerived(a.lightweightPath.slice(a.lightweightPath.lastIndexOf('/') + 1), toPath, a.mediaKind)) : null;
   await blobs.rename(a.projectId, a.path, toPath);
   if (a.lightweightPath && toLight) await blobs.rename(a.projectId, a.lightweightPath, toLight).catch(() => undefined);
   await q.update(asset).set({ path: toPath, lightweightPath: toLight, updatedAt: new Date() }).where(eq(asset.id, a.id));
 }
 
 /** The derived name for a renamed master: keeps the `_WxH` part of the old derived name. */
-function renameDerived(oldDerivedName: string, newMasterPath: string): string {
+function renameDerived(oldDerivedName: string, newMasterPath: string, kind: MediaKind): string {
+  if (kind === 'audio') return mp3Name(newMasterPath.slice(newMasterPath.lastIndexOf('/') + 1));
   const m = /_(\d+x\d+)(\.[^.]*)?$/.exec(oldDerivedName);
   const { base, ext } = splitName(newMasterPath.slice(newMasterPath.lastIndexOf('/') + 1));
   return `${base}_${m ? m[1] : '0x0'}${ext}`;

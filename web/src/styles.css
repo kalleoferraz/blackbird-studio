@@ -227,7 +227,7 @@ label.check input[type=checkbox] { width: auto; flex: none; }
 /* The cue under the playhead (yolk edge, soft fill that grows) and cues already passed */
 .cue { cursor: pointer; }
 .cue > .tagcol, .cue > .cue-main, .cue > .times { position: relative; }
-.cue .progress { position: absolute; left: 0; right: 0; top: 0; background: rgba(239, 155, 11, .14); border-radius: 5px 5px 0 0; pointer-events: none; } /* fills from the top down */
+.cue .progress { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(239, 155, 11, .14); border-radius: 5px 0 0 5px; pointer-events: none; }
 /* A cue that has finished sinks into the shadow; hovering or editing it brings it back */
 .cue.played { opacity: .5; transition: opacity .15s; }
 .cue.played:hover, .cue.played.editing { opacity: 1; }
@@ -235,3 +235,9 @@ label.check input[type=checkbox] { width: auto; flex: none; }
 .cue.playhead .strip { background: var(--primary) !important; outline: 0; }
 .now-tag { align-self: flex-start; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: var(--primary); color: var(--on-primary); }
 textarea.cue-text { cursor: text; }
+
+/* ---- audio files in the library ---- */
+.lib-status.working { color: var(--primary); }
+.lib-status.failed { color: #e5675f; }
+.spinner { display: inline-block; width: 9px; height: 9px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -1px; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

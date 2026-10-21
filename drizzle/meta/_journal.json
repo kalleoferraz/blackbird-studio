@@ -141,6 +141,13 @@
       "when": 1792580460242,
       "tag": "0019_swap_scene_segment",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1792612000000,
+      "tag": "0020_asset_peaks",
+      "breakpoints": true
     }
   ]
 }

@@ -74,3 +74,10 @@ export function inOrder<T extends { id: string }>(list: T[], ids: string[]): T[]
 
 /** "01" shows as "1" and "00A" as "A": the stored chapter index is padded for folder names, the screen is not. */
 export const plainIndex = (index: string) => index.replace(/^0+/, '') || index;
+
+/** A length as m:ss, or h:mm:ss from an hour on (0:07, 3:42, 1:02:09). */
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000)), h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60;
+  const two = (n: number) => String(n).padStart(2, '0');
+  return h ? `${h}:${two(m)}:${two(sec)}` : `${m}:${two(sec)}`;
+}

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { deflateSync } from 'node:zlib';
@@ -10,6 +10,10 @@ const root = mkdtempSync(path.join(tmpdir(), 'lib-'));
 process.env.LIBRARY_ROOT = root;
 
 const { buildApp } = await import('../src/server/app.js');
+const { audioJobsIdle, kickAudioJobs, requeueAudio, stopAudioJobs } = await import('../src/audio/jobs.js');
+const { wavFile } = await import('./support/wav.js');
+const { hostname } = await import('node:os');
+const { sql } = await import('drizzle-orm');
 const { runMigrations } = await import('../src/db/migrate.js');
 const { withDb } = await import('../src/db/client.js');
 const { createUser } = await import('../src/auth/accounts.js');
@@ -88,6 +92,7 @@ before(async () => {
 after(async () => {
   await app.close();
   await closeResizePool();
+  await stopAudioJobs();
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -152,13 +157,16 @@ describe('library', () => {
     assert.equal(r.body.hasLightweight, false);
   });
 
-  it('stores documents as they are and defers audio', async () => {
+  it('stores documents as they are and checks audio', async () => {
     const doc = await post('ann', `/api/projects/${ids.p}/library/files?folder=&name=notes.txt`, Buffer.from('hello'));
     assert.equal(doc.status, 201);
     assert.equal(doc.body.kind, 'document');
     const wav = await post('ann', `/api/projects/${ids.p}/library/files?folder=&name=take.wav`, Buffer.from('RIFFxxxxWAVE'));
-    assert.equal(wav.status, 415);
-    assert.equal(wav.body.error, 'audio_later');
+    assert.equal(wav.status, 422);
+    assert.equal(wav.body.error, 'audio_unreadable');
+    const flac = await post('ann', `/api/projects/${ids.p}/library/files?folder=&name=take.flac`, Buffer.from('fLaC0000'));
+    assert.equal(flac.status, 415);
+    assert.equal(flac.body.error, 'unsupported_audio');
     const bad = await post('ann', `/api/projects/${ids.p}/library/files?folder=Storyline&name=a.txt`, Buffer.from('x'));
     assert.equal(bad.status, 400);
     assert.equal((await post('cy', `/api/projects/${ids.p}/library/files?folder=&name=a.txt`, Buffer.from('y'))).status, 404);
@@ -327,5 +335,164 @@ describe('managed folder names', () => {
     assert.deepEqual(again, { folders: 0, files: 0 });
     const list = await call('ann', 'GET', `/api/projects/${pid}/library`);
     assert.deepEqual(list.body.folders.map((f: any) => f.name), ['Characters', 'Storyline']);
+  });
+});
+
+describe('audio files', () => {
+  const peaksOf = async (id: string) => call('ann', 'GET', `/api/assets/${id}/peaks`);
+  const up = (name: string, data: Buffer, folder = '') => post('ann', `/api/projects/${ids.aud}/library/files?folder=${encodeURIComponent(folder)}&name=${encodeURIComponent(name)}`, data);
+  const info = async (id: string) => (await call('ann', 'GET', `/api/assets/${id}`)).body;
+  const wav = wavFile({ seconds: 2, seed: 5 });
+
+  it('stores a WAV, reads its header and makes the MP3 playback copy', async () => {
+    const pr = await call('ann', 'POST', '/api/projects', { type: 'audiobook', title: `Aud ${run}`, language: 'en-US' });
+    ids.aud = pr.body.id;
+    const r = await up('take.wav', wav);
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.body.kind, 'audio');
+    assert.ok(['pending', 'processing', 'ready'].includes(r.body.status));
+    assert.deepEqual([r.body.format, r.body.durationMs, r.body.sampleRate, r.body.channels], ['wav', 2000, 48000, 2]);
+    ids.take = r.body.id;
+    await audioJobsIdle();
+    const a = await info(ids.take);
+    assert.equal(a.status, 'ready');
+    assert.equal(a.hasLightweight, true);
+    assert.ok(a.sizeLightweight > 10000 && a.sizeLightweight < wav.length);
+    assert.ok(existsSync(path.join(root, ids.aud!, 'take.wav')) && existsSync(path.join(root, ids.aud!, 'take.mp3')));
+    const light = await call('ann', 'GET', `/api/assets/${ids.take}/file?variant=light`);
+    assert.equal(light.res.headers['content-type'], 'audio/mpeg');
+    assert.equal(light.res.rawPayload.length, a.sizeLightweight);
+    const part = await app.inject({ method: 'GET', url: `/api/assets/${ids.take}/file?variant=light`, headers: { cookie: cookies.ann!, range: 'bytes=0-99' } });
+    assert.equal(part.statusCode, 206);
+    assert.equal(part.rawPayload.length, 100);
+    const orig = await call('ann', 'GET', `/api/assets/${ids.take}/file?download=1`);
+    assert.equal(orig.res.headers['content-type'], 'audio/wav');
+    assert.equal(orig.res.rawPayload.length, wav.length);
+    const list = await call('ann', 'GET', `/api/projects/${ids.aud}/library`);
+    assert.deepEqual(list.body.files.map((f: any) => f.name), ['take.wav']); // the playback copy is not a library file
+    assert.equal((await call('cy', 'GET', `/api/assets/${ids.take}`)).status, 404);
+  });
+
+  it('serves the waveform: one byte per 100 ms, on a decibel scale', async () => {
+    const a = await info(ids.take);
+    assert.equal(a.hasPeaks, true);
+    const r = await peaksOf(ids.take);
+    assert.equal(r.status, 200);
+    assert.equal(r.res.headers['content-type'], 'application/octet-stream');
+    assert.equal(r.res.headers['x-peaks-step-ms'], '100');
+    assert.equal(r.res.rawPayload.length, 20); // 2 s
+    // the tone is at 0.6 of full scale, about -4.4 dB: byte 255 * (60 - 4.4) / 60 = 236
+    for (const v of r.res.rawPayload) assert.ok(Math.abs(v - 236) <= 2, `byte ${v}`);
+    const again = await app.inject({ method: 'GET', url: `/api/assets/${ids.take}/peaks`, headers: { cookie: cookies.ann!, 'if-none-match': String(r.res.headers.etag) } });
+    assert.equal(again.statusCode, 304);
+    assert.equal((await call('cy', 'GET', `/api/assets/${ids.take}/peaks`)).status, 404);
+  });
+
+  it('refuses a recording it already has, even with other tags, and unusable files', async () => {
+    const same = await up('copy.wav', wavFile({ seconds: 2, seed: 5, list: true }));
+    assert.equal(same.status, 409);
+    assert.equal(same.body.error, 'already_in_library');
+    assert.equal(same.body.details?.assetId ?? same.body.assetId, ids.take);
+    assert.equal((await up('cut.wav', wavFile({ cut: 3000 }))).status, 422);
+    assert.equal((await up('six.wav', wavFile({ channels: 3 }))).status, 415);
+  });
+
+  it('keeps an uploaded MP3 as it is, without a second copy', async () => {
+    const mp3 = (await call('ann', 'GET', `/api/assets/${ids.take}/file?variant=light`)).res.rawPayload;
+    const r = await up('song.mp3', mp3, '');
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.deepEqual([r.body.hasLightweight, r.body.format], [false, 'mp3']);
+    assert.ok(Math.abs(r.body.durationMs - 2000) < 60);
+    await audioJobsIdle(); // its peaks are made from the decoded MP3
+    const a = await info(r.body.id);
+    assert.deepEqual([a.status, a.hasLightweight, a.hasPeaks], ['ready', false, true]);
+    assert.ok(!existsSync(path.join(root, ids.aud!, 'song.mp3.mp3')));
+    ids.song = r.body.id;
+  });
+
+  it('names the playback copy after the master, and numbers on a clash', async () => {
+    const r = await up('take.wav', wavFile({ seconds: 1, seed: 6 }));
+    assert.equal(r.status, 201);
+    assert.equal(r.body.name, 'take (2).wav');
+    await audioJobsIdle();
+    assert.ok(existsSync(path.join(root, ids.aud!, 'take (2).mp3')));
+  });
+
+  it('moves the playback copy with a renamed folder and removes both files on delete', async () => {
+    await call('ann', 'POST', `/api/projects/${ids.aud}/library/folders`, { parent: '', name: 'Birds' });
+    const r = await up('gulls.wav', wavFile({ seconds: 1, seed: 8 }), 'Birds');
+    await audioJobsIdle();
+    assert.equal((await call('ann', 'PATCH', `/api/projects/${ids.aud}/library/folders`, { path: 'Birds', name: 'Sea birds' })).status, 200);
+    assert.ok(existsSync(path.join(root, ids.aud!, 'Sea birds', 'gulls.mp3')));
+    assert.equal((await call('ann', 'GET', `/api/assets/${r.body.id}/file?variant=light`)).status, 200);
+    assert.equal((await call('ann', 'DELETE', `/api/assets/${r.body.id}`)).status, 200);
+    assert.equal(existsSync(path.join(root, ids.aud!, 'Sea birds', 'gulls.wav')) || existsSync(path.join(root, ids.aud!, 'Sea birds', 'gulls.mp3')), false);
+  });
+
+  it('marks a failed encode, keeps the master, and retries it', async () => {
+    const r = await up('fragile.wav', wavFile({ seconds: 1, seed: 9 }));
+    await audioJobsIdle();
+    const wavPath = path.join(root, ids.aud!, 'fragile.wav');
+    const keep = readFileSync(wavPath);
+    rmSync(wavPath);
+    await withDb((db) => db.execute(sql`UPDATE asset SET status = 'pending', size_lightweight = NULL WHERE id = ${r.body.id}`));
+    kickAudioJobs();
+    await audioJobsIdle();
+    const failed = await info(r.body.id);
+    assert.equal(failed.status, 'failed');
+    assert.ok(failed.error);
+    assert.equal(failed.hasLightweight, false);
+    assert.equal(failed.hasPeaks, false);
+    assert.equal((await peaksOf(r.body.id)).status, 409);
+    assert.equal((await call('ann', 'GET', `/api/assets/${r.body.id}/file?variant=light`)).status, 409);
+    assert.equal((await call('ann', 'POST', `/api/assets/${ids.take}/retry`)).status, 409); // not failed
+    assert.equal((await call('cy', 'POST', `/api/assets/${r.body.id}/retry`)).status, 404);
+    writeFileSync(wavPath, keep);
+    assert.equal((await call('ann', 'POST', `/api/assets/${r.body.id}/retry`)).status, 200);
+    await audioJobsIdle();
+    assert.equal((await info(r.body.id)).status, 'ready');
+  });
+
+  it('puts interrupted work back in the queue', async () => {
+    const r = await up('stuck.wav', wavFile({ seconds: 1, seed: 10 }));
+    await audioJobsIdle();
+    const set = (by: string, minutes: number) => withDb((db) => db.execute(sql`UPDATE asset SET status = 'processing', claimed_by = ${by}, claimed_at = ${new Date(Date.now() - minutes * 60000)}, attempts = 1 WHERE id = ${r.body.id}`));
+    await set('otherhost:1', 1);
+    assert.equal(await requeueAudio(true), 0); // another instance, claim still fresh
+    await set(`${hostname().slice(0, 40)}:99999`, 0);
+    assert.equal(await requeueAudio(false), 0); // this host, but not on boot and not old
+    assert.equal(await requeueAudio(true), 1); // this host's process is gone
+    await set('otherhost:1', 10);
+    assert.equal(await requeueAudio(false), 1); // old enough
+    kickAudioJobs();
+    await audioJobsIdle();
+    assert.equal((await info(r.body.id)).status, 'ready');
+    await withDb((db) => db.execute(sql`UPDATE asset SET status = 'processing', claimed_by = 'otherhost:1', claimed_at = ${new Date(Date.now() - 600000)}, attempts = 3 WHERE id = ${r.body.id}`));
+    await requeueAudio(false);
+    assert.equal((await info(r.body.id)).status, 'failed'); // tried three times already
+  });
+});
+
+describe('peaks for older assets and cleanup', () => {
+  it('makes peaks for a ready asset that has none, without encoding the MP3 again', async () => {
+    const { queueMissingPeaks } = await import('../src/audio/jobs.js');
+    const before = await call('ann', 'GET', `/api/assets/${ids.take}`);
+    const mp3Path = path.join(root, ids.aud!, 'take.mp3');
+    const stamp = readFileSync(mp3Path);
+    await withDb((db) => db.execute(sql`DELETE FROM asset_peaks WHERE asset_id = ${ids.take}`));
+    assert.equal((await call('ann', 'GET', `/api/assets/${ids.take}/peaks`)).status, 404);
+    assert.ok((await queueMissingPeaks()) >= 1);
+    kickAudioJobs();
+    await audioJobsIdle();
+    assert.equal((await call('ann', 'GET', `/api/assets/${ids.take}/peaks`)).status, 200);
+    assert.deepEqual(readFileSync(mp3Path), stamp); // the MP3 was kept, not made again
+    assert.equal((await call('ann', 'GET', `/api/assets/${ids.take}`)).body.sizeLightweight, before.body.sizeLightweight);
+  });
+
+  it('removes the peaks with the asset', async () => {
+    const n = async () => Number(((await withDb((db) => db.execute(sql`SELECT COUNT(*) AS n FROM asset_peaks WHERE asset_id = ${ids.song}`))) as any)[0][0].n);
+    assert.equal(await n(), 1);
+    assert.equal((await call('ann', 'DELETE', `/api/assets/${ids.song}`)).status, 200);
+    assert.equal(await n(), 0);
   });
 });

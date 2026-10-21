@@ -61,6 +61,10 @@ const ts = (name: string) => datetime(name, { mode: 'date', fsp: 3 });
 const createdAt = () => ts('created_at').notNull();
 const updatedAt = () => ts('updated_at').notNull();
 
+const mediumBlob = customType<{ data: Buffer }>({
+  dataType: () => 'mediumblob',
+});
+
 const ms = (name: string) => int(name, { unsigned: true });
 const position = () => smallint('position', { unsigned: true }).notNull();
 
@@ -186,6 +190,20 @@ export const asset = mysqlTable(
     index('asset_status_claimed_idx').on(t.status, t.claimedAt),
   ],
 );
+
+/**
+ * Waveform peaks of an audio asset: one byte per `step_ms` (100), the loudest sample of the window on a decibel
+ * scale (0 = -60 dB or silence, 255 = full scale). Written once when the asset is ready, so the library listing
+ * never carries it. See src/audio/peaks.ts.
+ */
+export const assetPeaks = mysqlTable('asset_peaks', {
+  assetId: ulid('asset_id')
+    .primaryKey()
+    .references(() => asset.id, { onDelete: 'cascade' }),
+  stepMs: smallint('step_ms', { unsigned: true }).notNull().default(100),
+  data: mediumBlob('data').notNull(),
+  createdAt: createdAt(),
+});
 
 export const character = mysqlTable(
   'character',

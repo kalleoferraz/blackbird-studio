@@ -1,12 +1,13 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { and, count, eq, inArray } from 'drizzle-orm';
 import { withDb, type Q } from '../db/client.js';
-import { asset, character, clip, note, project } from '../db/schema.js';
+import { asset, assetPeaks, character, clip, note, project } from '../db/schema.js';
 import { clearCover, uploadCover, useEarlierCover, EARLIER_COVER } from '../library/covers.js';
 import {
   MAX_PICTURE, MAX_UPLOAD, assetsUnder, checkFolder, cleanFileName, findByHash, join, removeFiles, sha256, splitName, storeFile,
   type AssetRow,
 } from '../library/files.js';
+import { kickAudioJobs, retryAudio } from '../audio/jobs.js';
 import { blobStore, cleanPath, PATH_MAX } from '../storage/blob-store.js';
 import { CHARACTERS, MANAGED_ROOTS, isCharactersRoot, isStoryline, pictureFolder } from '../library/managed.js';
 import { accessTo, accessToEntity, checkId } from './access.js';
@@ -15,13 +16,13 @@ import { HttpError, asBody, badRequest } from './http.js';
 
 const CONTENT_TYPES: Record<string, string> = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml',
-  pdf: 'application/pdf', txt: 'text/plain; charset=utf-8', md: 'text/plain; charset=utf-8', csv: 'text/plain; charset=utf-8',
+  wav: 'audio/wav', mp3: 'audio/mpeg', pdf: 'application/pdf', txt: 'text/plain; charset=utf-8', md: 'text/plain; charset=utf-8', csv: 'text/plain; charset=utf-8',
   json: 'application/json', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
 };
-const INLINE = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'application/pdf', 'text/plain; charset=utf-8', 'video/mp4', 'video/webm']);
+const INLINE = new Set(['audio/wav', 'audio/mpeg', 'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'application/pdf', 'text/plain; charset=utf-8', 'video/mp4', 'video/webm']);
 
 export function assetView(a: AssetRow, usage?: string[]) {
-  const info = (a.mediaInfo ?? {}) as { width?: number; height?: number; format?: string };
+  const info = (a.mediaInfo ?? {}) as { width?: number; height?: number; format?: string; durationMs?: number; sampleRate?: number; channels?: number };
   return {
     id: a.id,
     name: a.path.slice(a.path.lastIndexOf('/') + 1),
@@ -29,9 +30,16 @@ export function assetView(a: AssetRow, usage?: string[]) {
     kind: a.mediaKind,
     size: a.size,
     sizeLightweight: a.sizeLightweight,
-    hasLightweight: a.lightweightPath !== null,
+    hasLightweight: a.lightweightPath !== null && a.sizeLightweight !== null, // an audio playback copy exists only once it is ready
     width: info.width ?? null,
     height: info.height ?? null,
+    status: a.status,
+    hasPeaks: a.mediaKind === 'audio' && a.status === 'ready',
+    error: a.status === 'failed' ? a.error : null,
+    format: info.format ?? null,
+    durationMs: info.durationMs ?? null,
+    sampleRate: info.sampleRate ?? null,
+    channels: info.channels ?? null,
     fileState: a.fileState,
     earlierCover: EARLIER_COVER.test(a.path),
     createdAt: a.createdAt.toISOString(),
@@ -102,6 +110,9 @@ function parseRange(header: string | undefined, size: number): { start: number; 
 }
 
 async function sendFile(request: FastifyRequest, reply: FastifyReply, a: AssetRow, variant: 'original' | 'light', download: boolean) {
+  if (variant === 'light' && a.mediaKind === 'audio' && a.lightweightPath !== null && a.status !== 'ready') {
+    throw new HttpError(409, a.status === 'failed' ? 'encoding_failed' : 'not_ready', a.status === 'failed' ? 'The playback copy could not be made.' : 'The playback copy is still being made.');
+  }
   const useLight = variant === 'light' && a.lightweightPath !== null;
   const rel = useLight ? a.lightweightPath! : a.path;
   const size = await blobStore().size(a.projectId, rel);
@@ -295,6 +306,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       if (stored.duplicate) {
         throw new HttpError(409, 'already_in_library', `This file is already in the library at ${stored.asset.path}.`, { assetId: stored.asset.id, path: stored.asset.path });
       }
+      if (stored.asset.status === 'pending') kickAudioJobs(request.log);
       return reply.code(201).send(assetView(stored.asset));
     });
   });
@@ -311,6 +323,48 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       await removeFiles(a);
       return { ok: true };
     });
+  });
+
+  app.get('/api/assets/:id', auth, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    return withDb(async (db) => {
+      const row = (await db.select().from(asset).where(eq(asset.id, id)).limit(1))[0];
+      if (!row) throw new HttpError(404, 'not_found');
+      await accessTo(db, request.account!.id, row.projectId);
+      return assetView(row, (await usageOf(db, row.projectId, [id])).get(id));
+    });
+  });
+
+  // A failed playback copy goes back in the queue; the WAV master is kept, so this is always possible.
+  app.post('/api/assets/:id/retry', auth, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    return withDb(async (db) => {
+      const row = (await db.select().from(asset).where(eq(asset.id, id)).limit(1))[0];
+      if (!row) throw new HttpError(404, 'not_found');
+      await accessTo(db, request.account!.id, row.projectId, { edit: true });
+      if (!(await retryAudio(id))) throw new HttpError(409, 'not_failed', 'Only an asset whose playback copy failed can be retried.');
+      kickAudioJobs(request.log);
+      return { ok: true };
+    });
+  });
+
+  // The waveform: one byte per `stepMs`, loudest sample of the window on a decibel scale (see src/audio/peaks.ts).
+  app.get('/api/assets/:id/peaks', auth, async (request, reply) => {
+    const id = checkId((request.params as { id: string }).id);
+    const found = await withDb(async (db) => {
+      const row = (await db.select().from(asset).where(eq(asset.id, id)).limit(1))[0];
+      if (!row) throw new HttpError(404, 'not_found');
+      await accessTo(db, request.account!.id, row.projectId);
+      if (row.mediaKind !== 'audio') throw new HttpError(404, 'no_peaks', 'Only audio has a waveform.');
+      if (row.status !== 'ready') throw new HttpError(409, row.status === 'failed' ? 'processing_failed' : 'not_ready', row.status === 'failed' ? 'The audio could not be processed.' : 'The waveform is still being made.');
+      const p = (await db.select().from(assetPeaks).where(eq(assetPeaks.assetId, id)).limit(1))[0];
+      if (!p) throw new HttpError(404, 'no_peaks', 'This file has no waveform yet.');
+      return { hash: row.hash, stepMs: p.stepMs, data: p.data };
+    });
+    const etag = `"${found.hash.slice(0, 16)}-p${found.stepMs}"`;
+    reply.header('ETag', etag).header('Cache-Control', 'private, max-age=86400').header('X-Peaks-Step-Ms', String(found.stepMs)).header('X-Peaks-Floor-Db', '60');
+    if (request.headers['if-none-match'] === etag) return reply.code(304).send();
+    return reply.type('application/octet-stream').send(found.data);
   });
 
   app.get('/api/assets/:id/file', auth, async (request, reply) => {
