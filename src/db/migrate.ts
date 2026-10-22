@@ -6,7 +6,7 @@ import { connect } from './connection.js';
 
 // One name for the whole app; a second instance (Preview and Published share the database)
 // waits here instead of running the same migration at the same time.
-export const MIGRATION_LOCK_NAME = 'merulo_studio_migrate';
+export const MIGRATION_LOCK_NAME = 'blackbird_studio_migrate';
 const LOCK_WAIT_SECONDS = 60;
 
 // The folder written by `npm run db:generate`; the same relative path works from src/ and from dist/.

@@ -1,4 +1,4 @@
-# Merulo Studio
+# Blackbird Studio
 
 Hosted web app for writing, recording and organizing a multi-character audiobook, with a DAW-style timeline per section and a provable, incremental history of the text.
 

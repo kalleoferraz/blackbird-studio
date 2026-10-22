@@ -18,7 +18,7 @@ export function Login({ onLogin }: { onLogin: (me: Me) => void }) {
   };
   return (
     <form className="card narrow" onSubmit={submit}>
-      <h1 className="brand"><BlackbirdIcon />Merulo Studio</h1>
+      <h1 className="brand"><BlackbirdIcon />Blackbird Studio</h1>
       <label>Email<input type="email" autoFocus autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
       <label>Password<input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
       {error && <p className="error">{error}</p>}
