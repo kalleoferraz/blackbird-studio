@@ -162,6 +162,20 @@
       "when": 1792784800000,
       "tag": "0022_speech_rate",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1792871200000,
+      "tag": "0023_note_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1792957600000,
+      "tag": "0024_note_author_kind",
+      "breakpoints": true
     }
   ]
 }

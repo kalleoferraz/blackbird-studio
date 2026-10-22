@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, assetUrl, uploadFile } from './api.ts';
 import { LibraryPanel } from './Library.tsx';
-import type { Character } from './types.ts';
+import { NotesPanel } from './NotesPanel.tsx';
+import type { Character, NoteFocus, NoteItem, NoteRequest, Story } from './types.ts';
 import { ColourPicker, Confirm, Dialog, MenuButton, PlusIcon, errorText, useLocalState } from './ui.tsx';
 import { nextColour } from '../../src/shared/palette.ts';
 
@@ -76,19 +77,25 @@ export function CharacterDialog({ projectId, state, characters, onClose, onSaved
   );
 }
 
-export function RightPanel({ projectId, characters, readOnly, onCharacters, onError, openDialog }: {
-  projectId: string; characters: Character[]; readOnly: boolean;
+export function RightPanel({ projectId, meId, characters, readOnly, onCharacters, onError, openDialog, notes, story, noteFocus, noteRequest, onNotesChanged }: {
+  projectId: string; meId: string; characters: Character[]; readOnly: boolean;
   onCharacters: () => void; onError: (m: string) => void;
   openDialog: (s: CharacterDialogState) => void;
+  notes: NoteItem[]; story: Story; noteFocus: NoteFocus; noteRequest: NoteRequest | null; onNotesChanged: () => void;
 }) {
   const [remove, setRemove] = useState<Character | null>(null);
-  const [tab, setTab] = useLocalState<'characters' | 'library'>('rs.rightTab', 'characters');
+  const [tab, setTab] = useLocalState<'characters' | 'library' | 'notes'>('rs.rightTab', 'characters');
+  // A cue's notes icon or a Library badge asks for the Notes tab.
+  useEffect(() => { if (noteRequest) setTab('notes'); }, [noteRequest?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <aside className="right">
       <div className="tabs">
         <button className={tab === 'characters' ? 'on' : ''} onClick={() => setTab('characters')}>Characters</button>
         <button className={tab === 'library' ? 'on' : ''} onClick={() => setTab('library')}>Library</button>
+        <button className={tab === 'notes' ? 'on' : ''} onClick={() => setTab('notes')}>Notes</button>
       </div>
+      {tab === 'notes' && <NotesPanel projectId={projectId} meId={meId} readOnly={readOnly} notes={notes} story={story} focus={noteFocus}
+        request={noteRequest} onChanged={onNotesChanged} onError={onError} />}
       {tab === 'library' && <LibraryPanel projectId={projectId} readOnly={readOnly} onError={onError} />}
       {tab === 'characters' && (
         <div className="panel-body">

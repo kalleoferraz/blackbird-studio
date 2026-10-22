@@ -72,7 +72,12 @@ async function cards(q: Q, userId: string, onlyProjectId?: string) {
   const comments = await q
     .select({ projectId: note.projectId, n: count() })
     .from(note)
-    .where(and(inArray(note.projectId, ids), eq(note.type, 'comment'), isNull(note.rootNoteId), isNull(note.deletedAt)))
+    .where(and(inArray(note.projectId, ids), eq(note.type, 'comment'), isNull(note.rootNoteId))) // a tombstoned root with replies still counts as a thread
+    .groupBy(note.projectId);
+  const references = await q
+    .select({ projectId: note.projectId, n: count() })
+    .from(note)
+    .where(and(inArray(note.projectId, ids), eq(note.type, 'reference'), isNull(note.deletedAt)))
     .groupBy(note.projectId);
   const tasks = await q
     .select({ projectId: note.projectId, n: count() })
@@ -85,6 +90,7 @@ async function cards(q: Q, userId: string, onlyProjectId?: string) {
   const sz = by(sizes);
   const cm = by(comments);
   const tk = by(tasks);
+  const rf = by(references);
   const role = new Map(mine.map((m) => [m.projectId, m.role]));
   return projects.map((p) => ({
     id: p.id,
@@ -100,6 +106,7 @@ async function cards(q: Q, userId: string, onlyProjectId?: string) {
     chapterCount: Number(cc.get(p.id)?.n ?? 0),
     sizeBytes: Number(sz.get(p.id)?.size ?? 0) + Number(sz.get(p.id)?.light ?? 0),
     commentCount: Number(cm.get(p.id)?.n ?? 0),
+    referenceCount: Number(rf.get(p.id)?.n ?? 0),
     openTaskCount: Number(tk.get(p.id)?.n ?? 0),
     coverAssetId: p.coverAssetId,
     repoFolder: p.repoFolder,

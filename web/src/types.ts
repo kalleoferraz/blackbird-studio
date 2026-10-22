@@ -16,6 +16,7 @@ export interface ProjectCard {
   chapterCount: number;
   sizeBytes: number;
   commentCount: number;
+  referenceCount: number;
   openTaskCount: number;
   repoFolder: string | null;
   coverAssetId: string | null;
@@ -63,3 +64,26 @@ export interface LibFile {
   fileState: 'ok' | 'missing' | 'changed'; earlierCover: boolean; createdAt: string; usage?: string[];
 }
 export interface LibListing { folder: string; canEdit: boolean; writable: boolean; folders: LibFolder[]; files: LibFile[] }
+
+export type NoteType = 'comment' | 'task' | 'reference';
+export type NoteTargetKind = 'chapter' | 'segment' | 'scene' | 'cue' | 'asset';
+export interface NotePlace {
+  chapterId: string | null; segmentId: string | null; sceneId: string | null; cueId: string | null; assetId: string | null;
+  label: string | null; sceneNo: number | null; cueStartMs: number | null;
+}
+export interface NoteItem {
+  id: string; type: NoteType; textMd: string; refKey: string | null; link: string | null;
+  authorKind: 'user' | 'system' | 'llm'; author: { id: string; name: string } | null;
+  doneAt: string | null; doneBy: { id: string; name: string } | null;
+  target: { kind: NoteTargetKind; id: string } | null; place: NotePlace;
+  rootNoteId: string | null; replyToNoteId: string | null; createdAt: string; editedAt: string | null; deleted: boolean;
+}
+/** Where the reader is in the script: the Notes panel opens and highlights this path. */
+export interface NoteFocus {
+  chapterId: string | null; segmentId: string | null; sceneId: string | null; sceneNo: number | null;
+  cueId: string | null; cueLabel: string | null;
+}
+/** A request to show one place in the Notes panel (from a cue's notes icon or a Library badge). */
+export interface NoteRequest {
+  n: number; chapterId?: string | null; segmentId?: string | null; sceneId?: string | null; cueId?: string | null; assetId?: string | null;
+}

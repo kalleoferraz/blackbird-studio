@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as RPointerEvent } from 'react';
 import { api, uploadFile } from './api.ts';
 import { go } from './App.tsx';
-import type { Character, Me, ProjectCard, SegmentContent, Story } from './types.ts';
+import type { Character, Me, NoteFocus, NoteItem, NoteRequest, NoteTargetKind, ProjectCard, SegmentContent, Story } from './types.ts';
+import { NotesContext, badgesOf, type NotesInfo } from './notesContext.tsx';
+import { AddNoteDialog } from './NotesPanel.tsx';
 import { StoryIndex } from './StoryIndex.tsx';
 import { Writing } from './Writing.tsx';
 import { CharacterDialog, RightPanel, type CharacterDialogState } from './RightPanel.tsx';
@@ -27,6 +29,9 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   const [dialog, setDialog] = useState<CharacterDialogState>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState('');
+  const [notes, setNotes] = useState<NoteItem[]>([]);
+  const [noteRequest, setNoteRequest] = useState<NoteRequest | null>(null);
+  const [addNote, setAddNote] = useState<{ target: { kind: NoteTargetKind; id: string } | null; label: string } | null>(null);
 
   const loadProject = useCallback(async () => { try { setProject(await api<ProjectCard>('GET', `/api/projects/${projectId}`)); } catch (e) { setError(errorText(e)); } }, [projectId]);
   // The Characters tab lists the most used first. The order is taken once, when the page loads the list, and kept after that.
@@ -39,6 +44,10 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   const panelCharacters = useMemo(() => inOrder(characters, charOrder.current?.ids ?? []), [characters]);
   const loadStory = useCallback(async () => setStory(await api<Story>('GET', `/api/projects/${projectId}/story`)), [projectId]);
 
+  const loadNotes = useCallback(async () => {
+    try { setNotes((await api<{ notes: NoteItem[] }>('GET', `/api/projects/${projectId}/notes`)).notes); } catch (e) { setError(errorText(e)); }
+  }, [projectId]);
+  useEffect(() => { void loadNotes(); }, [loadNotes]);
   useEffect(() => { void loadProject(); void loadCharacters(); void loadStory().catch((e) => setError(errorText(e))); }, [loadProject, loadCharacters, loadStory]);
 
   // Without a segment in the address, open the first one.
@@ -68,7 +77,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   }, [content?.segment.id]);
 
   const readOnly = project?.role === 'viewer';
-  const refreshAfterEdit = () => { void loadProject(); void loadStory(); };
+  const refreshAfterEdit = () => { void loadProject(); void loadStory(); void loadNotes(); };
   const onContent = (c: SegmentContent) => { setContent(c); refreshAfterEdit(); };
   const openSegment = (id: string) => go(`/p/${projectId}/s/${id}`);
 
@@ -106,6 +115,19 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   const wanted = useSyncExternalStore(sub, () => playback.wantedSegment() ?? '');
   const curCue = useSyncExternalStore(sub, () => playback.currentCueId());
   const curScene = useSyncExternalStore(sub, () => playback.currentSceneId());
+  // The Notes panel opens on the place the reader is at: the open segment's chapter, and the scene and cue under the playhead.
+  const noteFocus = useMemo<NoteFocus>(() => {
+    const seg = content?.segment;
+    const sceneIdx = content ? content.scenes.findIndex((s) => s.id === curScene) : -1;
+    const cueRow = content && curCue ? content.scenes.flatMap((s) => s.cues).find((c) => c.id === curCue) : undefined;
+    return {
+      chapterId: seg?.chapterId ?? null, segmentId: seg?.id ?? null,
+      sceneId: sceneIdx >= 0 ? curScene : null, sceneNo: sceneIdx >= 0 ? content!.scenes[sceneIdx]!.position : null,
+      cueId: cueRow && sceneIdx >= 0 ? cueRow.id : null,
+      cueLabel: cueRow ? cueRow.text.replace(/\s+/g, ' ').trim().slice(0, 60) || null : null,
+    };
+  }, [content, curScene, curCue]);
+  const notesInfo = useMemo<NotesInfo>(() => ({ ...badgesOf(notes), show: (r) => setNoteRequest({ ...r, n: Date.now() }), add: (target, label) => setAddNote({ target, label }) }), [notes]);
   // Opening a segment yourself (index, address, back button) puts the playhead at its start. Moves the bar makes
   // itself are marked in `expectedNav` so they are not mistaken for that.
   const expectedNav = useRef<string | null>(null);
@@ -155,6 +177,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
 
   return (
     <NavContext.Provider value={nav}>
+    <NotesContext.Provider value={notesInfo}>
     <div className="script">
       <header className="topbar">
         <a href="#/" className="brand" title="Projects"><BlackbirdIcon /></a>
@@ -163,6 +186,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
         {error && <span className="error inline-error" onClick={() => setError('')}>{error}</span>}
         {saved && <span className="muted">{saved}</span>}
         <span className="muted small">{project.dirtySince ? 'Unsaved changes' : `Snapshot ${ago(project.lastSnapshotAt)}`}</span>
+        {!readOnly && <button onClick={() => setAddNote({ target: null, label: 'the media project' })} title="Add a note on the media project">Add note</button>}
         {!readOnly && <button onClick={() => void saveSnapshot()} disabled={saving}>{saving ? 'Saving…' : 'Save snapshot'}</button>}
         <span className="muted small">{me.user.displayName}{readOnly && ' · view only'}</span>
       </header>
@@ -186,16 +210,20 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
             </div>
           ) : <p className="muted">Select or add a segment.</p>}
         </main>
-        <RightPanel projectId={projectId} characters={panelCharacters} readOnly={!!readOnly}
-          onCharacters={() => void loadCharacters()} onError={setError} openDialog={setDialog} />
+        <RightPanel projectId={projectId} meId={me.user.id} characters={panelCharacters} readOnly={!!readOnly}
+          onCharacters={() => void loadCharacters()} onError={setError} openDialog={setDialog}
+          notes={notes} story={story} noteFocus={noteFocus} noteRequest={noteRequest} onNotesChanged={() => { void loadNotes(); void loadProject(); }} />
       </div>
       {content && project.type !== 'textbook' && tlOpen && <Timeline content={content} readOnly={!!readOnly} onContent={onContent} onError={setError} />}
       <NavBar store={playback} story={story} follow={follow} onFollow={setFollow} editing={editing}
         timeline={project.type !== 'textbook' ? { open: tlOpen, onToggle: () => setTlOpen(!tlOpen) } : undefined} />
+      {addNote && <AddNoteDialog projectId={projectId} target={addNote.target} label={addNote.label} onClose={() => setAddNote(null)}
+        onSaved={() => { void loadNotes(); void loadProject(); }} />}
       {trim && <TrimDialog req={trim} onDone={(keep) => { trim.resolve(keep); setTrim(null); }} />}
       {dialog && <CharacterDialog projectId={projectId} state={dialog} characters={characters} onClose={() => setDialog(null)}
         onSaved={() => { void loadCharacters(); if (segmentId) void api<SegmentContent>('GET', `/api/segments/${segmentId}`).then(setContent); }} onError={setError} />}
     </div>
+    </NotesContext.Provider>
     </NavContext.Provider>
   );
 }

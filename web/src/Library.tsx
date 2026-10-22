@@ -3,6 +3,7 @@ import { api, assetUrl, uploadFile } from './api.ts';
 import { formatBytes, formatDuration } from './format.ts';
 import type { LibFile, LibFolder, LibListing } from './types.ts';
 import { Confirm, Dialog, MenuButton, errorText, useLocalState } from './ui.tsx';
+import { AssetNotesBadge, useNotes } from './notesContext.tsx';
 
 /** Dispatched on `window` when files are added to the library from outside the Library panel. */
 export const LIBRARY_CHANGED = 'library-changed';
@@ -22,6 +23,7 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
   const [removeFolder, setRemoveFolder] = useState<{ folder: LibFolder; nonEmpty: boolean } | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const notes = useNotes();
   const target = useRef('');
   const expanded = new Set(['', ...open]);
 
@@ -120,6 +122,7 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
             {l.folders.map((c) => renderFolder(c, depth + 1))}
             {l.files.map((file) => (
               <div key={file.id} className="tree-row" style={{ paddingLeft: (depth + 1) * 14 }}>
+                <AssetNotesBadge assetId={file.id} />
                 <button className="tree-main" onClick={() => setPreview(file)} title={file.usage?.length ? `Used by ${file.usage.join(', ')}` : file.name}>
                   <span className="tree-icon">{file.kind === 'image' ? <img src={assetUrl(file.id, file.hasLightweight)} alt="" loading="lazy" /> : KIND_ICON[file.kind]}</span>
                   <span className="grow"><span className="lib-name">{file.name}</span>
@@ -132,6 +135,7 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
                   { label: file.kind === 'audio' && file.format === 'wav' ? 'Download WAV' : 'Download', onClick: () => { window.location.href = assetUrl(file.id, false, true); } },
                   ...(file.kind === 'audio' && file.hasLightweight ? [{ label: 'Download MP3', onClick: () => { window.location.href = assetUrl(file.id, true, true); } }] : []),
                   ...(file.status === 'failed' && !readOnly ? [{ label: 'Retry encoding', onClick: () => void retry(file, l.folder) }] : []),
+                  ...(readOnly ? [] : [{ label: 'Add note…', onClick: () => notes.add({ kind: 'asset', id: file.id }, `file “${file.name}”`) }]),
                   ...(readOnly ? [] : ['sep' as const, { label: 'Delete…', danger: true, disabled: !!file.usage?.length, hint: file.usage?.length ? 'in use' : undefined, onClick: () => setRemoveFile(file) }]),
                 ]}>⋯</MenuButton>
               </div>))}

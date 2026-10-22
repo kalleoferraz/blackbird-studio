@@ -362,10 +362,12 @@ export const note = mysqlTable(
     projectId: ulid('project_id')
       .notNull()
       .references(() => project.id, { onDelete: 'cascade' }),
-    authorUserId: ulid('author_user_id').references(() => user.id, { onDelete: 'set null' }), // null: written by the LLM, or the account is gone
+    authorUserId: ulid('author_user_id').references(() => user.id, { onDelete: 'set null' }), // null: the account is gone (kind user), or the note is by the system or the LLM
+    authorKind: mysqlEnum('author_kind', ['user', 'system', 'llm']).notNull().default('user'),
     type: mysqlEnum('type', ['comment', 'reference', 'task']).notNull(),
     textMd: text('text_md').notNull(),
     refKey: ciVarchar('ref_key', { length: 24 }), // references only: required, unique per project, also the sort key
+    link: varchar('link', { length: 2048 }), // references only: an http or https URL, checked by the app
     doneAt: ts('done_at'), // tasks only
     doneByUserId: ulid('done_by_user_id').references(() => user.id, { onDelete: 'set null' }),
     // A root note has no other target (the project itself) or exactly one of these (checked by the app).

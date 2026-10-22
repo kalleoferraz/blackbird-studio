@@ -6,6 +6,7 @@ import { Confirm, MenuButton, errorText, type MenuItem } from './ui.tsx';
 import { useNav, useStoreValue } from './playback.ts';
 import { AudioPicker } from './AudioPicker.tsx';
 import { audioMenuItems } from './audioMenu.ts';
+import { AddCueNoteButton, CueNoteIcons, useNotes } from './notesContext.tsx';
 
 interface Props {
   content: SegmentContent;
@@ -69,7 +70,7 @@ export function Writing({ content, characters, readOnly, onContent, onError, onN
   return (
     <div className="writing">
       {content.scenes.map((seg, i) => (
-        <SceneBlock key={seg.id} seg={seg} index={i} total={total} segmentId={content.segment.id} lanes={lanes} characters={characters} readOnly={readOnly}
+        <SceneBlock key={seg.id} seg={seg} index={i} total={total} segmentId={content.segment.id} chapterId={content.segment.chapterId} lanes={lanes} characters={characters} readOnly={readOnly}
           draft={draft} setDraft={setDraft} startDraft={startDraft} saveDraft={saveDraft}
           call={call} setConfirm={setConfirm} setPicking={setPicking} onNewCharacter={onNewCharacter} />
       ))}
@@ -87,8 +88,8 @@ interface DraftApi {
   startDraft: (sceneId: string, afterCueId: string | null) => void; saveDraft: (text: string, more: boolean) => Promise<boolean>;
 }
 
-function SceneBlock({ seg, index, total, segmentId, lanes, characters, readOnly, draft, setDraft, startDraft, saveDraft, call, setConfirm, setPicking, onNewCharacter }: DraftApi & {
-  seg: Scene; index: number; total: number; segmentId: string; lanes: Map<string, Lane>; characters: Character[]; readOnly: boolean; call: Call;
+function SceneBlock({ seg, index, total, segmentId, chapterId, lanes, characters, readOnly, draft, setDraft, startDraft, saveDraft, call, setConfirm, setPicking, onNewCharacter }: DraftApi & {
+  seg: Scene; index: number; total: number; segmentId: string; chapterId: string; lanes: Map<string, Lane>; characters: Character[]; readOnly: boolean; call: Call;
   setConfirm: (c: any) => void; setPicking: (p: { cue: Cue; colour: string } | null) => void; onNewCharacter: Props['onNewCharacter'];
 }) {
   // The scene's title is stored in `label`; it is edited from the scene's "⋯" menu.
@@ -100,8 +101,10 @@ function SceneBlock({ seg, index, total, segmentId, lanes, characters, readOnly,
     if (label.trim() !== (seg.label ?? '')) void call('PATCH', `/api/scenes/${seg.id}`, { label: label.trim() || null });
   };
   const nav = useNav();
+  const notes = useNotes();
   const menu: MenuItem[] = [
     { label: seg.label ? 'Edit title' : 'Add title', onClick: () => setEditingTitle(true) },
+    { label: 'Add note…', onClick: () => notes.add({ kind: 'scene', id: seg.id }, `scene “${seg.label || index + 1}”`) },
     { label: 'Merge with previous', disabled: index === 0, onClick: () => void call('POST', `/api/scenes/${seg.id}/merge-previous`) },
     { label: 'Delete scene', danger: true, disabled: total === 1, onClick: () => setConfirm({
       title: 'Delete scene', label: 'Delete',
@@ -145,7 +148,7 @@ function SceneBlock({ seg, index, total, segmentId, lanes, characters, readOnly,
               {i === 0 && !readOnly && <Gap seg={seg} afterId={null} canSplit={false} call={call} onAdd={add} before />}
               <CueBlock cue={c} lane={lanes.get(c.laneId)} characters={characters} readOnly={readOnly} call={call} isLast={i === seg.cues.length - 1}
                 startDraft={() => startDraft(seg.id, c.id)} setConfirm={setConfirm} setPicking={setPicking} onNewCharacter={onNewCharacter}
-                onSeek={() => nav?.store.seek({ segmentId, scene: index, ms: c.startMs })} />
+                onSeek={() => nav?.store.seek({ segmentId, scene: index, ms: c.startMs })} place={{ segmentId, sceneId: seg.id, chapterId }} />
               {draftAfter(c.id)}
               {!readOnly && <Gap seg={seg} afterId={c.id} canSplit={i < seg.cues.length - 1} nextId={seg.cues[i + 1]?.id} call={call} onAdd={add} last={i === seg.cues.length - 1} />}
             </div>
@@ -172,13 +175,15 @@ function Gap({ seg, afterId, canSplit, nextId, call, onAdd, last, before, always
   );
 }
 
-function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, drafting, setConfirm, setPicking, onNewCharacter, onSeek }: {
+function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, drafting, setConfirm, setPicking, onNewCharacter, onSeek, place }: {
   cue: Cue; lane?: Lane; characters: Character[]; readOnly: boolean; call: Call; isLast: boolean; startDraft: () => void;
   /** Present for a cue that only exists in the browser so far. */
   drafting?: { patch: (b: Partial<Draft>) => void; save: (text: string, more: boolean) => Promise<boolean>; cancel: () => void };
   setConfirm: (c: any) => void; setPicking: (p: { cue: Cue; colour: string } | null) => void; onNewCharacter: Props['onNewCharacter'];
   /** A click on the cue puts the playhead at its start. */
   onSeek?: () => void;
+  /** The cue's segment, scene and chapter (for its notes icon); absent for a draft. */
+  place?: { segmentId: string; sceneId: string; chapterId: string };
 }) {
   const [editing, setEditing] = useState(!!drafting);
   const [text, setText] = useState(cue.text);
@@ -266,6 +271,7 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
   const audioTitle = cue.clips.length ? 'No take chosen' : 'No audio yet: record a take or choose audio';
   const placeholder = cue.type === 'speech' ? 'Spoken text (Markdown)…' : cue.type === 'sfx' ? 'Describe the sound effect…' : 'Describe the music…';
   const black = colour.toLowerCase() === '#000000';
+  const showAudio = !drafting && (readOnly ? cue.clips.length > 0 : true);
   const name = cue.type === 'speech' ? (character?.name ?? lane?.title ?? 'No character') : (lane?.title ?? TYPE_LABEL[cue.type]);
   const nameStyle = { color: black ? 'var(--text)' : colour };
   return (
@@ -280,7 +286,12 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
           <MenuButton className="name" items={charMenu} title="Character"><b style={nameStyle}>{name}</b></MenuButton> :
           <span className="name"><b style={nameStyle}>{name}</b></span>}
       </div>
-      {isNow && !editing && <span className="now-tag">now</span>}
+      {!editing && (!drafting || isNow) && (
+        <div className="tag-row">
+          {!drafting && place && <CueNoteIcons cueId={cue.id} segmentId={place.segmentId} sceneId={place.sceneId} chapterId={place.chapterId} />}
+          {!readOnly && !drafting && <AddCueNoteButton cueId={cue.id} label={`this cue: “${cue.text.replace(/\s+/g, ' ').trim().slice(0, 40) || name}”`} />}
+          {isNow && <span className="now-tag">now</span>}
+        </div>)}
       {editing && (
         <div className="edit-actions">
           <button className="round cancel" title="Cancel (Esc)" onMouseDown={(e) => e.preventDefault()} onClick={cancel}>
@@ -302,13 +313,17 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
           <div className={'cue-text' + (cue.text ? '' : ' empty')} onDoubleClick={() => { clearTimeout(seekTimer.current); if (!readOnly) setEditing(true); }}>
             {cue.text ? (cue.type === 'speech' && !character?.isNarrator ? '— ' : '') + cue.text : placeholder}</div>)}
       </div>
-      <div className="times">
+      <div className={'times' + (showAudio ? ' with-audio' : '')}>
         <span className="start" title="Start within the scene">{formatClock(cue.startMs)}</span>
+        <div className="len-row">
           {editLen !== null ? (
             <input className="len-input" autoFocus value={editLen} onChange={(e) => setEditLen(e.target.value)} onBlur={commitLen}
               onKeyDown={(e) => { if (e.key === 'Enter') commitLen(); if (e.key === 'Escape') setEditLen(null); }} />
           ) : drafting ? <span className="len">–</span> : readOnly ? <span className={'len' + estimated}>{formatTenths(cue.lengthMs)}</span> : (
             <MenuButton className={'len' + estimated} items={lengthMenu} title={`${formatSeconds(cue.lengthMs)}${cue.lengthAuto ? ' · follows the text (auto)' : ''}`}>{formatTenths(cue.lengthMs)}</MenuButton>)}
+          {showAudio && (readOnly ? <span className={'audio-btn' + (chosenClip ? ' has' : ' none')} title={chosenClip?.name ?? audioTitle}><AudioIcon /></span> :
+            <MenuButton className={'audio-btn' + (chosenClip ? ' has' : ' none')} items={audioMenu} title={chosenClip ? chosenClip.name : audioTitle}><AudioIcon /></MenuButton>)}
+        </div>
         {cue.lengthAuto && !drafting && <span className="auto" title="The length follows the text until you set it by hand">auto</span>}
       </div>
       <div className="cue-actions">
@@ -318,8 +333,6 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
               <circle cx="8" cy="8" r="6.2" /><path d="M5.600 5.600l4.800 4.800M10.400 5.600l-4.800 4.800" />
             </svg>
           </button>)}
-        {!drafting && (readOnly ? cue.clips.length > 0 : true) && (readOnly ? <span className={'audio-btn' + (chosenClip ? ' has' : ' none')} title={chosenClip?.name ?? audioTitle}><AudioIcon /></span> :
-          <MenuButton className={'audio-btn' + (chosenClip ? ' has' : ' none')} items={audioMenu} title={chosenClip ? chosenClip.name : audioTitle}><AudioIcon /></MenuButton>)}
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { api } from './api.ts';
 import type { Story, StoryChapter } from './types.ts';
 import { Confirm, MenuButton, PlusIcon, errorText, useLocalState, type MenuItem } from './ui.tsx';
 import { plainIndex } from './format.ts';
+import { useNotes } from './notesContext.tsx';
 
 
 type Drag = { kind: 'chapter'; id: string } | { kind: 'segment'; id: string } | null;
@@ -15,6 +16,7 @@ export function StoryIndex({ projectId, story, currentSegmentId, readOnly, onSto
   const [editing, setEditing] = useState<string | null>(null); // chapter or segment id; 'new-chapter' for the new row
   const [confirm, setConfirm] = useState<null | { title: string; message: string; run: () => Promise<void> }>(null);
   const drag = useRef<Drag>(null);
+  const notes = useNotes();
   const [over, setOver] = useState<string | null>(null);
 
   const run = async (fn: () => Promise<Story>) => {
@@ -27,6 +29,7 @@ export function StoryIndex({ projectId, story, currentSegmentId, readOnly, onSto
     { label: 'Add segment', onClick: async () => {
       const s = await run(() => api<Story>('POST', `/api/chapters/${c.id}/segments`, { title: 'New segment' }));
       if (s?.created) { setCollapsed(collapsed.filter((x) => x !== c.id)); setEditing(s.created); onOpenSegment(s.created); } } },
+    { label: 'Add note…', onClick: () => notes.add({ kind: 'chapter', id: c.id }, `chapter “${c.title}”`) },
     { label: c.introductory ? 'Make a numbered chapter' : 'Mark as introductory', onClick: () => void run(() => api<Story>('PATCH', `/api/chapters/${c.id}`, { introductory: !c.introductory })) },
     'sep',
     { label: 'Move up', disabled: i === 0 || story.chapters[i - 1]!.introductory !== c.introductory, onClick: () => void run(() => api<Story>('POST', `/api/chapters/${c.id}/move`, { position: c.position - 1 })) },
@@ -80,6 +83,7 @@ export function StoryIndex({ projectId, story, currentSegmentId, readOnly, onSto
                 ) : <span className="title" onDoubleClick={() => !readOnly && setEditing(s.id)}>{s.title}</span>}
                 {!readOnly && <MenuButton className="more" title="Segment options" items={[
                   { label: 'Rename', onClick: () => setEditing(s.id) },
+                  { label: 'Add note…', onClick: () => notes.add({ kind: 'segment', id: s.id }, `segment “${s.title}”`) },
                   { label: 'Move up', disabled: si === 0, onClick: () => void run(() => api<Story>('POST', `/api/segments/${s.id}/move`, { chapterId: c.id, position: s.position - 1 })) },
                   { label: 'Move down', disabled: si === c.segments.length - 1, onClick: () => void run(() => api<Story>('POST', `/api/segments/${s.id}/move`, { chapterId: c.id, position: s.position + 1 })) },
                   'sep',
