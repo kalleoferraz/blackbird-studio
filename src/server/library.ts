@@ -10,6 +10,7 @@ import {
 import { kickAudioJobs, retryAudio } from '../audio/jobs.js';
 import { blobStore, cleanPath, PATH_MAX } from '../storage/blob-store.js';
 import { CHARACTERS, MANAGED_ROOTS, isCharactersRoot, isStoryline, pictureFolder } from '../library/managed.js';
+import { touchProject } from '../db/touch.js';
 import { accessTo, accessToEntity, checkId } from './access.js';
 import { authenticate } from './auth-routes.js';
 import { HttpError, asBody, badRequest } from './http.js';
@@ -262,6 +263,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
         await db.delete(asset).where(inArray(asset.id, rows.map((a) => a.id)));
       }
       await blobStore().removeDir(projectId, folder);
+      if (rows.length > 0) await touchProject(db, projectId, request.account!.id);
       return { ok: true, removedFiles: rows.length };
     });
   });
@@ -317,6 +319,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
         await blobs.rename(projectId, to, from).catch(() => undefined);
         throw e;
       }
+      if (inside.length > 0) await touchProject(db, projectId, request.account!.id);
       return { path: to };
     });
   });
@@ -335,6 +338,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       if (stored.duplicate) {
         throw new HttpError(409, 'already_in_library', `This file is already in the library at ${stored.asset.path}.`, { assetId: stored.asset.id, path: stored.asset.path });
       }
+      await touchProject(db, projectId, request.account!.id);
       if (stored.asset.status === 'pending') kickAudioJobs(request.log);
       return reply.code(201).send(assetView(stored.asset));
     });
@@ -351,6 +355,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       await db.delete(clip).where(eq(clip.assetId, id)); // only alternatives can be left (see usageOf)
       await db.delete(asset).where(eq(asset.id, id));
       await removeFiles(a);
+      await touchProject(db, a.projectId, request.account!.id);
       return { ok: true };
     });
   });
@@ -418,6 +423,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     return withDb(async (db) => {
       await accessTo(db, request.account!.id, projectId, { edit: true });
       const r = await uploadCover(db, projectId, name, data);
+      if (r.status === 'set') await touchProject(db, projectId, request.account!.id);
       return { coverAssetId: r.asset.id, changed: r.status === 'set', previous: r.status === 'set' ? r.previous : null };
     });
   });
@@ -428,6 +434,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     return withDb(async (db) => {
       await accessTo(db, request.account!.id, projectId, { edit: true });
       const a = await useEarlierCover(db, projectId, assetId);
+      await touchProject(db, projectId, request.account!.id);
       return { coverAssetId: a.id };
     });
   });
@@ -437,6 +444,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     return withDb(async (db) => {
       await accessTo(db, request.account!.id, projectId, { edit: true });
       await clearCover(db, projectId);
+      await touchProject(db, projectId, request.account!.id);
       return { ok: true };
     });
   });
@@ -462,6 +470,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
         assetId = stored.asset.id;
       }
       await db.update(character).set({ pictureAssetId: assetId, updatedAt: new Date() }).where(eq(character.id, id));
+      await touchProject(db, access.projectId, request.account!.id);
       return { pictureAssetId: assetId };
     });
   });
@@ -471,6 +480,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     return withDb(async (db) => {
       const access = await accessToEntity(db, request.account!.id, 'character', id, { edit: true });
       await db.update(character).set({ pictureAssetId: null, updatedAt: new Date() }).where(eq(character.id, id));
+      await touchProject(db, access.projectId, request.account!.id);
       return { ok: true };
     });
   });

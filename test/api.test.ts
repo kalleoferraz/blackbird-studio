@@ -221,7 +221,8 @@ describe('snapshots', () => {
     const files = saved[0]!.files;
     assert.ok(files['Project.json'] && files['Script.md']);
     assert.ok(Object.keys(files).some((f) => f === 'Chapters/01 - Chapter 1.md'));
-    assert.match(files['Script.md']!, /\*\*Narrator:\*\* Opening line\./);
+    assert.match(files['Script.md']!, /\n\nOpening line\.\n/);
+    assert.doesNotMatch(files['Script.md']!, /Narrator/);
     assert.match(files['Script.md']!, /\[SFX: door slam\]/);
     assert.equal((await call('ann', 'GET', `/api/projects/${p.body.id}`)).body.dirtySince, null);
 
@@ -232,6 +233,28 @@ describe('snapshots', () => {
     assert.equal(list.body.snapshots[0].label, 'first');
     assert.equal((await call('bob', 'POST', `/api/projects/${p.body.id}/snapshot`, {})).status, 404);
     await call('ann', 'DELETE', `/api/projects/${p.body.id}`, { confirmTitle: `Snap ${run}` });
+  });
+
+  it('marks the project as changed after library, cover and picture changes', async () => {
+    setVersionStoreFactory(() => ({ async commit() { return { sha: 'b'.repeat(40) }; } }));
+    const p = await call('ann', 'POST', '/api/projects', { type: 'audiobook', title: `Lib ${run}`, language: 'en-US' });
+    const dirty = async () => (await call('ann', 'GET', `/api/projects/${p.body.id}`)).body.dirtySince;
+    const save = async () => { assert.equal((await call('ann', 'POST', `/api/projects/${p.body.id}/snapshot`, {})).status, 200); assert.equal(await dirty(), null); };
+    const raw = (method: 'POST' | 'PUT', url: string, data: Buffer) =>
+      app.inject({ method, url, payload: data, headers: { cookie: cookies.ann!, 'content-type': 'application/octet-stream' } });
+    await save();
+
+    const up = await raw('POST', `/api/projects/${p.body.id}/library/files?folder=&name=notes.txt`, Buffer.from('hello'));
+    assert.equal(up.statusCode, 201, up.body);
+    assert.ok(await dirty(), 'an upload must mark the project as changed');
+    await save();
+
+    await call('ann', 'POST', `/api/projects/${p.body.id}/library/folders`, { parent: '', name: 'docs' });
+    assert.equal(await dirty(), null, 'an empty folder is not in a snapshot');
+
+    assert.equal((await call('ann', 'DELETE', `/api/assets/${up.json().id}`)).status, 200);
+    assert.ok(await dirty(), 'deleting a file must mark the project as changed');
+    await call('ann', 'DELETE', `/api/projects/${p.body.id}`, { confirmTitle: `Lib ${run}` });
   });
 
   it('answers 503 when the repository is not configured', async () => {

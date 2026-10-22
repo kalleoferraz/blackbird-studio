@@ -186,7 +186,6 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
         {error && <span className="error inline-error" onClick={() => setError('')}>{error}</span>}
         {saved && <span className="muted">{saved}</span>}
         <span className="muted small">{project.dirtySince ? 'Unsaved changes' : `Snapshot ${ago(project.lastSnapshotAt)}`}</span>
-        {!readOnly && <button onClick={() => setAddNote({ target: null, label: 'the media project' })} title="Add a note on the media project">Add note</button>}
         {!readOnly && <button onClick={() => void saveSnapshot()} disabled={saving}>{saving ? 'Saving…' : 'Save snapshot'}</button>}
         <span className="muted small">{me.user.displayName}{readOnly && ' · view only'}</span>
       </header>

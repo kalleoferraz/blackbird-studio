@@ -91,6 +91,7 @@ export function buildProjectJson(rows: Rows): string {
 function chapterMarkdown(ch: Obj, index: string, rows: Rows, characterName: Map<string, string>, heading: number): string {
   const segments = (rows.segments as Obj[]).filter((s) => s.chapterId === ch.id).sort(byPosition);
   const h = (n: number) => '#'.repeat(n);
+  const narrators = new Set((rows.characters as Obj[]).filter((c) => c.isNarrator).map((c) => c.id as string));
   const out: string[] = [`${h(heading)} ${index} · ${ch.title}`];
   for (const sc of segments) {
     out.push('', `${h(heading + 1)} ${sc.title}`);
@@ -105,8 +106,9 @@ function chapterMarkdown(ch: Obj, index: string, rows: Rows, characterName: Map<
         if (q.type === 'sfx') out.push('', `[SFX: ${text.replace(/\s*\n\s*/g, ' ')}]`);
         else if (q.type === 'music') out.push('', `[MUSIC: ${text.replace(/\s*\n\s*/g, ' ')}]`);
         else {
-          const name = q.characterId ? characterName.get(q.characterId) : undefined;
-          out.push('', name ? `**${name}:** ${text}` : text);
+          // The narrator's text stands alone; any other character is named, with a colon and an em dash.
+          const name = q.characterId && !narrators.has(q.characterId) ? characterName.get(q.characterId) : undefined;
+          out.push('', name ? `**${name}:** — ${text}` : text);
         }
       }
     });
