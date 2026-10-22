@@ -5,6 +5,7 @@ import { formatClock, formatMinutes, formatMs, formatSeconds, formatTenths, pars
 import { Confirm, MenuButton, errorText, type MenuItem } from './ui.tsx';
 import { useNav, useStoreValue } from './playback.ts';
 import { AudioPicker } from './AudioPicker.tsx';
+import { audioMenuItems } from './audioMenu.ts';
 
 interface Props {
   content: SegmentContent;
@@ -256,15 +257,10 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
   const askDelete = () => setConfirm({
     title: 'Delete cue', label: 'Delete', message: 'Delete this cue?', run: async () => { await call('DELETE', `/api/cues/${cue.id}`); } });
 
-  const audioMenu: MenuItem[] = [
-    ...cue.clips.map((k): MenuItem => ({ label: `Take ${k.number} · ${k.name}`, hint: formatMs(k.lengthMs), checked: k.id === cue.clipId,
-      onClick: () => { if (k.id !== cue.clipId) void patch2('POST', `/api/cues/${cue.id}/choose-clip`, { clipId: k.id }); } })),
-    ...(cue.clips.length ? ['sep' as const] : []),
-    { label: 'Record a take…', disabled: !!nav?.store.rec, onClick: () => nav?.record(cue.id) },
-    { label: 'Choose audio…', onClick: () => setPicking({ cue, colour: colour.toLowerCase() === '#000000' ? '#EDE4DC' : colour }) },
-    'sep',
-    { label: 'Remove audio', danger: true, disabled: !chosenClip, onClick: () => { if (chosenClip) void patch2('DELETE', `/api/clips/${chosenClip.id}`); } },
-  ];
+  const audioMenu = audioMenuItems(cue, {
+    nav, run: (m, u, b) => void patch2(m, u, b),
+    chooseAudio: () => setPicking({ cue, colour: colour.toLowerCase() === '#000000' ? '#EDE4DC' : colour }),
+  });
   // A length that is only an estimate (no audio, not set by hand) is shown in gray.
   const estimated = !chosenClip && cue.lengthAuto ? ' est' : '';
   const audioTitle = cue.clips.length ? 'No take chosen' : 'No audio yet: record a take or choose audio';

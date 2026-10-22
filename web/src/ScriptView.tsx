@@ -13,6 +13,7 @@ import { NavContext, PlaybackStore } from './playback.ts';
 import { toNav } from './nav.ts';
 import { recordTake } from './recording.ts';
 import { TrimDialog, type TrimRequest } from './TrimDialog.tsx';
+import { Timeline } from './Timeline.tsx';
 import { AudioPlayer } from './audio-playback.ts';
 
 export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: string; segmentId?: string }) {
@@ -53,7 +54,18 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
 
   // Opening another segment starts at its top; re-clicking the open one leaves the scroll where it is.
   const mainRef = useRef<HTMLElement>(null);
+  const titlesRef = useRef<HTMLDivElement>(null);
+  const [titlesGone, setTitlesGone] = useState(false);
+  const [tlOpen, setTlOpen] = useLocalState('rs.timelineOpen', true);
   useEffect(() => { mainRef.current?.scrollTo({ top: 0 }); }, [segmentId]);
+  // Once the chapter and segment titles have scrolled out of sight, a slim header says where we are.
+  useEffect(() => {
+    const el = titlesRef.current, root = mainRef.current;
+    if (!el || !root) { setTitlesGone(false); return; }
+    const io = new IntersectionObserver(([e]) => setTitlesGone(!!e && !e.isIntersecting && e.boundingClientRect.top < (e.rootBounds?.top ?? 0) + 1), { root, threshold: 0 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [content?.segment.id]);
 
   const readOnly = project?.role === 'viewer';
   const refreshAfterEdit = () => { void loadProject(); void loadStory(); };
@@ -146,7 +158,8 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
     <div className="script">
       <header className="topbar">
         <a href="#/" className="brand" title="Projects"><BlackbirdIcon /></a>
-        <a href={`#/p/${projectId}`}>{project.title}</a><span className="grow" />
+        <a href={`#/p/${projectId}`}>{project.title}</a>
+        {project.subtitle && <span className="topbar-sub" title={project.subtitle}>{project.subtitle}</span>}<span className="grow" />
         {error && <span className="error inline-error" onClick={() => setError('')}>{error}</span>}
         {saved && <span className="muted">{saved}</span>}
         <span className="muted small">{project.dirtySince ? 'Unsaved changes' : `Snapshot ${ago(project.lastSnapshotAt)}`}</span>
@@ -161,8 +174,13 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
         <main className="center-col" ref={mainRef}>
           {content ? (
             <div className="doc">
+              <div className="where-wrap"><div className={'where' + (titlesGone ? ' on' : '')} onClick={() => mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} title="Back to the top" data-testid="where">
+                <b>{content.segment.chapterTitle}</b><span className="sep">›</span><span>{content.segment.title}</span>
+              </div></div>
+              <div ref={titlesRef}>
               <TitleEdit className="chapter-title" value={content.segment.chapterTitle} disabled={!!readOnly} onSave={(v) => renameTitle('chapter', content.segment.chapterId, v)} />
               <TitleEdit className="segment-title" value={content.segment.title} disabled={!!readOnly} onSave={(v) => renameTitle('segment', content.segment.id, v)} />
+              </div>
               <Writing content={content} characters={characters} readOnly={!!readOnly} onContent={onContent} onError={setError}
                 onNewCharacter={(then) => setDialog({ then })} />
             </div>
@@ -171,7 +189,9 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
         <RightPanel projectId={projectId} characters={panelCharacters} readOnly={!!readOnly}
           onCharacters={() => void loadCharacters()} onError={setError} openDialog={setDialog} />
       </div>
-      <NavBar store={playback} story={story} follow={follow} onFollow={setFollow} editing={editing} />
+      {content && project.type !== 'textbook' && tlOpen && <Timeline content={content} readOnly={!!readOnly} onContent={onContent} onError={setError} />}
+      <NavBar store={playback} story={story} follow={follow} onFollow={setFollow} editing={editing}
+        timeline={project.type !== 'textbook' ? { open: tlOpen, onToggle: () => setTlOpen(!tlOpen) } : undefined} />
       {trim && <TrimDialog req={trim} onDone={(keep) => { trim.resolve(keep); setTrim(null); }} />}
       {dialog && <CharacterDialog projectId={projectId} state={dialog} characters={characters} onClose={() => setDialog(null)}
         onSaved={() => { void loadCharacters(); if (segmentId) void api<SegmentContent>('GET', `/api/segments/${segmentId}`).then(setContent); }} onError={setError} />}

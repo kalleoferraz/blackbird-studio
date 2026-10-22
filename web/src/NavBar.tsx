@@ -27,8 +27,10 @@ const BUTTONS: { icon: keyof typeof ICONS; label: string; keys: string; dir: 'pr
 ];
 
 /** The one navigation bar of the Script View: position at the left, controls in the centre, clock and Follow at the right. */
-export function NavBar({ store, story, follow, onFollow, editing }: {
+export function NavBar({ store, story, follow, onFollow, editing, timeline }: {
   store: PlaybackStore; story: Story; follow: boolean; onFollow: (v: boolean) => void; editing: boolean;
+  /** The timeline panel's switch; absent where there is no timeline (a textbook). */
+  timeline?: { open: boolean; onToggle: () => void };
 }) {
   useSyncExternalStore(store.subscribe, store.getVersion);
   const seg = store.current();
@@ -114,6 +116,17 @@ export function NavBar({ store, story, follow, onFollow, editing }: {
             title={editing ? 'Follow is paused while you edit a cue' : 'When on, the script scrolls (and opens the next segment) to follow the playhead'}>
             <input type="checkbox" checked={follow} onChange={(e) => onFollow(e.target.checked)} /> Follow
           </label>
+          {timeline && (
+            <button type="button" className={'tlbtn' + (timeline.open ? ' on' : '')} aria-pressed={timeline.open} data-testid="timeline-toggle"
+              title={timeline.open ? 'Hide the timeline' : 'Show the timeline'} onClick={timeline.onToggle}>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+                <path d="M2.5 5.5h8M13.5 5.5h4M2.5 10h4M9.5 10h8M2.5 14.5h10M15.5 14.5h2" />
+                <rect x="10.5" y="3.8" width="3" height="3.4" rx=".6" fill="currentColor" stroke="none" />
+                <rect x="6.5" y="8.3" width="3" height="3.4" rx=".6" fill="currentColor" stroke="none" />
+                <rect x="12.5" y="12.8" width="3" height="3.4" rx=".6" fill="currentColor" stroke="none" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -31,6 +31,8 @@ import {
   splitScene,
   updateClip,
   updateCue,
+  placeCue,
+  type CuePlace,
   type ClipOrigin,
   type ClipPatch,
   type CuePatch,
@@ -387,6 +389,23 @@ export function registerStoryRoutes(app: FastifyInstance): void {
     const patch = readCuePatch(asBody(request.body));
     return segmentWrite(request, 'cue', id, async (tx) => {
       await updateCue(tx, id, patch);
+    });
+  });
+
+  app.post('/api/cues/:id/place', small, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    const body = asBody(request.body);
+    const place: CuePlace = {};
+    const startMs = optInt(body, 'startMs', 0, MAX_SCENE_MS);
+    const lengthMs = optInt(body, 'lengthMs', 100, MAX_SCENE_MS);
+    if (startMs !== undefined) place.startMs = startMs;
+    if (lengthMs !== undefined) place.lengthMs = lengthMs;
+    if ('mode' in body) {
+      if (body.mode !== 'ripple' && body.mode !== 'trim') throw badRequest('invalid_mode');
+      place.mode = body.mode;
+    }
+    return segmentWrite(request, 'cue', id, async (tx) => {
+      await placeCue(tx, id, place);
     });
   });
 

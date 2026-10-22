@@ -6,12 +6,12 @@ export type MenuItem =
   | { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; checked?: boolean; hint?: string; color?: string }
   | 'sep';
 
-/** A popover menu anchored to an element; closes on outside click or Escape. */
-export function Menu({ anchor, items, onClose }: { anchor: HTMLElement; items: MenuItem[]; onClose: () => void }) {
+/** A popover menu anchored to an element, or to a point (a right click); closes on outside click or Escape. */
+export function Menu({ anchor, items, onClose }: { anchor: HTMLElement | { x: number; y: number }; items: MenuItem[]; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   useLayoutEffect(() => {
-    const a = anchor.getBoundingClientRect();
+    const a = anchor instanceof HTMLElement ? anchor.getBoundingClientRect() : { left: anchor.x, right: anchor.x, top: anchor.y, bottom: anchor.y - 2 };
     const m = ref.current!.getBoundingClientRect();
     let left = a.left, top = a.bottom + 2;
     if (left + m.width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - m.width - 8);
@@ -19,7 +19,7 @@ export function Menu({ anchor, items, onClose }: { anchor: HTMLElement; items: M
     setPos({ left, top });
   }, [anchor]);
   useEffect(() => {
-    const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node) && !anchor.contains(e.target as Node)) onClose(); };
+    const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node) && !(anchor instanceof HTMLElement && anchor.contains(e.target as Node))) onClose(); };
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('mousedown', down);
     document.addEventListener('keydown', key);

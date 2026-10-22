@@ -368,6 +368,47 @@ export async function updateCue(tx: Tx, cueId: string, patch: CuePatch): Promise
   return cueRow(tx, cueId);
 }
 
+export interface CuePlace {
+  startMs?: number;
+  lengthMs?: number;
+  /** For a new length: `ripple` moves the later cues by the change, `trim` cuts the cue where the next one on its lane begins. */
+  mode?: 'ripple' | 'trim';
+}
+
+/**
+ * The timeline's move and resize. A move changes only the cue's start and never touches another cue; it is refused
+ * when it would overlap a cue on the same lane. A resize keeps the start: in ripple mode the later cues move by the
+ * change (as with a length typed in the writing panel), in trim mode nothing else moves and the length stops where
+ * the next cue of the lane begins. A hand-set length turns length auto off.
+ */
+export async function placeCue(tx: Tx, cueId: string, place: CuePlace): Promise<CueRow> {
+  let current = await cueRow(tx, cueId);
+  const siblings = (await sceneCues(tx, current.sceneId)).filter((c) => c.id !== cueId && c.laneId === current.laneId);
+
+  if (place.startMs !== undefined && place.startMs !== current.startMs) {
+    const startMs = Math.max(0, place.startMs);
+    checkSpan(startMs, current.lengthMs);
+    if (siblings.some((o) => o.startMs < startMs + current.lengthMs && startMs < o.startMs + o.lengthMs)) {
+      throw new HttpError(409, 'lane_overlap', 'Another cue on this lane is in the way.');
+    }
+    await tx.update(cue).set({ startMs, updatedAt: new Date() }).where(eq(cue.id, cueId));
+    current = await cueRow(tx, cueId);
+  }
+
+  if (place.lengthMs !== undefined && place.lengthMs !== current.lengthMs) {
+    let lengthMs = Math.max(100, place.lengthMs);
+    if (place.mode === 'trim') {
+      const next = siblings.filter((o) => o.startMs >= current.startMs + 1).sort((a, b) => a.startMs - b.startMs)[0];
+      if (next) lengthMs = Math.min(lengthMs, Math.max(100, next.startMs - current.startMs));
+    }
+    checkSpan(current.startMs, lengthMs);
+    const delta = lengthMs - current.lengthMs;
+    await tx.update(cue).set({ lengthMs, lengthAuto: false, updatedAt: new Date() }).where(eq(cue.id, cueId));
+    if (place.mode !== 'trim' && delta !== 0) await applyRipple(tx, current.sceneId, current.startMs + current.lengthMs, delta, [cueId]);
+  }
+  return cueRow(tx, cueId);
+}
+
 export async function deleteCue(tx: Tx, cueId: string): Promise<void> {
   const current = await cueRow(tx, cueId);
   const seg = await sceneRow(tx, current.sceneId);
