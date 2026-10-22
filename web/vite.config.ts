@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// The built app goes to ../public/app and is served by Fastify under /app/.
+// The built app goes to ../public/app; Fastify serves the page at / and its files under /app/.
 export default defineConfig({
   base: '/app/',
   plugins: [react()],

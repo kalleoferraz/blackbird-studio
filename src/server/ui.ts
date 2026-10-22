@@ -27,8 +27,19 @@ export function registerUi(app: FastifyInstance): void {
       .header('content-security-policy', "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' data:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
       .send(content);
   };
-  app.get('/app', async (_req, reply) => send(reply, 'index.html'));
-  app.get('/app/', async (_req, reply) => send(reply, 'index.html'));
+  // The app opens from the root. It is also the host's health check (GET / must return 200), so a missing build
+  // still answers 200 with a small JSON instead of the page.
+  app.get('/', async (_req, reply) => {
+    try {
+      await readFile(appFolder + 'index.html');
+    } catch {
+      return reply.send({ ok: true, name: 'blackbird-studio', ui: 'not built' });
+    }
+    return send(reply, 'index.html');
+  });
+  // Old address of the app.
+  app.get('/app', async (_req, reply) => reply.redirect('/'));
+  app.get('/app/', async (_req, reply) => reply.redirect('/'));
   app.get('/app/:name', async (req, reply) => {
     const name = (req.params as { name: string }).name;
     if (!/^[\w-]+\.(svg|png|ico)$/.test(name)) return reply.code(404).send({ error: 'not_found' });

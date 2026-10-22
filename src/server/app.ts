@@ -15,8 +15,7 @@ export function buildApp(): FastifyInstance {
   // X-Forwarded-For can dodge the per-address limit, but not the per-account one.
   const app = Fastify({ logger: true, trustProxy: true });
 
-  // The host's health check does GET / on 127.0.0.1:<port>; it must return 200.
-  app.get('/', async () => ({ ok: true, name: 'blackbird-studio' }));
+  // GET / is the app itself (registerUi). The host's health check also does GET / on 127.0.0.1:<port> and needs a 200.
 
   app.get('/health', async () => ({
     status: 'ok',
