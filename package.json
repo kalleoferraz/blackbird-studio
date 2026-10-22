@@ -1,8 +1,8 @@
 {
-  "name": "blackbird-studio",
+  "name": "merulo-studio",
   "version": "0.0.1",
   "private": true,
-  "description": "Blackbird Studio: write, record and organize a media project (audiobook, textbook, film, series, podcast) in one place.",
+  "description": "Merulo Studio: write, record and organize a media project (audiobook, textbook, film, series, podcast) in one place.",
   "type": "module",
   "engines": {
     "node": ">=22"
