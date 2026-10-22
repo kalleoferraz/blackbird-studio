@@ -13,6 +13,7 @@
     "start": "node dist/server/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:generate": "drizzle-kit generate",
+    "reset:local": "tsx --env-file=.env.local scripts/reset-local.ts",
     "web:dev": "vite --config web/vite.config.ts web",
     "web:build": "vite build --config web/vite.config.ts web",
     "web:typecheck": "tsc -p web/tsconfig.json",

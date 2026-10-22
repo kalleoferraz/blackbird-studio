@@ -284,7 +284,7 @@ export function registerProjectRoutes(app: FastifyInstance): void {
     const rows = await q
       .select({ n: count() })
       .from(membership)
-      .where(and(eq(membership.projectId, projectId), inArray(membership.role, ['author', 'owner'])));
+      .where(and(eq(membership.projectId, projectId), eq(membership.role, 'author')));
     return Number(rows[0]?.n ?? 0);
   }
 

@@ -119,7 +119,6 @@ export const project = mysqlTable('project', {
   type: mysqlEnum('type', ['audiobook', 'textbook', 'film', 'series', 'podcast']).notNull().default('audiobook'),
   title: varchar('title', { length: 200 }).notNull(),
   subtitle: varchar('subtitle', { length: 200 }),
-  visibility: mysqlEnum('visibility', ['private', 'public']).notNull().default('private'),
   language: varchar('language', { length: 10 }).notNull(), // BCP 47, such as pt-BR
   // What the recorded speech takes taught the speech-length estimate: speaking units and the milliseconds they took (see src/shared/estimate.ts).
   speechUnits: double('speech_units').notNull().default(0),
@@ -149,7 +148,7 @@ export const membership = mysqlTable(
       .notNull()
       .references(() => project.id, { onDelete: 'cascade' }),
     // One role per membership for now; several roles later means a user_roles table.
-    role: mysqlEnum('role', ['owner', 'author', 'narrator', 'translator', 'reader']).notNull(),
+    role: mysqlEnum('role', ['author', 'narrator', 'translator', 'reader']).notNull(),
     createdAt: createdAt(),
   },
   (t) => [
@@ -314,7 +313,6 @@ export const cue = mysqlTable(
     lengthMs: ms('length_ms').notNull(), // authoritative: a clip plays inside it
     // True until the length is set by hand or a clip becomes chosen. Speech: follows the text estimate; sfx and music: follows the chosen clip's audio length.
     lengthAuto: boolean('length_auto').notNull().default(true),
-    title: varchar('title', { length: 200 }), // unused since 2026-10-20 (merged into text_md); a later migration removes it
     textMd: text('text_md').notNull(), // speech: Markdown spoken text; sfx and music: a one-line description
     createdAt: createdAt(),
     updatedAt: updatedAt(),

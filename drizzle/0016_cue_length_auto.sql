@@ -1,1 +1,0 @@
-ALTER TABLE `cue` ADD `length_auto` boolean DEFAULT true NOT NULL;

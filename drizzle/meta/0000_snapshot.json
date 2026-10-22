@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "822d7de2-2b72-4c7a-bfe8-6bf0e2ccdc08",
+  "id": "b137cb04-e1c2-4c14-87bd-c4d83a13e13b",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "asset": {
@@ -47,6 +47,20 @@
           "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "size_lightweight": {
+          "name": "size_lightweight",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lightweight_path": {
+          "name": "lightweight_path",
+          "type": "varchar(255) character set utf8mb4 collate utf8mb4_unicode_ci",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "media_info": {
@@ -133,6 +147,14 @@
           ],
           "isUnique": true
         },
+        "asset_project_lightweight_path_uq": {
+          "name": "asset_project_lightweight_path_uq",
+          "columns": [
+            "project_id",
+            "lightweight_path"
+          ],
+          "isUnique": true
+        },
         "asset_status_claimed_idx": {
           "name": "asset_status_claimed_idx",
           "columns": [
@@ -162,6 +184,66 @@
           "name": "asset_id",
           "columns": [
             "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "asset_peaks": {
+      "name": "asset_peaks",
+      "columns": {
+        "asset_id": {
+          "name": "asset_id",
+          "type": "char(26) character set ascii collate ascii_bin",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "step_ms": {
+          "name": "step_ms",
+          "type": "smallint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 100
+        },
+        "data": {
+          "name": "data",
+          "type": "mediumblob",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "asset_peaks_asset_id_asset_id_fk": {
+          "name": "asset_peaks_asset_id_asset_id_fk",
+          "tableFrom": "asset_peaks",
+          "tableTo": "asset",
+          "columnsFrom": [
+            "asset_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "asset_peaks_asset_id": {
+          "name": "asset_peaks_asset_id",
+          "columns": [
+            "asset_id"
           ]
         }
       },
@@ -281,6 +363,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "is_narrator": {
+          "name": "is_narrator",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "default_colour": {
           "name": "default_colour",
@@ -433,7 +523,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 0
+          "default": 100
         },
         "fade_out_ms": {
           "name": "fade_out_ms",
@@ -441,7 +531,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 0
+          "default": 100
         },
         "loops": {
           "name": "loops",
@@ -532,8 +622,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "segment_id": {
-          "name": "segment_id",
+        "scene_id": {
+          "name": "scene_id",
           "type": "char(26) character set ascii collate ascii_bin",
           "primaryKey": false,
           "notNull": true,
@@ -544,6 +634,21 @@
           "type": "char(26) character set ascii collate ascii_bin",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "type": {
+          "name": "type",
+          "type": "enum('speech','sfx','music')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'speech'"
+        },
+        "character_id": {
+          "name": "character_id",
+          "type": "char(26) character set ascii collate ascii_bin",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "clip_id": {
@@ -567,12 +672,13 @@
           "notNull": true,
           "autoincrement": false
         },
-        "title": {
-          "name": "title",
-          "type": "varchar(200)",
+        "length_auto": {
+          "name": "length_auto",
+          "type": "boolean",
           "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
         },
         "text_md": {
           "name": "text_md",
@@ -597,19 +703,19 @@
         }
       },
       "indexes": {
-        "cue_segment_start_idx": {
-          "name": "cue_segment_start_idx",
+        "cue_scene_start_idx": {
+          "name": "cue_scene_start_idx",
           "columns": [
-            "segment_id",
+            "scene_id",
             "start_ms"
           ],
           "isUnique": false
         },
-        "cue_lane_segment_start_idx": {
-          "name": "cue_lane_segment_start_idx",
+        "cue_lane_scene_start_idx": {
+          "name": "cue_lane_scene_start_idx",
           "columns": [
             "lane_id",
-            "segment_id",
+            "scene_id",
             "start_ms"
           ],
           "isUnique": false
@@ -623,12 +729,12 @@
         }
       },
       "foreignKeys": {
-        "cue_segment_id_segment_id_fk": {
-          "name": "cue_segment_id_segment_id_fk",
+        "cue_scene_id_scene_id_fk": {
+          "name": "cue_scene_id_scene_id_fk",
           "tableFrom": "cue",
-          "tableTo": "segment",
+          "tableTo": "scene",
           "columnsFrom": [
-            "segment_id"
+            "scene_id"
           ],
           "columnsTo": [
             "id"
@@ -647,6 +753,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "cue_character_id_character_id_fk": {
+          "name": "cue_character_id_character_id_fk",
+          "tableFrom": "cue",
+          "tableTo": "character",
+          "columnsFrom": [
+            "character_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "cue_clip_id_clip_id_fk": {
@@ -684,8 +803,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "scene_id": {
-          "name": "scene_id",
+        "segment_id": {
+          "name": "segment_id",
           "type": "char(26) character set ascii collate ascii_bin",
           "primaryKey": false,
           "notNull": true,
@@ -719,6 +838,14 @@
           "notNull": true,
           "autoincrement": false
         },
+        "auto": {
+          "name": "auto",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
         "created_at": {
           "name": "created_at",
           "type": "datetime(3)",
@@ -735,22 +862,22 @@
         }
       },
       "indexes": {
-        "lane_scene_position_uq": {
-          "name": "lane_scene_position_uq",
+        "lane_segment_position_uq": {
+          "name": "lane_segment_position_uq",
           "columns": [
-            "scene_id",
+            "segment_id",
             "position"
           ],
           "isUnique": true
         }
       },
       "foreignKeys": {
-        "lane_scene_id_scene_id_fk": {
-          "name": "lane_scene_id_scene_id_fk",
+        "lane_segment_id_segment_id_fk": {
+          "name": "lane_segment_id_segment_id_fk",
           "tableFrom": "lane",
-          "tableTo": "scene",
+          "tableTo": "segment",
           "columnsFrom": [
-            "scene_id"
+            "segment_id"
           ],
           "columnsTo": [
             "id"
@@ -802,7 +929,7 @@
         },
         "role": {
           "name": "role",
-          "type": "enum('owner','author','narrator','translator')",
+          "type": "enum('author','narrator','translator','reader')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -888,6 +1015,14 @@
           "notNull": false,
           "autoincrement": false
         },
+        "author_kind": {
+          "name": "author_kind",
+          "type": "enum('user','system','llm')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'user'"
+        },
         "type": {
           "name": "type",
           "type": "enum('comment','reference','task')",
@@ -905,6 +1040,13 @@
         "ref_key": {
           "name": "ref_key",
           "type": "varchar(24) character set utf8mb4 collate utf8mb4_unicode_ci",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "link": {
+          "name": "link",
+          "type": "varchar(2048)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -930,15 +1072,15 @@
           "notNull": false,
           "autoincrement": false
         },
-        "scene_id": {
-          "name": "scene_id",
+        "segment_id": {
+          "name": "segment_id",
           "type": "char(26) character set ascii collate ascii_bin",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "segment_id": {
-          "name": "segment_id",
+        "scene_id": {
+          "name": "scene_id",
           "type": "char(26) character set ascii collate ascii_bin",
           "primaryKey": false,
           "notNull": false,
@@ -1018,17 +1160,17 @@
           ],
           "isUnique": false
         },
-        "note_scene_idx": {
-          "name": "note_scene_idx",
-          "columns": [
-            "scene_id"
-          ],
-          "isUnique": false
-        },
         "note_segment_idx": {
           "name": "note_segment_idx",
           "columns": [
             "segment_id"
+          ],
+          "isUnique": false
+        },
+        "note_scene_idx": {
+          "name": "note_scene_idx",
+          "columns": [
+            "scene_id"
           ],
           "isUnique": false
         },
@@ -1115,12 +1257,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "note_scene_id_scene_id_fk": {
-          "name": "note_scene_id_scene_id_fk",
+        "note_segment_id_segment_id_fk": {
+          "name": "note_segment_id_segment_id_fk",
           "tableFrom": "note",
-          "tableTo": "scene",
+          "tableTo": "segment",
           "columnsFrom": [
-            "scene_id"
+            "segment_id"
           ],
           "columnsTo": [
             "id"
@@ -1128,12 +1270,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "note_segment_id_segment_id_fk": {
-          "name": "note_segment_id_segment_id_fk",
+        "note_scene_id_scene_id_fk": {
+          "name": "note_scene_id_scene_id_fk",
           "tableFrom": "note",
-          "tableTo": "segment",
+          "tableTo": "scene",
           "columnsFrom": [
-            "segment_id"
+            "scene_id"
           ],
           "columnsTo": [
             "id"
@@ -1215,6 +1357,14 @@
           "notNull": true,
           "autoincrement": false
         },
+        "type": {
+          "name": "type",
+          "type": "enum('audiobook','textbook','film','series','podcast')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'audiobook'"
+        },
         "title": {
           "name": "title",
           "type": "varchar(200)",
@@ -1222,13 +1372,12 @@
           "notNull": true,
           "autoincrement": false
         },
-        "visibility": {
-          "name": "visibility",
-          "type": "enum('private','public')",
+        "subtitle": {
+          "name": "subtitle",
+          "type": "varchar(200)",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'private'"
+          "notNull": false,
+          "autoincrement": false
         },
         "language": {
           "name": "language",
@@ -1236,6 +1385,22 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "speech_units": {
+          "name": "speech_units",
+          "type": "double",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "speech_ms": {
+          "name": "speech_ms",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         },
         "cover_asset_id": {
           "name": "cover_asset_id",
@@ -1259,9 +1424,23 @@
           "notNull": false,
           "autoincrement": false
         },
+        "last_edited_at": {
+          "name": "last_edited_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "active_session": {
           "name": "active_session",
           "type": "char(26) character set ascii collate ascii_bin",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "repo_folder": {
+          "name": "repo_folder",
+          "type": "varchar(80) character set utf8mb4 collate utf8mb4_unicode_ci",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -1281,7 +1460,15 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "project_repo_folder_uq": {
+          "name": "project_repo_folder_uq",
+          "columns": [
+            "repo_folder"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {
         "project_cover_asset_id_asset_id_fk": {
           "name": "project_cover_asset_id_asset_id_fk",
@@ -1310,6 +1497,88 @@
     },
     "scene": {
       "name": "scene",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(26) character set ascii collate ascii_bin",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "segment_id": {
+          "name": "segment_id",
+          "type": "char(26) character set ascii collate ascii_bin",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "position": {
+          "name": "position",
+          "type": "smallint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "label": {
+          "name": "label",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "scene_segment_position_uq": {
+          "name": "scene_segment_position_uq",
+          "columns": [
+            "segment_id",
+            "position"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "scene_segment_id_segment_id_fk": {
+          "name": "scene_segment_id_segment_id_fk",
+          "tableFrom": "scene",
+          "tableTo": "segment",
+          "columnsFrom": [
+            "segment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "scene_id": {
+          "name": "scene_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "segment": {
+      "name": "segment",
       "columns": {
         "id": {
           "name": "id",
@@ -1355,8 +1624,8 @@
         }
       },
       "indexes": {
-        "scene_chapter_position_uq": {
-          "name": "scene_chapter_position_uq",
+        "segment_chapter_position_uq": {
+          "name": "segment_chapter_position_uq",
           "columns": [
             "chapter_id",
             "position"
@@ -1365,94 +1634,12 @@
         }
       },
       "foreignKeys": {
-        "scene_chapter_id_chapter_id_fk": {
-          "name": "scene_chapter_id_chapter_id_fk",
-          "tableFrom": "scene",
+        "segment_chapter_id_chapter_id_fk": {
+          "name": "segment_chapter_id_chapter_id_fk",
+          "tableFrom": "segment",
           "tableTo": "chapter",
           "columnsFrom": [
             "chapter_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "scene_id": {
-          "name": "scene_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "segment": {
-      "name": "segment",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "char(26) character set ascii collate ascii_bin",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "scene_id": {
-          "name": "scene_id",
-          "type": "char(26) character set ascii collate ascii_bin",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "position": {
-          "name": "position",
-          "type": "smallint unsigned",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "label": {
-          "name": "label",
-          "type": "varchar(100)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "segment_scene_position_uq": {
-          "name": "segment_scene_position_uq",
-          "columns": [
-            "scene_id",
-            "position"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "segment_scene_id_scene_id_fk": {
-          "name": "segment_scene_id_scene_id_fk",
-          "tableFrom": "segment",
-          "tableTo": "scene",
-          "columnsFrom": [
-            "scene_id"
           ],
           "columnsTo": [
             "id"
@@ -1574,6 +1761,126 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
+    "team": {
+      "name": "team",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(26) character set ascii collate ascii_bin",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "team_name_uq": {
+          "name": "team_name_uq",
+          "columns": [
+            "name"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "team_id": {
+          "name": "team_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "team_member": {
+      "name": "team_member",
+      "columns": {
+        "team_id": {
+          "name": "team_id",
+          "type": "char(26) character set ascii collate ascii_bin",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "char(26) character set ascii collate ascii_bin",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "team_member_user_idx": {
+          "name": "team_member_user_idx",
+          "columns": [
+            "user_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "team_member_team_id_team_id_fk": {
+          "name": "team_member_team_id_team_id_fk",
+          "tableFrom": "team_member",
+          "tableTo": "team",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "team_member_user_id_user_id_fk": {
+          "name": "team_member_user_id_user_id_fk",
+          "tableFrom": "team_member",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "team_member_team_id_user_id_pk": {
+          "name": "team_member_team_id_user_id_pk",
+          "columns": [
+            "team_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
     "user": {
       "name": "user",
       "columns": {
@@ -1603,6 +1910,35 @@
           "type": "varchar(100)",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "disabled_at": {
+          "name": "disabled_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "must_change_password": {
+          "name": "must_change_password",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "last_login_at": {
+          "name": "last_login_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_edit_at": {
+          "name": "last_edit_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "created_at": {

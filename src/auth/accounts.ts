@@ -1,11 +1,11 @@
 import { randomBytes } from 'node:crypto';
-import { asc, eq, and, inArray, ne, isNull } from 'drizzle-orm';
+import { asc, eq, and, ne, isNull } from 'drizzle-orm';
 import { withDb, type Db } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { membership, project, user } from '../db/schema.js';
 import { checkPasswordRules, hashPassword } from './password.js';
 
-export const ROLES = ['owner', 'author', 'narrator', 'translator', 'reader'] as const;
+export const ROLES = ['author', 'narrator', 'translator', 'reader'] as const;
 export type Role = (typeof ROLES)[number];
 
 export type UserRow = typeof user.$inferSelect;
@@ -179,14 +179,14 @@ export async function soleAuthorProjects(db: Db, userId: string): Promise<{ proj
     .select({ projectId: membership.projectId, title: project.title })
     .from(membership)
     .innerJoin(project, eq(project.id, membership.projectId))
-    .where(and(eq(membership.userId, userId), inArray(membership.role, ['owner', 'author'])));
+    .where(and(eq(membership.userId, userId), eq(membership.role, 'author')));
   const blocking: { projectId: string; title: string }[] = [];
   for (const m of mine) {
     const others = await db
       .select({ id: user.id })
       .from(membership)
       .innerJoin(user, eq(user.id, membership.userId))
-      .where(and(eq(membership.projectId, m.projectId), inArray(membership.role, ['owner', 'author']), ne(membership.userId, userId), isNull(user.disabledAt)))
+      .where(and(eq(membership.projectId, m.projectId), eq(membership.role, 'author'), ne(membership.userId, userId), isNull(user.disabledAt)))
       .limit(1);
     if (others.length === 0) blocking.push(m);
   }

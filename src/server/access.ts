@@ -8,7 +8,7 @@ import { HttpError, notFound } from './http.js';
 export type Level = 'author' | 'viewer';
 
 export function levelOf(role: string): Level {
-  return role === 'author' || role === 'owner' ? 'author' : 'viewer';
+  return role === 'author' ? 'author' : 'viewer';
 }
 
 export interface Access {

@@ -1,2 +1,0 @@
-ALTER TABLE `project` ADD `repo_folder` varchar(80) character set utf8mb4 collate utf8mb4_unicode_ci;--> statement-breakpoint
-ALTER TABLE `project` ADD CONSTRAINT `project_repo_folder_uq` UNIQUE(`repo_folder`);

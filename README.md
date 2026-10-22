@@ -12,6 +12,19 @@ First working version (everything except audio): accounts and teams, projects, m
 
 Node.js 22 or newer.
 
+## Quick start (fresh install)
+
+```bash
+npm install
+cp .env.example .env.local        # set DB_*, SESSION_SECRET, ADMIN_EMAIL and ADMIN_PASSWORD (10+ characters)
+scripts/local-db-setup.sh         # creates the local MySQL database and user named in .env.local
+npm run dev                       # creates every table (drizzle/0000_init.sql) and the admin account, then serves :3000
+```
+
+The whole schema is one baseline migration, `drizzle/0000_init.sql`, applied by the app at startup. Later schema changes are added on top of it with `npm run db:generate`. `npm run reset:local` empties the local database and library and rebuilds the schema.
+
+On the host (no shell): to start over, set `RESET_ALL_DATA` to a new tag (for example `2026-10-22`), deploy, and remove the variable after the first healthy start. It drops every table, empties the library folder and rebuilds the schema once; see Bible section 4, Migrations.
+
 ## Commands
 
 ```bash

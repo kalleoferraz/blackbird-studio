@@ -1,1 +1,0 @@
-ALTER TABLE `user` ADD `last_login_at` datetime(3);

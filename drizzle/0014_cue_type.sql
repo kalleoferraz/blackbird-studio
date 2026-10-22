@@ -1,1 +1,0 @@
-ALTER TABLE `cue` ADD `type` enum('speech','sfx','music') DEFAULT 'speech' NOT NULL;

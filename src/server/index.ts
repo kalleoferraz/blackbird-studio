@@ -2,6 +2,7 @@ import { buildApp } from './app.js';
 import { bootstrapAccounts } from '../auth/accounts.js';
 import { sessionConfigured } from '../auth/session.js';
 import { runMigrations } from '../db/migrate.js';
+import { resetIfRequested } from '../db/reset.js';
 import { startAudioJobs } from '../audio/jobs.js';
 import { normalizeAllManagedFolders } from '../library/managed.js';
 
@@ -11,7 +12,10 @@ try {
   // Apply pending database migrations before accepting requests. Without database settings
   // (a local run with no .env) the app starts anyway, since the health check must still answer.
   if (process.env.DB_HOST) {
+    // One-time wipe of data and library when RESET_ALL_DATA is set to a new tag (see src/db/reset.ts).
+    const finishReset = await resetIfRequested(app.log);
     await runMigrations();
+    finishReset?.();
     app.log.info('Database migrations are up to date');
     await bootstrapAccounts(app.log);
     // Libraries made before the managed folders were spelled Characters and Storyline are renamed here.

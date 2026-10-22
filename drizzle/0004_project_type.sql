@@ -1,1 +1,0 @@
-ALTER TABLE `project` ADD `type` enum('audiobook','textbook','film','series','podcast') DEFAULT 'audiobook' NOT NULL;
