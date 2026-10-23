@@ -357,5 +357,12 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 
 /* Manage Project card */
 .manage-actions { display: flex; flex-wrap: wrap; gap: 18px 28px; align-items: flex-start; }
-.manage-actions > .manage-col { flex: 1 1 280px; min-width: 240px; display: flex; flex-direction: column; gap: 18px; }
+.manage-actions > .manage-col { flex: 1 1 220px; min-width: 200px; }
 .manage-actions p { margin: 6px 0 0; }
+
+.lib-missing { flex: none; width: 16px; height: 16px; margin-right: 4px; border-radius: 50%; background: #e5484d; color: #fff; font-size: 12px; font-weight: 700; line-height: 16px; text-align: center; cursor: help; }
+.restore-list { max-height: 40vh; overflow: auto; margin: 10px 0; border: 1px solid var(--line, #3a3a3a); border-radius: 6px; }
+.restore-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--line, #2c2c2c); }
+.restore-row:last-child { border-bottom: 0; }
+.restore-row select { width: auto; flex: none; }
+.clash-existing { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }

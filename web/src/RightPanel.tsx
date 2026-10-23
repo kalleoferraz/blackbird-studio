@@ -77,11 +77,11 @@ export function CharacterDialog({ projectId, state, characters, onClose, onSaved
   );
 }
 
-export function RightPanel({ projectId, meId, characters, readOnly, onCharacters, onError, openDialog, notes, story, noteFocus, noteRequest, onNotesChanged }: {
+export function RightPanel({ projectId, meId, characters, readOnly, onCharacters, onError, openDialog, notes, story, noteFocus, noteRequest, onNotesChanged, onAssetChanged }: {
   projectId: string; meId: string; characters: Character[]; readOnly: boolean;
   onCharacters: () => void; onError: (m: string) => void;
   openDialog: (s: CharacterDialogState) => void;
-  notes: NoteItem[]; story: Story; noteFocus: NoteFocus; noteRequest: NoteRequest | null; onNotesChanged: () => void;
+  notes: NoteItem[]; story: Story; noteFocus: NoteFocus; noteRequest: NoteRequest | null; onNotesChanged: () => void; onAssetChanged: () => void;
 }) {
   const [remove, setRemove] = useState<Character | null>(null);
   const [tab, setTab] = useLocalState<'characters' | 'library' | 'notes'>('rs.rightTab', 'characters');
@@ -96,7 +96,7 @@ export function RightPanel({ projectId, meId, characters, readOnly, onCharacters
       </div>
       {tab === 'notes' && <NotesPanel projectId={projectId} meId={meId} readOnly={readOnly} notes={notes} story={story} focus={noteFocus}
         request={noteRequest} onChanged={onNotesChanged} onError={onError} />}
-      {tab === 'library' && <LibraryPanel projectId={projectId} readOnly={readOnly} onError={onError} />}
+      {tab === 'library' && <LibraryPanel projectId={projectId} readOnly={readOnly} onError={onError} onAssetChanged={onAssetChanged} />}
       {tab === 'characters' && (
         <div className="panel-body">
           {characters.map((c) => (

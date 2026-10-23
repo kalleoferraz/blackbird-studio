@@ -4,6 +4,7 @@ import { formatBytes, formatDuration } from './format.ts';
 import type { LibFile, LibFolder, LibListing } from './types.ts';
 import { Confirm, Dialog, MenuButton, errorText, useLocalState } from './ui.tsx';
 import { AssetNotesBadge, useNotes } from './notesContext.tsx';
+import { forgetPeaks } from './peaks.ts';
 
 /** Dispatched on `window` when files are added to the library from outside the Library panel. */
 export const LIBRARY_CHANGED = 'library-changed';
@@ -12,7 +13,7 @@ const KIND_ICON: Record<string, string> = { image: '🖼', audio: '♪', video: 
 const ROOT: LibFolder = { name: '/', path: '', managed: true, writable: true };
 
 /** The library as an explorer tree: folders open and close in place, there is no navigation. */
-export function LibraryPanel({ projectId, readOnly, onError }: { projectId: string; readOnly: boolean; onError: (m: string) => void }) {
+export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged }: { projectId: string; readOnly: boolean; onError: (m: string) => void; onAssetChanged: () => void }) {
   const [open, setOpen] = useLocalState<string[]>(`rs.libOpen.${projectId}`, []);
   const [lists, setLists] = useState<Record<string, LibListing>>({});
   const [busy, setBusy] = useState('');
@@ -23,6 +24,9 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
   const [removeFolder, setRemoveFolder] = useState<{ folder: LibFolder; nonEmpty: boolean } | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const reInput = useRef<HTMLInputElement>(null);
+  const reTarget = useRef<{ file: LibFile; folder: string } | null>(null);
+  const [info, setInfo] = useState('');
   const notes = useNotes();
   const target = useRef('');
   const expanded = new Set(['', ...open]);
@@ -65,6 +69,31 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
 
   const retry = async (file: LibFile, folder: string) => {
     try { await api('POST', `/api/assets/${file.id}/retry`); await fetchList(folder); } catch (e) { onError(errorText(e)); }
+  };
+
+  /** A new file for an asset that exists in the list (a missing one put back). Its cues keep their clips. */
+  const reupload = async (file: LibFile, folder: string, f: File) => {
+    setInfo(''); setBusy(`Uploading ${f.name}…`);
+    try {
+      const r = await uploadFile<{ tasks: number }>('POST', `/api/assets/${file.id}/replace`, f);
+      forgetPeaks(file.id);
+      onError('');
+      if (r.tasks) setInfo(r.tasks === 1 ? 'Added the task “Check if new audio is fitting” to the cue.' : `Added the task “Check if new audio is fitting” to ${r.tasks} cues.`);
+      await fetchList(folder);
+      onAssetChanged();
+      if (file.kind === 'audio') {
+        // The waveform is made again in the background: look until it is there, then redraw the timeline.
+        for (let i = 0; i < 60; i++) {
+          await new Promise((res) => setTimeout(res, 1500));
+          const a = await api<{ status: string }>('GET', `/api/assets/${file.id}`).catch(() => null);
+          if (a && a.status !== 'pending' && a.status !== 'processing') break;
+        }
+        forgetPeaks(file.id);
+        await fetchList(folder);
+        onAssetChanged();
+      }
+    } catch (e) { onError(errorText(e)); }
+    setBusy('');
   };
 
   const toggle = (path: string) => {
@@ -122,6 +151,7 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
             {l.folders.map((c) => renderFolder(c, depth + 1))}
             {l.files.map((file) => (
               <div key={file.id} className="tree-row" style={{ paddingLeft: (depth + 1) * 14 }}>
+                {file.fileState === 'missing' && <span className="lib-missing" role="img" aria-label="File missing" title="The file is missing: it is listed in the project but its bytes are not here. Re-upload it from the menu.">!</span>}
                 <AssetNotesBadge assetId={file.id} />
                 <button className="tree-main" onClick={() => setPreview(file)} title={file.usage?.length ? `Used by ${file.usage.join(', ')}` : file.name}>
                   <span className="tree-icon">{file.kind === 'image' ? <img src={assetUrl(file.id, file.hasLightweight)} alt="" loading="lazy" /> : KIND_ICON[file.kind]}</span>
@@ -134,6 +164,7 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
                   { label: file.kind === 'image' ? 'Preview' : file.kind === 'audio' ? 'Play' : 'Details', onClick: () => setPreview(file) },
                   { label: file.kind === 'audio' && file.format === 'wav' ? 'Download WAV' : 'Download', onClick: () => { window.location.href = assetUrl(file.id, false, true); } },
                   ...(file.kind === 'audio' && file.hasLightweight ? [{ label: 'Download MP3', onClick: () => { window.location.href = assetUrl(file.id, true, true); } }] : []),
+                  ...(file.fileState === 'missing' && !readOnly ? [{ label: 'Re-upload file…', onClick: () => { reTarget.current = { file, folder: l.folder }; if (reInput.current) { reInput.current.accept = /\.[A-Za-z0-9]+$/.test(file.name) ? file.name.slice(file.name.lastIndexOf('.')) : ''; reInput.current.click(); } } }] : []),
                   ...(file.status === 'failed' && !readOnly ? [{ label: 'Retry encoding', onClick: () => void retry(file, l.folder) }] : []),
                   ...(readOnly ? [] : [{ label: 'Add note…', onClick: () => notes.add({ kind: 'asset', id: file.id }, `file “${file.name}”`) }]),
                   ...(readOnly ? [] : ['sep' as const, { label: 'Delete…', danger: true, disabled: !!file.usage?.length, hint: file.usage?.length ? 'in use' : undefined, onClick: () => setRemoveFile(file) }]),
@@ -147,7 +178,9 @@ export function LibraryPanel({ projectId, readOnly, onError }: { projectId: stri
   return (
     <div className="panel-body library">
       {busy && <p className="muted small">{busy}</p>}
+      {!busy && info && <p className="muted small">{info}</p>}
       {renderFolder({ ...ROOT, writable: !readOnly }, 0, true)}
+      <input ref={reInput} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; const t = reTarget.current; if (f && t) void reupload(t.file, t.folder, f); e.target.value = ''; }} />
       <input ref={input} type="file" multiple hidden onChange={(e) => { if (e.target.files) void upload(target.current, e.target.files); e.target.value = ''; }} />
 
       {preview && <Dialog title={preview.name} wide onClose={() => setPreview(null)}>

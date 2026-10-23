@@ -79,15 +79,28 @@ after(async () => {
 
 /** The file without what must differ between two imports of it. */
 const essence = (b: any) => ({ ...b, exportedAt: undefined, project: { ...b.project, title: undefined, repoFolder: undefined } });
-const exportOf = async (who: string, id: string) => (await call(who, 'GET', `/api/projects/${id}/export`)).res;
+const { readZipEntry, readZipIndex } = await import('../web/src/zip.js');
+/** The export is a zip: project.json at its root and the library's files. This returns the response with the project file read out of it. */
+const exportOf = async (who: string, id: string) => {
+  const res = (await call(who, 'GET', `/api/projects/${id}/export`)).res;
+  let project: any = null;
+  let names: string[] = [];
+  if (res.statusCode === 200) {
+    const blob = new Blob([res.rawPayload]);
+    const entries = await readZipIndex(blob);
+    names = entries.map((e) => e.name);
+    project = JSON.parse(await (await readZipEntry(blob, entries.find((e) => e.name === 'project.json')!)).text());
+  }
+  return { statusCode: res.statusCode, headers: res.headers, raw: res.rawPayload, names, json: () => project };
+};
 
 describe('export, import and library zip', () => {
   let file: any;
 
-  it('exports everything but the members as a JSON download', async () => {
+  it('exports everything but the members as one zip with project.json in its root', async () => {
     const res = await exportOf('ann', ids.p);
     assert.equal(res.statusCode, 200);
-    assert.match(String(res.headers['content-disposition']), /^attachment; filename=".*\.json"; filename\*=UTF-8''/);
+    assert.match(String(res.headers['content-disposition']), /^attachment; filename=".*\.zip"; filename\*=UTF-8''/);
     file = res.json();
     assert.equal(file.format, 'blackbird-project');
     assert.equal(file.assets.length, 1);
@@ -103,6 +116,10 @@ describe('export, import and library zip', () => {
     assert.equal(taken.status, 409, JSON.stringify(taken.body));
     assert.equal(taken.body.error, 'folder_taken');
     assert.ok(taken.body.suggestion && taken.body.suggestion !== taken.body.folder);
+    assert.equal(taken.body.existing, undefined); // cy cannot edit ann's project, so there is nothing to add files to
+    const own = await call('ann', 'POST', '/api/projects/import', { file });
+    assert.equal(own.status, 409);
+    assert.deepEqual(own.body.existing, { id: ids.p, title: `Transfer ${run} Ünï` }); // ann can: the app offers to add the files there
     // still taken when the user types a name that is taken (ignoring case)
     assert.equal((await call('cy', 'POST', '/api/projects/import', { file, repoFolder: taken.body.folder.toUpperCase() })).status, 409);
 
@@ -146,15 +163,20 @@ describe('export, import and library zip', () => {
     assert.equal((await app.inject({ method: 'POST', url: '/api/projects/import', payload: { file } })).statusCode, 401);
   });
 
-  it('streams the library as a zip with its files', async () => {
-    const res = (await call('ann', 'GET', `/api/projects/${ids.p}/library.zip`)).res;
-    assert.equal(res.statusCode, 200);
+  it('has the library files next to project.json in the zip, and refuses a clashing file name', async () => {
+    const res = await exportOf('ann', ids.p!);
     assert.equal(res.headers['content-type'], 'application/zip');
-    assert.match(String(res.headers['content-disposition']), /library\.zip/);
-    const bytes = res.rawPayload;
-    assert.equal(bytes.subarray(0, 2).toString(), 'PK');
-    assert.ok(bytes.includes(Buffer.from('birds.wav')), 'the file name is in the zip');
-    assert.equal((await call('cy', 'GET', `/api/projects/${ids.p}/library.zip`)).status, 404); // not a member
+    assert.equal(res.raw.subarray(0, 2).toString(), 'PK');
+    assert.equal(res.names[0], 'project.json');
+    assert.ok(res.names.includes('birds.wav'), 'the library file is in the zip');
+    assert.equal((await call('ann', 'GET', `/api/projects/${ids.p}/export/check`)).body.ok, true);
+    // a library file that would take the place of the project file
+    const clash = await call('ann', 'POST', `/api/projects/${ids.p}/library/files?folder=&name=project.json`, Buffer.from('{}'), { 'content-type': 'application/octet-stream' });
+    assert.equal(clash.status, 201, JSON.stringify(clash.body));
+    const refused = await call('ann', 'GET', `/api/projects/${ids.p}/export/check`);
+    assert.equal(refused.status, 409);
+    assert.equal(refused.body.error, 'name_clash');
+    assert.equal((await call('ann', 'DELETE', `/api/assets/${clash.body.id}`)).status, 200);
   });
 
   it('restores library files into the imported copy, file by file', async () => {
@@ -190,6 +212,62 @@ describe('export, import and library zip', () => {
     const served = await app.inject({ method: 'GET', url: `/api/assets/${after.id}/file`, headers: { cookie: cookies.cy! } });
     assert.equal(served.statusCode, 200);
     assert.ok(served.rawPayload.equals(master));
+  });
+
+  it('re-uploads a file: same asset and clips, new waveform, one task per cue that plays it', async () => {
+    const { asset, assetPeaks, clip } = await import('../src/db/schema.js');
+    const { eq } = await import('drizzle-orm');
+    const before = await withDb(async (db) => ({ a: (await db.select().from(asset).where(eq(asset.id, ids.asset!)))[0]!, p: (await db.select().from(assetPeaks).where(eq(assetPeaks.assetId, ids.asset!)))[0]!, clips: await db.select().from(clip).where(eq(clip.assetId, ids.asset!)) }));
+    const send = (who: string, id: string, body: Buffer) => call(who, 'POST', `/api/assets/${id}/replace`, body, { 'content-type': 'application/octet-stream' });
+    const tasks = async () => (await call('ann', 'GET', `/api/projects/${ids.p}/notes`)).body.notes.filter((n: any) => n.type === 'task' && n.textMd === 'Check if new audio is fitting');
+    assert.equal((await send('cy', ids.asset!, wavFile({ seconds: 3, seed: 9 }))).status, 404); // not a member
+    assert.equal((await send('ann', ids.asset!, Buffer.from('not audio'))).status >= 400, true);
+    const r = await send('ann', ids.asset!, wavFile({ seconds: 4, seed: 9 }));
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.id, ids.asset);
+    assert.equal(r.body.tasks, 1);
+    await audioJobsIdle();
+    const after = await withDb(async (db) => ({ a: (await db.select().from(asset).where(eq(asset.id, ids.asset!)))[0]!, p: (await db.select().from(assetPeaks).where(eq(assetPeaks.assetId, ids.asset!)))[0]!, clips: await db.select().from(clip).where(eq(clip.assetId, ids.asset!)) }));
+    assert.notEqual(after.a.hash, before.a.hash);
+    assert.equal(after.a.status, 'ready');
+    assert.equal(after.a.path, before.a.path);
+    assert.ok(!after.p.data.equals(before.p.data), 'the waveform was made again');
+    assert.deepEqual(after.clips.map((c) => [c.id, c.cueId, c.offsetMs, c.lengthMs]), before.clips.map((c) => [c.id, c.cueId, c.offsetMs, c.lengthMs])); // the cue is untouched
+    assert.equal((await tasks()).length, 1);
+    assert.equal((await tasks())[0].target.kind, 'cue');
+    // another change while the task is still open adds no second task; the same file again changes nothing
+    assert.equal((await send('ann', ids.asset!, wavFile({ seconds: 4, seed: 10 }))).body.tasks, 0);
+    await audioJobsIdle();
+    assert.equal((await tasks()).length, 1);
+    // the same recording again (what putting a missing file back usually is) still asks for a listen, once the first task is done
+    const t = (await tasks())[0];
+    assert.equal((await call('ann', 'POST', `/api/notes/${t.id}/done`, { done: true })).status < 300, true);
+    const same = await send('ann', ids.asset!, wavFile({ seconds: 4, seed: 10 }));
+    assert.equal(same.body.tasks, 1);
+    await audioJobsIdle();
+  });
+
+  it('asks which zip files exist, and replaces the ones chosen', async () => {
+    const { asset } = await import('../src/db/schema.js');
+    const { eq } = await import('drizzle-orm');
+    const row = (await withDb(async (db) => db.select().from(asset).where(eq(asset.projectId, ids.copy!))))[0]!;
+    const check = await call('cy', 'POST', `/api/projects/${ids.copy}/library/restore-check`, { paths: [row.path, 'nope.wav'] });
+    assert.equal(check.status, 200, JSON.stringify(check.body));
+    assert.equal(check.body.files.length, 1);
+    assert.equal(check.body.files[0].role, 'master');
+    assert.ok(check.body.files[0].onDisk > 0);
+    assert.equal((await call('ann', 'POST', `/api/projects/${ids.copy}/library/restore-check`, { paths: [row.path] })).status, 404);
+    const replace = await call('cy', 'POST', `/api/projects/${ids.copy}/library/restore?path=${encodeURIComponent(row.path)}&replace=1`, wavFile({ seconds: 2, seed: 21 }), { 'content-type': 'application/octet-stream' });
+    assert.equal(replace.status, 200, JSON.stringify(replace.body));
+    assert.equal(replace.body.outcome, 'replaced');
+    assert.equal(replace.body.tasks, 1);
+    await audioJobsIdle();
+    const now = (await withDb(async (db) => db.select().from(asset).where(eq(asset.id, row.id))))[0]!;
+    assert.notEqual(now.hash, row.hash);
+    assert.equal(now.status, 'ready');
+    // without the flag an existing file is kept
+    const keep = await call('cy', 'POST', `/api/projects/${ids.copy}/library/restore?path=${encodeURIComponent(row.path)}`, wavFile({ seconds: 2, seed: 21 }), { 'content-type': 'application/octet-stream' });
+    assert.equal(keep.body.outcome, 'already');
   });
 
   it('deletes projects with note threads and chosen clips, original and imported copy', async () => {

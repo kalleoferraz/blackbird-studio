@@ -9,9 +9,11 @@ import { COLOUR_PATTERN } from '../shared/palette.js';
 import { languageProfile } from '../shared/languages.js';
 import { parseWav, wavSamples } from '../audio/wav.js';
 import { AudioError } from '../audio/errors.js';
-import { MAX_UPLOAD, sha256 } from '../library/files.js';
+import { MAX_UPLOAD, replaceFile, sha256, type AssetRow } from '../library/files.js';
+import { kickAudioJobs } from '../audio/jobs.js';
+import { addFitTasks } from './replaced.js';
 import { blobStore, cleanPath } from '../storage/blob-store.js';
-import { accessTo, checkId } from './access.js';
+import { accessTo, checkId, levelOf } from './access.js';
 import { authenticate } from './auth-routes.js';
 import { MAX_SCENE_MS } from './content.js';
 import { HttpError, badRequest } from './http.js';
@@ -403,7 +405,13 @@ export async function importBundle(userId: string, raw: unknown, folderOverride?
     const taken = await takenFolders(tx);
     const wanted = override ?? proj.repoFolder ?? cleanFolder(proj.title) ?? 'Untitled';
     if (taken.has(wanted.toLowerCase())) {
-      throw new HttpError(409, 'folder_taken', `A project with the folder name "${wanted}" already exists.`, { folder: wanted, suggestion: freeFolder(taken, wanted) });
+      // When the folder belongs to a project this person can edit, the files of the zip can go there instead.
+      const mine = await tx.select({ id: project.id, title: project.title, folder: project.repoFolder, role: membership.role })
+        .from(project).innerJoin(membership, eq(membership.projectId, project.id)).where(eq(membership.userId, userId));
+      const existing = mine.find((m) => (m.folder ?? '').toLowerCase() === wanted.toLowerCase() && levelOf(m.role) === 'author');
+      throw new HttpError(409, 'folder_taken', `A project with the folder name "${wanted}" already exists.`, {
+        folder: wanted, suggestion: freeFolder(taken, wanted), ...(existing ? { existing: { id: existing.id, title: existing.title } } : {}),
+      });
     }
     const now = new Date();
     const projectId = newUlid();
@@ -531,23 +539,59 @@ function attachment(name: string): string {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
 
+/** The project file inside an export (the zip's root). */
+export const PROJECT_FILE = 'project.json';
+
 const ALREADY_COMPRESSED = new Set(['mp3', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'flac', 'wma', 'jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi', 'zip', 'pdf', 'docx', 'xlsx', 'pptx', 'epub']);
 
 export function registerTransferRoutes(app: FastifyInstance): void {
   const auth = { preHandler: authenticate() };
 
+  /** Reads what an export holds, and refuses when it cannot be made: a library file called project.json at the root would clash with the project file. */
+  async function prepareExport(userId: string, id: string) {
+    const { bundle, title, folder } = await withDb(async (db) => {
+      await accessTo(db, userId, id);
+      const b = await buildBundle(db, id);
+      const row = (await db.select({ t: project.title, f: project.repoFolder }).from(project).where(eq(project.id, id)).limit(1))[0]!;
+      return { bundle: b, title: row.t, folder: row.f };
+    });
+    const files = await blobStore().listFiles(id);
+    if (files.some((f) => f.toLowerCase() === PROJECT_FILE)) {
+      throw new HttpError(409, 'name_clash', 'The library has a file named project.json in its root, which the export needs for the project itself. Rename that file first.');
+    }
+    return { bundle, files, name: cleanFolder(folder ?? title) ?? 'project' };
+  }
+
+  // The browser asks first, so a refusal is shown as a message instead of being saved as the download.
+  app.get('/api/projects/:id/export/check', auth, async (request) => {
+    const { files } = await prepareExport(request.account!.id, checkId((request.params as { id: string }).id));
+    return { ok: true, files: files.length };
+  });
+
+  // The whole project as one zip: project.json at the root (everything but members, snapshots and file bytes) and
+  // the library's files at their paths. Streamed as it is built: nothing is kept in memory or written to disk.
   app.get('/api/projects/:id/export', auth, async (request, reply) => {
     const id = checkId((request.params as { id: string }).id);
-    const { bundle, name } = await withDb(async (db) => {
-      await accessTo(db, request.account!.id, id);
-      const b = await buildBundle(db, id);
-      return { bundle: b, name: String((b.project as Json).title) };
+    const { bundle, files, name } = await prepareExport(request.account!.id, id);
+    const store = blobStore();
+    const archive = new ZipArchive({ zlib: { level: 3 } });
+    archive.on('warning', (e) => request.log.warn(e));
+    archive.on('error', (e) => {
+      request.log.error(e);
+      reply.raw.destroy(e);
     });
+    reply.raw.on('close', () => archive.abort());
+    archive.append(Buffer.from(JSON.stringify(bundle, null, 2), 'utf8'), { name: PROJECT_FILE });
+    for (const rel of files) {
+      const ext = rel.slice(rel.lastIndexOf('.') + 1).toLowerCase();
+      archive.append(store.read(id, rel), { name: rel, store: ALREADY_COMPRESSED.has(ext) });
+    }
+    void archive.finalize();
     return reply
-      .header('content-type', 'application/json; charset=utf-8')
-      .header('content-disposition', attachment(`${cleanFolder(name) ?? 'project'}.json`))
+      .header('content-type', 'application/zip')
+      .header('content-disposition', attachment(`${name}.zip`))
       .header('cache-control', 'no-store')
-      .send(JSON.stringify(bundle, null, 2));
+      .send(archive);
   });
 
   app.post('/api/projects/import', { ...auth, bodyLimit: 64 * 1024 * 1024 }, async (request, reply) => {
@@ -573,15 +617,23 @@ export function registerTransferRoutes(app: FastifyInstance): void {
     const data = request.body;
     if (!Buffer.isBuffer(data) || data.byteLength === 0) throw badRequest('invalid_body', 'Send the file as the request body (application/octet-stream).');
     if (data.byteLength > MAX_UPLOAD) throw new HttpError(413, 'too_large', 'The file is larger than 100 MB.');
-    return withDb(async (db) => {
+    const replace = (request.query as Record<string, unknown>).replace === '1';
+    const out = await withDb(async (db) => {
       await accessTo(db, request.account!.id, id, { edit: true });
       const a = (await db.select().from(asset).where(and(eq(asset.projectId, id), or(eq(asset.path, rel), eq(asset.lightweightPath, rel)))).limit(1))[0];
       if (!a) throw new HttpError(404, 'not_in_project', 'This file is not in the project\'s file list.');
       const store = blobStore();
       const isMaster = a.path.toLowerCase() === rel.toLowerCase();
       const place = isMaster ? a.path : a.lightweightPath!;
+      // The zip's file is chosen over the one already there: it becomes the asset's file (see replaceFile).
+      if (replace && isMaster && (await store.size(id, a.path)) !== null) {
+        const r = await replaceFile(db, a, data);
+        await touchProject(db, id, request.account!.id);
+        return { outcome: 'replaced' as const, kind: 'master' as const, assetId: a.id, path: a.path, complete: true, fit: r.changed ? r.asset : null };
+      }
       let outcome: 'restored' | 'already' = 'restored';
-      if ((await store.size(id, place)) !== null) outcome = 'already';
+      // A copy (MP3, reduced picture) that the server is making right now is not put back from the zip.
+      if ((await store.size(id, place)) !== null || (!isMaster && (a.status === 'pending' || a.status === 'processing'))) outcome = 'already';
       else {
         if (isMaster) {
           let hash = sha256(data);
@@ -600,35 +652,39 @@ export function registerTransferRoutes(app: FastifyInstance): void {
       const lightThere = a.lightweightPath === null || (await store.size(id, a.lightweightPath)) !== null;
       const fileState = masterThere && lightThere ? 'ok' : 'missing';
       if (fileState !== a.fileState) await db.update(asset).set({ fileState, updatedAt: new Date() }).where(eq(asset.id, a.id));
-      return { outcome, kind: isMaster ? 'master' : 'derived', assetId: a.id, path: place, complete: fileState === 'ok' };
+      return { outcome, kind: (isMaster ? 'master' : 'derived') as 'master' | 'derived', assetId: a.id, path: place, complete: fileState === 'ok', fit: null as AssetRow | null };
     });
+    const { fit, ...result } = out;
+    const tasks = fit ? await addFitTasks(request.account!.id, fit) : 0;
+    if (fit && fit.status === 'pending') kickAudioJobs(request.log);
+    return { ...result, tasks };
   });
 
-  app.get('/api/projects/:id/library.zip', auth, async (request, reply) => {
+  // Which of these zip entries does the project know, and which of those are on disk right now? The browser asks before
+  // it uploads anything, so the person can decide what to do with files that already exist.
+  app.post('/api/projects/:id/library/restore-check', { onRequest: authenticate(), bodyLimit: 4 * 1024 * 1024 }, async (request) => {
     const id = checkId((request.params as { id: string }).id);
-    const title = await withDb(async (db) => {
-      await accessTo(db, request.account!.id, id);
-      return (await db.select({ t: project.title, f: project.repoFolder }).from(project).where(eq(project.id, id)).limit(1))[0]!;
+    const body = (request.body ?? {}) as { paths?: unknown };
+    if (!Array.isArray(body.paths) || body.paths.length > 20000 || body.paths.some((x) => typeof x !== 'string')) throw badRequest('invalid_paths', 'Send { paths: [...] }.');
+    const paths = [...new Set((body.paths as string[]).map((x) => cleanPath(x)).filter((x): x is string => !!x))];
+    return withDb(async (db) => {
+      await accessTo(db, request.account!.id, id, { edit: true });
+      const store = blobStore();
+      const files: { path: string; role: 'master' | 'derived'; assetId: string; masterPath: string; onDisk: number | null; listedSize: number }[] = [];
+      for (let i = 0; i < paths.length; i += 400) {
+        const chunk = paths.slice(i, i + 400);
+        const rows = await db.select().from(asset).where(and(eq(asset.projectId, id), or(inArray(asset.path, chunk), inArray(asset.lightweightPath, chunk))));
+        for (const a of rows) {
+          for (const p of chunk) {
+            const master = a.path.toLowerCase() === p.toLowerCase();
+            const derived = !!a.lightweightPath && a.lightweightPath.toLowerCase() === p.toLowerCase();
+            if (!master && !derived) continue;
+            const place = master ? a.path : a.lightweightPath!;
+            files.push({ path: p, role: master ? 'master' : 'derived', assetId: a.id, masterPath: a.path, onDisk: await store.size(id, place), listedSize: master ? a.size : a.sizeLightweight ?? 0 });
+          }
+        }
+      }
+      return { files };
     });
-    const store = blobStore();
-    const files = await store.listFiles(id);
-    // Streamed to the browser as it is built: nothing is kept in memory or written to disk.
-    const archive = new ZipArchive({ zlib: { level: 3 } });
-    archive.on('warning', (e) => request.log.warn(e));
-    archive.on('error', (e) => {
-      request.log.error(e);
-      reply.raw.destroy(e);
-    });
-    reply.raw.on('close', () => archive.abort());
-    for (const rel of files) {
-      const ext = rel.slice(rel.lastIndexOf('.') + 1).toLowerCase();
-      archive.append(store.read(id, rel), { name: rel, store: ALREADY_COMPRESSED.has(ext) });
-    }
-    void archive.finalize();
-    return reply
-      .header('content-type', 'application/zip')
-      .header('content-disposition', attachment(`${cleanFolder(title.f ?? title.t) ?? 'project'} - library.zip`))
-      .header('cache-control', 'no-store')
-      .send(archive);
   });
 }

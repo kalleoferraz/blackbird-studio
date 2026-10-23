@@ -3,6 +3,9 @@ export interface Peaks { step: number; data: Uint8Array }
 
 const cache = new Map<string, Promise<Peaks | null>>();
 
+/** Drops what was fetched for an asset (its file was replaced, so the waveform changed). */
+export function forgetPeaks(assetId: string): void { cache.delete(assetId); }
+
 export function loadPeaks(assetId: string): Promise<Peaks | null> {
   let p = cache.get(assetId);
   if (!p) {

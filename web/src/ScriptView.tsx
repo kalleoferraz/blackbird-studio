@@ -211,7 +211,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
         </main>
         <RightPanel projectId={projectId} meId={me.user.id} characters={panelCharacters} readOnly={!!readOnly}
           onCharacters={() => void loadCharacters()} onError={setError} openDialog={setDialog}
-          notes={notes} story={story} noteFocus={noteFocus} noteRequest={noteRequest} onNotesChanged={() => { void loadNotes(); void loadProject(); }} />
+          notes={notes} story={story} noteFocus={noteFocus} noteRequest={noteRequest} onNotesChanged={() => { void loadNotes(); void loadProject(); }} onAssetChanged={refreshAfterEdit} />
       </div>
       {content && project.type !== 'textbook' && tlOpen && <Timeline content={content} readOnly={!!readOnly} onContent={onContent} onError={setError} />}
       <NavBar store={playback} story={story} follow={follow} onFollow={setFollow} editing={editing}

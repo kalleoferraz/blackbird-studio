@@ -4,13 +4,14 @@ import { withDb, type Q } from '../db/client.js';
 import { asset, assetPeaks, character, clip, cue, note, project } from '../db/schema.js';
 import { clearCover, uploadCover, useEarlierCover, EARLIER_COVER } from '../library/covers.js';
 import {
-  MAX_PICTURE, MAX_UPLOAD, assetsUnder, checkFolder, cleanFileName, findByHash, join, removeFiles, sha256, splitName, storeFile,
+  MAX_PICTURE, MAX_UPLOAD, assetsUnder, checkFolder, cleanFileName, findByHash, join, removeFiles, replaceFile, sha256, splitName, storeFile,
   type AssetRow,
 } from '../library/files.js';
 import { kickAudioJobs, retryAudio } from '../audio/jobs.js';
 import { blobStore, cleanPath, PATH_MAX } from '../storage/blob-store.js';
 import { CHARACTERS, MANAGED_ROOTS, isCharactersRoot, isStoryline, pictureFolder } from '../library/managed.js';
 import { touchProject } from '../db/touch.js';
+import { addFitTasks } from './replaced.js';
 import { accessTo, accessToEntity, checkId } from './access.js';
 import { authenticate } from './auth-routes.js';
 import { HttpError, asBody, badRequest } from './http.js';
@@ -342,6 +343,25 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       if (stored.asset.status === 'pending') kickAudioJobs(request.log);
       return reply.code(201).send(assetView(stored.asset));
     });
+  });
+
+  // A new file for an existing asset (a missing one put back, or another take of the same sound). Cues keep their
+  // clips; the waveform is made again, and a cue that plays a different recording gets a task to listen again.
+  app.post('/api/assets/:id/replace', upload(MAX_UPLOAD + 4096), async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    const data = rawBody(request);
+    const result = await withDb(async (db) => {
+      const row = (await db.select().from(asset).where(eq(asset.id, id)).limit(1))[0];
+      if (!row) throw new HttpError(404, 'not_found');
+      await accessTo(db, request.account!.id, row.projectId, { edit: true });
+      const r = await replaceFile(db, row, data);
+      await touchProject(db, row.projectId, request.account!.id);
+      return r;
+    });
+    // Re-uploading is always worth a listen, even when the recording turns out to be the same one as before.
+    const tasks = await addFitTasks(request.account!.id, result.asset);
+    if (result.asset.status === 'pending') kickAudioJobs(request.log);
+    return { ...assetView(result.asset), tasks };
   });
 
   app.delete('/api/assets/:id', auth, async (request) => {

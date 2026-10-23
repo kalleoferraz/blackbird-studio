@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { and, eq, like, sql } from 'drizzle-orm';
 import type { Q } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
-import { asset } from '../db/schema.js';
+import { asset, assetPeaks } from '../db/schema.js';
 import { AudioError } from '../audio/errors.js';
 import { parseMp3 } from '../audio/mp3.js';
 import { parseWav, wavSamples } from '../audio/wav.js';
@@ -255,6 +255,86 @@ export async function storeFile(q: Q, o: StoreOptions): Promise<Stored> {
     }
     throw e;
   }
+}
+
+export interface Replaced {
+  asset: AssetRow;
+  /** False when the new bytes are the same recording or picture as before (same hash). */
+  changed: boolean;
+}
+
+/**
+ * Puts new bytes under an existing asset: same id, same path, so every clip, note and picture that points at it keeps
+ * pointing at it. The hash, size and media info are taken from the new file, the old derived copy (MP3, reduced
+ * picture) is dropped and made again, and for audio the waveform is made again (the asset goes back to `pending`).
+ * The new file must be the same kind of file with the same extension; an identical file is accepted too (that is how
+ * a missing file is put back).
+ */
+export async function replaceFile(q: Q, row: AssetRow, data: Uint8Array): Promise<Replaced> {
+  if (data.byteLength === 0) throw new HttpError(400, 'empty_file', 'The file is empty.');
+  if (data.byteLength > MAX_UPLOAD) throw new HttpError(413, 'too_large', `The file is larger than ${Math.round(MAX_UPLOAD / (1024 * 1024))} MB.`);
+  const name = row.path.slice(row.path.lastIndexOf('/') + 1);
+  const d = await detect(name, data);
+  const pathExt = extensionOf(name);
+  const sameExt = d.ext.slice(1) === pathExt || (d.ext === '.jpg' && pathExt === 'jpeg');
+  if (d.kind !== row.mediaKind || !sameExt) {
+    throw new HttpError(415, 'wrong_type', `Choose a ${pathExt ? '.' + pathExt : ''} file of the same kind as ${name}.`);
+  }
+  const bytesHash = sha256(data);
+  let hash = bytesHash;
+  let info: Record<string, unknown> = {};
+  let light: { data: Uint8Array; width: number; height: number } | null = null;
+  if (d.kind === 'audio') {
+    try {
+      if (pathExt === 'wav') {
+        const w = parseWav(data);
+        hash = sha256(wavSamples(data, w));
+        info = { format: 'wav', durationMs: w.durationMs, sampleRate: w.sampleRate, channels: w.channels, bitDepth: w.bitDepth, sampleFormat: w.sampleFormat };
+      } else {
+        const m = parseMp3(data);
+        info = { format: 'mp3', durationMs: m.durationMs, sampleRate: m.sampleRate, channels: m.channels, bitrateKbps: m.bitrateKbps };
+      }
+    } catch (e) {
+      if (e instanceof AudioError) throw new HttpError(e.status, e.code, e.message);
+      throw e;
+    }
+  } else if (d.kind === 'image' && d.format !== 'svg') {
+    const r = await processImage(data, { lib: 'wasm-vips', name, pool: resizePool() });
+    if (r.status === 'failed') throw new HttpError(422, 'image_unreadable', `The image could not be read: ${r.error.message}.`);
+    info = { width: r.inspection.displayWidth, height: r.inspection.displayHeight, format: r.inspection.format };
+    if (r.status === 'resized') light = { data: r.output.data, width: r.output.width, height: r.output.height };
+  } else if (d.format === 'svg') {
+    info = { format: 'svg' };
+  }
+  const other = await findByHash(q, row.projectId, hash);
+  if (other && other.id !== row.id) {
+    throw new HttpError(409, 'already_in_library', `This file is already in the library at ${other.path}.`, { assetId: other.id, path: other.path });
+  }
+
+  const blobs = blobStore();
+  const lightPath = light ? join(dirOf(row.path), lightweightName(name, light.width, light.height)) : row.mediaKind === 'audio' ? row.lightweightPath : null;
+  // `put` never overwrites, so what is there goes first; the derived copies are made again from the new bytes.
+  await blobs.remove(row.projectId, row.path).catch(() => undefined);
+  await blobs.put(row.projectId, row.path, data);
+  if (row.lightweightPath) await blobs.remove(row.projectId, row.lightweightPath).catch(() => undefined);
+  if (light && lightPath) await blobs.put(row.projectId, lightPath, light.data);
+  const patch: Partial<typeof asset.$inferInsert> = {
+    hash,
+    size: data.byteLength,
+    mediaInfo: info,
+    lightweightPath: lightPath,
+    sizeLightweight: light ? light.data.byteLength : null,
+    status: d.kind === 'audio' ? 'pending' : 'ready',
+    fileState: 'ok',
+    claimedBy: null,
+    claimedAt: null,
+    attempts: 0,
+    error: null,
+    updatedAt: new Date(),
+  };
+  await q.update(asset).set(patch).where(eq(asset.id, row.id));
+  if (d.kind === 'audio') await q.delete(assetPeaks).where(eq(assetPeaks.assetId, row.id));
+  return { asset: { ...row, ...patch } as AssetRow, changed: hash !== row.hash };
 }
 
 /** Removes the row's files from disk (the row itself is removed by the caller). */
