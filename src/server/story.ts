@@ -151,6 +151,8 @@ function readCuePatch(body: Record<string, unknown>): CuePatch {
   return patch;
 }
 
+const isWav = (b: Buffer) => b.length > 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WAVE';
+
 export function registerStoryRoutes(app: FastifyInstance): void {
   const auth = { preHandler: authenticate() };
   const small = { ...auth, bodyLimit: 8192 };
@@ -471,7 +473,7 @@ export function registerStoryRoutes(app: FastifyInstance): void {
   });
 
   /**
-   * A take recorded in the browser (MP3 for now): stored under Storyline with the naming scheme, attached to the
+   * A take recorded in the browser (a 24-bit WAV master, from which the worker derives the MP3 copy and the peaks; an MP3 is still accepted): stored under Storyline with the naming scheme, attached to the
    * cue as its next take and chosen. The cue then lasts as long as the take.
    */
   app.post('/api/cues/:id/recording', { onRequest: authenticate(), bodyLimit: MAX_UPLOAD + 4096 }, async (request, reply) => {
@@ -482,7 +484,7 @@ export function registerStoryRoutes(app: FastifyInstance): void {
       const access = await accessToEntity(db, userId(request), 'cue', id, { edit: true });
       const last = (await db.select({ n: max(clip.number) }).from(clip).where(eq(clip.cueId, id)))[0]?.n ?? 0;
       const where = await storylineName(db, id, Number(last) + 1);
-      return { projectId: access.projectId, folder: where.folder, name: where.base + '.mp3' };
+      return { projectId: access.projectId, folder: where.folder, name: where.base + (isWav(data) ? '.wav' : '.mp3') };
     });
     const stored = await withDb((db) => storeFile(db, { projectId, folder, name, data, only: ['audio'], maxBytes: MAX_UPLOAD }));
     if (stored.asset.status === 'pending') kickAudioJobs(request.log);

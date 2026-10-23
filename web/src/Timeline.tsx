@@ -350,14 +350,19 @@ function Wave({ peaks, offsetMs, clipMs, lengthMs, width, colour }: { peaks: Pea
     g.clearRect(0, 0, w, h);
     g.fillStyle = colour; g.globalAlpha = 0.85;
     const played = Math.min(lengthMs, clipMs); // a longer cue is silent after its clip ends
-    const cols = Math.max(1, Math.round((played / Math.max(1, lengthMs)) * w));
-    for (let px = 0; px < cols; px++) {
-      const a = Math.floor((offsetMs + (px / cols) * played) / peaks.step);
-      const b = Math.max(a + 1, Math.floor((offsetMs + ((px + 1) / cols) * played) / peaks.step));
+    // Thin rounded bars with a gap between them: one bar every BAR+GAP pixels.
+    const BAR = 2, GAP = 2;
+    const span = Math.max(1, Math.round((played / Math.max(1, lengthMs)) * w));
+    const cols = Math.max(1, Math.floor(span / (BAR + GAP)));
+    for (let k = 0; k < cols; k++) {
+      const a = Math.floor((offsetMs + (k / cols) * played) / peaks.step);
+      const b = Math.max(a + 1, Math.floor((offsetMs + ((k + 1) / cols) * played) / peaks.step));
       let m = 0;
       for (let i = a; i < b && i < peaks.data.length; i++) m = Math.max(m, peaks.data[i]!);
-      const bar = m === 0 ? 1 : Math.max(2, (m / 255) * (h - 8));
-      g.fillRect(px, (h - bar) / 2, 1, bar);
+      const bar = m === 0 ? BAR : Math.max(BAR + 1, (m / 255) * (h - 8));
+      g.beginPath();
+      g.roundRect(k * (BAR + GAP), (h - bar) / 2, BAR, bar, BAR / 2);
+      g.fill();
     }
   }, [peaks, offsetMs, clipMs, lengthMs, w, h, colour]);
   return <canvas ref={ref} className="tl-wave" />;

@@ -170,6 +170,19 @@ describe('clips', () => {
     assert.equal((await rec(Buffer.from('not audio at all'))).status >= 400, true);
   });
 
+  it('stores a recorded WAV as the master and the worker derives the MP3 copy', async () => {
+    const cueId = await sfxCue('Wav take');
+    const wav = wavFile({ seconds: 2, seed: 51, sampleRate: 48000, channels: 1, bits: 24 });
+    const r = await call('ann', 'POST', `/api/cues/${cueId}/recording`, wav, { 'content-type': 'application/octet-stream' });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.match(r.body.path, /Wav take \(1\)\.wav$/);
+    assert.ok(Math.abs(cueOf(r.body, cueId).lengthMs - 2000) < 100);
+    await audioJobsIdle();
+    const row = (await withDb((db) => db.execute(sql`SELECT status, lightweight_path AS lw FROM asset WHERE project_id = ${ids.p} AND path = ${r.body.path}`)) as any)[0][0];
+    assert.equal(row.status, 'ready');
+    assert.match(row.lw, /Wav take \(1\)\.mp3$/);
+  });
+
   it('lets an unplayed take be deleted from the library, but not the one a cue plays', async () => {
     const { encodeWavToMp3 } = await import('../src/audio/encode.js');
     const cueId = await sfxCue('Takes');

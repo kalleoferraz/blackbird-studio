@@ -1,9 +1,7 @@
-// Records the microphone and turns it into an MP3 in the browser (Bible: recordings are MP3 for now).
-// The samples come from an AudioWorklet (recorder-worklet.js); the encoder is loaded only when a take is made.
+// Records the microphone in the browser and writes the kept part as a 24-bit WAV (Bible: upload is WAV; the server derives the MP3).
+// The samples come from an AudioWorklet (recorder-worklet.js).
 
 import workletUrl from './recorder-worklet.js?url';
-
-const MP3_KBPS = 128;
 
 export class MicRecorder {
   private chunks: Float32Array[] = [];
@@ -58,19 +56,26 @@ export class MicRecorder {
   }
 }
 
-/** A finished recording, before it is encoded. */
+/** A finished recording, before it is written. */
 export interface Take { samples: Float32Array; rate: number; durationMs: number }
 
-/** Encodes the part of a take between two times as an MP3. */
-export async function encodeMp3(take: Take, fromMs: number, toMs: number): Promise<Blob> {
+/** Writes the part of a take between two times as a mono 24-bit WAV (the master; the server derives the MP3 copy). */
+export function encodeWav(take: Take, fromMs: number, toMs: number): Blob {
   const a = Math.max(0, Math.floor((fromMs / 1000) * take.rate)), b = Math.min(take.samples.length, Math.ceil((toMs / 1000) * take.rate));
-  const { createMp3Encoder } = await import('wasm-media-encoders');
-  const enc = await createMp3Encoder();
-  enc.configure({ sampleRate: take.rate, channels: 1, bitrate: MP3_KBPS as never });
-  const parts: Uint8Array[] = [];
-  const BLOCK = 16384;
-  for (let i = a; i < b; i += BLOCK) { const out = enc.encode([take.samples.subarray(i, Math.min(b, i + BLOCK))]); if (out.length) parts.push(out.slice()); }
-  const tail = enc.finalize();
-  if (tail.length) parts.push(tail.slice());
-  return new Blob(parts as BlobPart[], { type: 'audio/mpeg' });
+  const n = Math.max(0, b - a), bytes = n * 3;
+  const buf = new ArrayBuffer(44 + bytes);
+  const v = new DataView(buf);
+  const tag = (at: number, t: string) => { for (let i = 0; i < 4; i++) v.setUint8(at + i, t.charCodeAt(i)); };
+  tag(0, 'RIFF'); v.setUint32(4, 36 + bytes, true); tag(8, 'WAVE'); tag(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, take.rate, true); v.setUint32(28, take.rate * 3, true); v.setUint16(32, 3, true); v.setUint16(34, 24, true);
+  tag(36, 'data'); v.setUint32(40, bytes, true);
+  let at = 44;
+  for (let i = a; i < b; i++) {
+    const x = Math.max(-1, Math.min(1, take.samples[i]!));
+    const q = Math.round(x < 0 ? x * 0x800000 : x * 0x7fffff);
+    v.setUint8(at, q & 255); v.setUint8(at + 1, (q >> 8) & 255); v.setUint8(at + 2, (q >> 16) & 255);
+    at += 3;
+  }
+  return new Blob([buf], { type: 'audio/wav' });
 }

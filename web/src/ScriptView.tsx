@@ -101,8 +101,8 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
       store: playback, cueId,
       seek: () => playback.seek({ segmentId: c.segment.id, scene: si, ms: q.startMs }),
       review: (take) => new Promise((resolve) => setTrim({ take, text: q.text, resolve })),
-      upload: async (mp3) => {
-        onContentRef.current(await uploadFile<SegmentContent>('POST', `/api/cues/${cueId}/recording`, mp3));
+      upload: async (wav) => {
+        onContentRef.current(await uploadFile<SegmentContent>('POST', `/api/cues/${cueId}/recording`, wav));
         window.dispatchEvent(new Event('library-changed'));
       },
       onError: setError,
