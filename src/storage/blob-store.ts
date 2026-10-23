@@ -21,6 +21,8 @@ export interface BlobStore {
   removeDir(projectId: string, relPath: string): Promise<void>;
   /** Removes the whole library of a media project. */
   removeProject(projectId: string): Promise<void>;
+  /** Every file of a media project's library, as paths relative to it written with `/` (sorted; empty when there is no library). */
+  listFiles(projectId: string): Promise<string[]>;
 }
 
 const BAD_CHARS = /[\\:*?"<>|\u0000-\u001f]/;
@@ -108,6 +110,26 @@ export class LocalDiskBlobStore implements BlobStore {
 
   async removeProject(projectId: string): Promise<void> {
     await rm(this.dir(projectId), { recursive: true, force: true });
+  }
+
+  async listFiles(projectId: string): Promise<string[]> {
+    const base = this.dir(projectId);
+    const out: string[] = [];
+    const walk = async (rel: string): Promise<void> => {
+      let entries;
+      try {
+        entries = await readdir(path.join(base, rel), { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const next = rel ? `${rel}/${e.name}` : e.name;
+        if (e.isDirectory()) await walk(next);
+        else if (e.isFile()) out.push(next);
+      }
+    };
+    await walk('');
+    return out.sort();
   }
 }
 

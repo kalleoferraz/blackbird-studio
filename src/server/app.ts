@@ -8,6 +8,7 @@ import { registerNoteRoutes } from './notes.js';
 import { registerProjectRoutes } from './projects.js';
 import { registerSnapshotRoutes } from './snapshots.js';
 import { registerStoryRoutes } from './story.js';
+import { registerTransferRoutes } from './transfer.js';
 import { registerUi } from './ui.js';
 
 export function buildApp(): FastifyInstance {
@@ -27,6 +28,7 @@ export function buildApp(): FastifyInstance {
   registerErrorHandler(app);
   registerAuthRoutes(app);
   registerAdminRoutes(app);
+  registerTransferRoutes(app);
   registerProjectRoutes(app);
   registerStoryRoutes(app);
   registerCharacterRoutes(app);

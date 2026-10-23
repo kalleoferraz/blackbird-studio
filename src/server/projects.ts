@@ -4,7 +4,7 @@ import { inTransaction, withDb, type Q, type Tx } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { touchProject } from '../db/touch.js';
 import { isAdminEmail, normalizeEmail } from '../auth/accounts.js';
-import { asset, chapter, character, cue, membership, note, project, segment, scene, snapshot, teamMember, user } from '../db/schema.js';
+import { asset, chapter, character, clip, cue, lane, membership, note, project, segment, scene, snapshot, teamMember, user } from '../db/schema.js';
 import { NARRATOR_COLOUR } from '../shared/palette.js';
 import { LANGUAGES, languageProfile } from '../shared/languages.js';
 import { accessTo, checkId, levelOf } from './access.js';
@@ -219,8 +219,21 @@ export function registerProjectRoutes(app: FastifyInstance): void {
       await accessTo(tx, request.account!.id, id, { edit: true });
       const row = (await tx.select().from(project).where(eq(project.id, id)).limit(1))[0]!;
       if (body.confirmTitle !== row.title) throw new HttpError(400, 'confirm_title', 'Type the title of the media project to confirm.');
+      // Untangle the cycles first instead of leaving them to the cascades: MySQL refuses a cascade that updates a table
+      // it is already deleting from (notes: root cascades, reply-to sets null; cues and clips point at each other).
+      await tx.update(note).set({ rootNoteId: null, replyToNoteId: null }).where(eq(note.projectId, id));
       await tx.delete(note).where(eq(note.projectId, id));
-      await tx.delete(chapter).where(eq(chapter.projectId, id)); // segments, scenes, lanes, cues and clips cascade
+      const scenes = tx.select({ id: scene.id }).from(scene).innerJoin(segment, eq(scene.segmentId, segment.id)).innerJoin(chapter, eq(segment.chapterId, chapter.id)).where(eq(chapter.projectId, id));
+      await tx.update(cue).set({ clipId: null }).where(inArray(cue.sceneId, scenes));
+      await tx.delete(clip).where(inArray(clip.cueId, tx.select({ id: cue.id }).from(cue).where(inArray(cue.sceneId, scenes))));
+      // Everything below the chapters goes explicitly, deepest first, so the delete does not depend on how the
+      // database's cascades happen to be set up (cues point at characters and lanes with RESTRICT).
+      await tx.delete(cue).where(inArray(cue.sceneId, scenes));
+      const segments = tx.select({ id: segment.id }).from(segment).innerJoin(chapter, eq(segment.chapterId, chapter.id)).where(eq(chapter.projectId, id));
+      await tx.delete(lane).where(inArray(lane.segmentId, segments));
+      await tx.delete(scene).where(inArray(scene.segmentId, segments));
+      await tx.delete(segment).where(inArray(segment.chapterId, tx.select({ id: chapter.id }).from(chapter).where(eq(chapter.projectId, id))));
+      await tx.delete(chapter).where(eq(chapter.projectId, id));
       await tx.delete(character).where(eq(character.projectId, id));
       await tx.update(project).set({ coverAssetId: null }).where(eq(project.id, id));
       await tx.delete(asset).where(eq(asset.projectId, id));

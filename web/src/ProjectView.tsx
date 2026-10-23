@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, assetUrl, uploadFile } from './api.ts';
+import { api, assetUrl, downloadAs, startDownload, uploadFile } from './api.ts';
 import { go } from './App.tsx';
 import { TYPES } from './Projects.tsx';
 import type { Language, Me, Member, ProjectCard } from './types.ts';
 import { ago, formatBytes } from './format.ts';
 import { BlackbirdIcon } from './Brand.tsx';
 import { Confirm, Dialog, errorText } from './ui.tsx';
+import { readZipEntry, readZipIndex } from './zip.ts';
 
 export function ProjectView({ me, projectId, onLogout }: { me: Me; projectId: string; onLogout: () => void }) {
   const [p, setP] = useState<ProjectCard | null>(null);
@@ -13,6 +14,9 @@ export function ProjectView({ me, projectId, onLogout }: { me: Me; projectId: st
   const [members, setMembers] = useState<Member[]>([]);
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [restoring, setRestoring] = useState<File | null>(null);
+  const zipInput = useRef<HTMLInputElement>(null);
   const load = useCallback(async () => {
     try {
       setP(await api<ProjectCard>('GET', `/api/projects/${projectId}`));
@@ -22,6 +26,10 @@ export function ProjectView({ me, projectId, onLogout }: { me: Me; projectId: st
   useEffect(() => { void load(); void api<{ languages: Language[] }>('GET', '/api/languages').then((r) => setLangs(r.languages)); }, [load]);
 
   const patch = async (body: object) => { try { setP(await api<ProjectCard>('PATCH', `/api/projects/${projectId}`, body)); setError(''); } catch (e) { setError(errorText(e)); } };
+  const exportProject = async () => {
+    setExporting(true);
+    try { await downloadAs(`/api/projects/${projectId}/export`, 'project.json'); setError(''); } catch (e) { setError(errorText(e)); } finally { setExporting(false); }
+  };
   if (error && !p) return <div className="page"><a href="#/">← Projects</a><p className="error">{error}</p></div>;
   if (!p) return <div className="center muted">Loading…</div>;
   const author = p.role === 'author';
@@ -51,9 +59,24 @@ export function ProjectView({ me, projectId, onLogout }: { me: Me; projectId: st
         </div>
       </section>
       <MembersPanel projectId={p.id} members={members} me={me} author={author} onChange={load} setError={setError} />
-      {author && <section className="card"><h2>Delete project</h2>
-        <p className="muted">Removes the project and everything in it. Snapshots already in the repository are kept.</p>
-        <button className="danger solid delete-project" onClick={() => setDeleting(true)}>Delete project</button></section>}
+      {author && <section className="card"><h2>Manage Project</h2>
+        <div className="manage-actions">
+          <div className="manage-col">
+          <div><button disabled={exporting} onClick={() => void exportProject()}>Export</button>
+            <p className="muted small">Saves the project as a .json file: story, notes, characters and the library's file list. Members and the library's files are not included.</p></div>
+          <div><button className="danger solid delete-project" onClick={() => setDeleting(true)}>Delete permanently</button>
+            <p className="muted small">Removes the project and everything in it. Snapshots already in the repository are kept.</p></div>
+          </div>
+          <div className="manage-col">
+          <div><button onClick={() => { if (p.sizeBytes === 0) setError('The library is empty.'); else { setError(''); startDownload(`/api/projects/${p.id}/library.zip`); } }}>Download Library</button>
+            <p className="muted small">Saves all the library's files as one .zip.</p></div>
+          <div><button onClick={() => zipInput.current?.click()}>Upload Library</button>
+            <p className="muted small">Puts the files of a library .zip (from Download Library) back into this project. Files the project does not list are skipped.</p>
+            <input ref={zipInput} type="file" hidden accept=".zip,application/zip"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) setRestoring(f); e.target.value = ''; }} /></div>
+          </div>
+        </div></section>}
+      {restoring && <RestoreLibrary projectId={p.id} zip={restoring} onClose={() => { setRestoring(null); void load(); }} />}
       {deleting && <DeleteProject p={p} onClose={() => setDeleting(false)} />}
     </div>
   );
@@ -141,7 +164,7 @@ function DeleteProject({ p, onClose }: { p: ProjectCard; onClose: () => void }) 
   const [error, setError] = useState('');
   const [deleteFiles, setDeleteFiles] = useState(false);
   return (
-    <Dialog title="Delete project" onClose={onClose}>
+    <Dialog title="Delete permanently" onClose={onClose}>
       <p>This cannot be undone. Type the project title to confirm:</p>
       <p><strong>{p.title}</strong></p>
       <input autoFocus value={typed} onChange={(e) => setTyped(e.target.value)} />
@@ -152,6 +175,63 @@ function DeleteProject({ p, onClose }: { p: ProjectCard; onClose: () => void }) 
         <button className="danger solid" disabled={typed !== p.title} onClick={async () => {
           try { await api('DELETE', `/api/projects/${p.id}`, { confirmTitle: typed, deleteFiles }); go('/'); } catch (e) { setError(errorText(e)); }
         }}>Delete forever</button></div>
+    </Dialog>
+  );
+}
+
+type RestoreTally = { restored: number; already: number; skipped: string[]; failed: { name: string; why: string }[] };
+
+/** Reads the zip in the browser and sends its files to the project one at a time (the zip itself is never uploaded). */
+function RestoreLibrary({ projectId, zip, onClose }: { projectId: string; zip: File; onClose: () => void }) {
+  const [done, setDone] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [current, setCurrent] = useState('');
+  const [finished, setFinished] = useState(false);
+  const [fatal, setFatal] = useState('');
+  const [tally, setTally] = useState<RestoreTally>({ restored: 0, already: 0, skipped: [], failed: [] });
+  const stop = useRef(false);
+  useEffect(() => {
+    stop.current = false;
+    const t: RestoreTally = { restored: 0, already: 0, skipped: [], failed: [] };
+    void (async () => {
+      try {
+        const entries = (await readZipIndex(zip)).filter((e) => !e.directory);
+        setTotal(entries.length);
+        let n = 0;
+        for (const e of entries) {
+          if (stop.current) break;
+          setCurrent(e.name);
+          if (e.size > 100 * 1024 * 1024) t.failed.push({ name: e.name, why: 'larger than 100 MB, which the server cannot take' });
+          else if (e.size === 0) t.skipped.push(e.name);
+          else {
+            try {
+              const r = await uploadFile<{ outcome: 'restored' | 'already' }>('POST', `/api/projects/${projectId}/library/restore?path=${encodeURIComponent(e.name)}`, await readZipEntry(zip, e));
+              if (r.outcome === 'restored') t.restored++; else t.already++;
+            } catch (err: any) {
+              if (err.code === 'not_in_project') t.skipped.push(e.name);
+              else t.failed.push({ name: e.name, why: errorText(err) });
+            }
+          }
+          setDone(++n);
+          setTally({ ...t, skipped: [...t.skipped], failed: [...t.failed] });
+        }
+      } catch (err) { setFatal(errorText(err)); }
+      setFinished(true);
+    })();
+    return () => { stop.current = true; };
+  }, [zip, projectId]);
+  return (
+    <Dialog title="Upload Library" onClose={finished ? onClose : () => undefined}>
+      {fatal ? <p className="error">{fatal}</p> : <>
+        <p className="muted small">{zip.name}</p>
+        {!finished && <p>{done} of {total} files{current ? <><br /><span className="muted small">{current}</span></> : null}</p>}
+        {!finished && total > 0 && <progress value={done} max={total} style={{ width: '100%' }} />}
+        {finished && <p>{stop.current ? 'Stopped. ' : ''}{tally.restored} restored, {tally.already} already there{tally.skipped.length ? `, ${tally.skipped.length} skipped (not in this project's file list)` : ''}{tally.failed.length ? `, ${tally.failed.length} failed` : ''}.</p>}
+        {finished && tally.failed.length > 0 && <ul className="small">{tally.failed.slice(0, 20).map((f) => <li key={f.name}>{f.name}: {f.why}</li>)}</ul>}
+      </>}
+      <div className="row end">
+        {finished ? <button className="primary" onClick={onClose}>Close</button> : <button onClick={() => { stop.current = true; }}>Stop</button>}
+      </div>
     </Dialog>
   );
 }

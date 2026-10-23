@@ -354,3 +354,8 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .tl-canvas { cursor: grab; } .tl-body.panning, .tl-body.panning .tl-canvas { cursor: grabbing; } .tl-ruler { cursor: col-resize; }
 
 .topbar-sub { font-style: italic; font-weight: 300; font-size: .82rem; color: #A99C91; margin-left: 10px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+
+/* Manage Project card */
+.manage-actions { display: flex; flex-wrap: wrap; gap: 18px 28px; align-items: flex-start; }
+.manage-actions > .manage-col { flex: 1 1 280px; min-width: 240px; display: flex; flex-direction: column; gap: 18px; }
+.manage-actions p { margin: 6px 0 0; }

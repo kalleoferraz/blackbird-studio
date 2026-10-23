@@ -38,3 +38,30 @@ export async function uploadFile<T = any>(method: 'PUT' | 'POST', url: string, f
 /** The address of an asset's bytes (the reduced copy for thumbnails, when there is one). */
 export const assetUrl = (id: string, light = false, download = false) =>
   `/api/assets/${id}/file${light || download ? '?' : ''}${light ? 'variant=light' : ''}${light && download ? '&' : ''}${download ? 'download=1' : ''}`;
+
+/** Downloads a JSON/other response as a file the user saves (the server names it in Content-Disposition). */
+export async function downloadAs(url: string, fallbackName: string): Promise<void> {
+  const res = await fetch(url, { credentials: 'same-origin' });
+  if (!res.ok) {
+    if (res.status === 401) onUnauthorized();
+    let data: any = null;
+    try { data = await res.json(); } catch { /* no body */ }
+    throw new ApiError(res.status, data?.error ?? 'error', data?.message ?? data?.error ?? `Error ${res.status}`, data);
+  }
+  const header = res.headers.get('content-disposition') ?? '';
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  const name = star ? decodeURIComponent(star[1]!) : fallbackName;
+  const href = URL.createObjectURL(await res.blob());
+  startDownload(href, name);
+  setTimeout(() => URL.revokeObjectURL(href), 60_000);
+}
+
+/** Starts a browser download of an address that streams a file (a large zip): the browser saves it as it arrives. */
+export function startDownload(href: string, name = ''): void {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
