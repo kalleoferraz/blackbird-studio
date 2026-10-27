@@ -270,6 +270,74 @@ describe('export, import and library zip', () => {
     assert.equal(keep.body.outcome, 'already');
   });
 
+  it('flags files that are not on disk when the library is checked, and clears the flag when they are back', async () => {
+    const { asset } = await import('../src/db/schema.js');
+    const { eq } = await import('drizzle-orm');
+    const { readFileSync, rmSync, writeFileSync } = await import('node:fs');
+    const row = async () => (await withDb(async (db) => db.select().from(asset).where(eq(asset.id, ids.asset!))))[0]!;
+    const a = await row();
+    const onDisk = path.join(root, ids.p!, a.path);
+    const bytes = readFileSync(onDisk);
+    const check = () => call('ann', 'POST', `/api/projects/${ids.p}/library/verify`);
+    assert.deepEqual((await check()).body, { checked: 1, missing: 0, changed: 0 });
+    rmSync(onDisk);
+    assert.deepEqual((await check()).body, { checked: 1, missing: 1, changed: 1 });
+    assert.equal((await row()).fileState, 'missing');
+    assert.equal((await call('ann', 'GET', `/api/projects/${ids.p}/library`)).body.files[0].fileState, 'missing');
+    assert.equal((await check()).body.changed, 0); // nothing new to flag
+    assert.equal((await call('cy', 'POST', `/api/projects/${ids.p}/library/verify`)).status, 404); // not a member
+    writeFileSync(onDisk, bytes);
+    assert.deepEqual((await check()).body, { checked: 1, missing: 0, changed: 1 });
+    assert.equal((await row()).fileState, 'ok');
+  });
+
+  it('removes audio from a cue: only the clip, or the library file and its disk file too unless something else uses it', async () => {
+    const { existsSync } = await import('node:fs');
+    const mkCue = async (text: string) => (await call('ann', 'POST', `/api/scenes/${ids.scene}/cues`, { type: 'sfx', text })).body.created as string;
+    const upload = async (name: string, seed: number) => {
+      const r = await call('ann', 'POST', `/api/projects/${ids.p}/library/files?folder=&name=${name}`, wavFile({ seconds: 1, seed }), { 'content-type': 'application/octet-stream' });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      await audioJobsIdle();
+      return r.body as { id: string; path: string };
+    };
+    const clipOn = async (cueId: string, assetId: string) => {
+      const r = await call('ann', 'POST', `/api/cues/${cueId}/clips`, { assetId, offsetMs: 0, lengthMs: 500, choose: true });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      return r.body.clips ? (r.body.clips as any[]).at(-1).id as string : (r.body.created as string);
+    };
+    const clipIdOf = async (cueId: string) => {
+      const c = (await call('ann', 'GET', `/api/segments/${ids.seg}`)).body.scenes.flatMap((s: any) => s.cues).find((q: any) => q.id === cueId);
+      return c.clipId as string;
+    };
+    const file = (a: { path: string }) => path.join(root, ids.p!, a.path);
+    // 1. only from the cue: the file stays
+    const keep = await upload('keep.wav', 41);
+    const c1 = await mkCue('keep'); await clipOn(c1, keep.id);
+    const r1 = await call('ann', 'DELETE', `/api/clips/${await clipIdOf(c1)}`);
+    assert.equal(r1.status, 200, JSON.stringify(r1.body));
+    assert.equal(r1.body.assetDeleted, undefined);
+    assert.equal((await call('ann', 'GET', `/api/assets/${keep.id}`)).status, 200);
+    assert.ok(existsSync(file(keep)));
+    // 2. from the cue and the library: file and row gone
+    const gone = await upload('gone.wav', 42);
+    const c2 = await mkCue('gone'); await clipOn(c2, gone.id);
+    const r2 = await call('ann', 'DELETE', `/api/clips/${await clipIdOf(c2)}?deleteAsset=1`);
+    assert.equal(r2.body.assetDeleted, true, JSON.stringify(r2.body));
+    assert.equal((await call('ann', 'GET', `/api/assets/${gone.id}`)).status, 404);
+    assert.ok(!existsSync(file(gone)), 'the file is removed from the disk');
+    // 3. another cue still plays it: it stays, and the answer says why
+    const shared = await upload('shared.wav', 43);
+    const c3 = await mkCue('a'); const c4 = await mkCue('b');
+    await clipOn(c3, shared.id); await clipOn(c4, shared.id);
+    const r3 = await call('ann', 'DELETE', `/api/clips/${await clipIdOf(c3)}?deleteAsset=1`);
+    assert.equal(r3.body.assetDeleted, false);
+    assert.ok(r3.body.assetKept.length > 0);
+    assert.equal((await call('ann', 'GET', `/api/assets/${shared.id}`)).status, 200);
+    assert.ok(existsSync(file(shared)));
+    // a viewer or stranger cannot do it
+    assert.equal((await call('cy', 'DELETE', `/api/clips/${await clipIdOf(c4)}?deleteAsset=1`)).status >= 400, true);
+  });
+
   it('deletes projects with note threads and chosen clips, original and imported copy', async () => {
     const title = (await call('cy', 'GET', `/api/projects/${ids.copy}`)).body.title;
     assert.equal((await call('cy', 'DELETE', `/api/projects/${ids.copy}`, { confirmTitle: title, deleteFiles: true })).status, 200);

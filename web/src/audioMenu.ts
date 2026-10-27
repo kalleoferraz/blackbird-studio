@@ -9,6 +9,8 @@ export function audioMenuItems(cue: Cue, o: {
   /** Runs a change on the cue's content (POST choose-clip, DELETE clip). */
   run: (method: 'POST' | 'DELETE', url: string, body?: unknown) => void;
   chooseAudio: () => void;
+  /** Asks what to do with the chosen audio (see RemoveAudioDialog). */
+  removeAudio: () => void;
 }): MenuItem[] {
   const chosen = cue.clips.find((k) => k.id === cue.clipId) ?? null;
   return [
@@ -18,6 +20,6 @@ export function audioMenuItems(cue: Cue, o: {
     { label: 'Record a take…', disabled: !!o.nav?.store.rec, onClick: () => o.nav?.record(cue.id) },
     { label: 'Choose audio…', onClick: o.chooseAudio },
     'sep',
-    { label: 'Remove audio', danger: true, disabled: !chosen, onClick: () => { if (chosen) o.run('DELETE', `/api/clips/${chosen.id}`); } },
+    { label: 'Remove audio', danger: true, disabled: !chosen, onClick: () => { if (chosen) o.removeAudio(); } },
   ];
 }

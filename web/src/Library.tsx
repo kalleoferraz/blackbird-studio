@@ -47,11 +47,20 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged }: {
     await Promise.all(paths.map((p) => fetchList(p)));
   }, [fetchList]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { void reloadOpen(['', ...open]); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Something outside the panel changed the library (a take was recorded): look again at the folders that are open.
   const reloadRef = useRef(reloadOpen);
   reloadRef.current = reloadOpen;
+  useEffect(() => { void reloadOpen(['', ...open]); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When the Library first opens, check that every listed file is really on the server and flag the ones that are not.
+  useEffect(() => {
+    let live = true;
+    void api<{ changed: number }>('POST', `/api/projects/${projectId}/library/verify`)
+      .then((r) => { if (live && r.changed) void reloadRef.current(); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, [projectId]);
+
+  // Something outside the panel changed the library (a take was recorded): look again at the folders that are open.
   useEffect(() => {
     const again = () => { void reloadRef.current(); };
     window.addEventListener(LIBRARY_CHANGED, again);

@@ -10,6 +10,7 @@ import { loadPeaks, type Peaks } from './peaks.ts';
 import { Menu, errorText, useLocalState } from './ui.tsx';
 import { AudioPicker } from './AudioPicker.tsx';
 import { audioMenuItems } from './audioMenu.ts';
+import { RemoveAudioDialog } from './RemoveAudio.tsx';
 
 const LANE_H = 54;
 const RULER_H = 22;
@@ -62,6 +63,7 @@ export function Timeline({ content, readOnly, onContent, onError }: {
   const [selId, setSelId] = useState<string | null>(null);
   const [menu, setMenu] = useState<null | { x: number; y: number; cue: Cue; colour: string }>(null);
   const [picking, setPicking] = useState<null | { cue: Cue; colour: string }>(null);
+  const [removing, setRemoving] = useState<Cue | null>(null);
   const recording = useStoreValue(store, (st) => !!st.rec, false);
   useEffect(() => setZoom(null), [scene.id]); // a new scene starts fitted
 
@@ -288,8 +290,9 @@ export function Timeline({ content, readOnly, onContent, onError }: {
         </div>
       </div>
       {menu && <Menu anchor={{ x: menu.x, y: menu.y }} onClose={() => setMenu(null)}
-        items={audioMenuItems(menu.cue, { nav, run: (m, u, b) => void runOnCue(m, u, b), chooseAudio: () => setPicking({ cue: menu.cue, colour: menu.colour }) })} />}
+        items={audioMenuItems(menu.cue, { nav, run: (m, u, b) => void runOnCue(m, u, b), chooseAudio: () => setPicking({ cue: menu.cue, colour: menu.colour }), removeAudio: () => setRemoving(menu.cue) })} />}
       {picking && <AudioPicker cue={picking.cue} content={content} colour={picking.colour} onContent={onContent} onError={onError} onClose={() => setPicking(null)} />}
+      {removing && <RemoveAudioDialog cue={removing} onContent={onContent} onError={onError} onClose={() => setRemoving(null)} />}
       {ask && (
         <div className="tl-ask" role="dialog" style={{ left: Math.max(8, Math.min(window.innerWidth - 330, ask.x - 150)), bottom: window.innerHeight - ask.y + 14 }}>
           <div>Shift the {ask.later} later cue{ask.later === 1 ? '' : 's'} with it?</div>

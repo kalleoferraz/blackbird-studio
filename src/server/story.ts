@@ -4,9 +4,10 @@ import { inTransaction, withDb, type Q, type Tx } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { closeGap, openGap, parkRow } from '../db/positions.js';
 import { touchProject } from '../db/touch.js';
-import { chapter, clip, cue, lane, project, segment, scene } from '../db/schema.js';
+import { asset, chapter, clip, cue, lane, project, segment, scene } from '../db/schema.js';
 import { kickAudioJobs } from '../audio/jobs.js';
-import { MAX_UPLOAD, storeFile } from '../library/files.js';
+import { MAX_UPLOAD, removeFiles, storeFile, type AssetRow } from '../library/files.js';
+import { usageOf } from './library.js';
 import { chapterIndexLabel } from '../library/managed.js';
 import { storylineName } from '../library/storyline.js';
 import { accessTo, accessToEntity, checkId } from './access.js';
@@ -496,12 +497,28 @@ export function registerStoryRoutes(app: FastifyInstance): void {
     return reply.code(201).send(result);
   });
 
+  // Takes the clip off its cue. With `?deleteAsset=1` the file goes from the library and the disk too, unless
+  // something else still uses it (another cue, a note, a picture): then it stays, and `assetKept` says why.
   app.delete('/api/clips/:id', auth, async (request) => {
     const id = checkId((request.params as { id: string }).id);
+    const withAsset = (request.query as Record<string, unknown>).deleteAsset === '1';
     const cueId = await cueOfClip(id);
-    return segmentWrite(request, 'cue', cueId, async (tx) => {
+    let gone: AssetRow | null = null;
+    const result = await segmentWrite(request, 'cue', cueId, async (tx) => {
+      const held = (await tx.select({ assetId: clip.assetId }).from(clip).where(eq(clip.id, id)).limit(1))[0];
       await removeClip(tx, id);
+      if (!withAsset || !held) return;
+      const a = (await tx.select().from(asset).where(eq(asset.id, held.assetId)).limit(1))[0];
+      if (!a) return;
+      const usage = (await usageOf(tx, a.projectId, [a.id])).get(a.id);
+      if (usage) return { assetDeleted: false, assetKept: usage };
+      await tx.delete(clip).where(eq(clip.assetId, a.id)); // only alternatives can be left (see usageOf)
+      await tx.delete(asset).where(eq(asset.id, a.id));
+      gone = a;
+      return { assetDeleted: true };
     });
+    if (gone) await removeFiles(gone).catch((e) => request.log.error(e));
+    return result;
   });
 
   /** Chooses the clip a cue plays; `clipId: null` chooses none. */

@@ -50,7 +50,7 @@ export function assetView(a: AssetRow, usage?: string[]) {
 }
 
 /** Where assets are used: cover, character pictures, clips, notes (the library refuses to delete these). */
-async function usageOf(q: Q, projectId: string, ids: string[]): Promise<Map<string, string[]>> {
+export async function usageOf(q: Q, projectId: string, ids: string[]): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
   if (ids.length === 0) return out;
   const add = (id: string | null, text: string) => {
@@ -342,6 +342,33 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       await touchProject(db, projectId, request.account!.id);
       if (stored.asset.status === 'pending') kickAudioJobs(request.log);
       return reply.code(201).send(assetView(stored.asset));
+    });
+  });
+
+  // Does every file the project lists exist on disk? Asked once when the Library first opens. A file that is gone is
+  // flagged `missing` (red mark in the Library); one that is back is `ok` again. Only the files are looked at: the
+  // MP3 or reduced copy counts only once it has been made (its size is known).
+  app.post('/api/projects/:id/library/verify', auth, async (request) => {
+    const projectId = checkId((request.params as { id: string }).id);
+    return withDb(async (db) => {
+      await accessTo(db, request.account!.id, projectId);
+      const rows = await db.select().from(asset).where(eq(asset.projectId, projectId));
+      const store = blobStore();
+      let missing = 0;
+      let changed = 0;
+      for (let i = 0; i < rows.length; i += 32) {
+        await Promise.all(rows.slice(i, i + 32).map(async (a) => {
+          const masterThere = (await store.size(projectId, a.path)) !== null;
+          const derivedThere = a.lightweightPath === null || a.sizeLightweight === null || (await store.size(projectId, a.lightweightPath)) !== null;
+          const next = !masterThere || !derivedThere ? 'missing' : a.fileState === 'missing' ? 'ok' : a.fileState;
+          if (next === 'missing') missing++;
+          if (next !== a.fileState) {
+            changed++;
+            await db.update(asset).set({ fileState: next, updatedAt: new Date() }).where(eq(asset.id, a.id));
+          }
+        }));
+      }
+      return { checked: rows.length, missing, changed };
     });
   });
 
