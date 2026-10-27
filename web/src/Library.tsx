@@ -25,6 +25,7 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
   const [open, setOpen] = useLocalState<string[]>(`rs.libOpen.${projectId}`, []);
   const [lists, setLists] = useState<Record<string, LibListing>>({});
   const [busy, setBusy] = useState('');
+  const [progress, setProgress] = useState<number | null>(null);
   const [preview, setPreview] = useState<LibFile | null>(null);
   const [newIn, setNewIn] = useState<LibFolder | null>(null);
   const [renaming, setRenaming] = useState<LibFolder | null>(null);
@@ -91,9 +92,9 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
 
   /** A new file for an asset that exists in the list (a missing one put back). Its cues keep their clips. */
   const reupload = async (file: LibFile, folder: string, f: File) => {
-    setInfo(''); setBusy(`Uploading ${f.name}…`);
+    setInfo(''); setBusy(`Uploading ${f.name}…`); setProgress(0);
     try {
-      const r = await uploadFile<{ tasks: number }>('POST', `/api/assets/${file.id}/replace`, f);
+      const r = await uploadFile<{ tasks: number }>('POST', `/api/assets/${file.id}/replace`, f, setProgress);
       forgetPeaks(file.id);
       onError('');
       if (r.tasks) setInfo(r.tasks === 1 ? 'Added the task “Check if new audio is fitting” to the cue.' : `Added the task “Check if new audio is fitting” to ${r.tasks} cues.`);
@@ -111,7 +112,7 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
         onAssetChanged();
       }
     } catch (e) { onError(errorText(e)); }
-    setBusy('');
+    setBusy(''); setProgress(null);
   };
 
   const toggle = (path: string) => {
@@ -126,11 +127,11 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
     const problems: string[] = [];
     for (let i = 0; i < all.length; i++) {
       const f = all[i]!;
-      setBusy(`Uploading ${i + 1} of ${all.length}: ${f.name}`);
-      try { await uploadFile('POST', `/api/projects/${projectId}/library/files?folder=${encodeURIComponent(folder)}&name=${encodeURIComponent(f.name)}`, f); }
+      setBusy(`Uploading ${i + 1} of ${all.length}: ${f.name}`); setProgress(0);
+      try { await uploadFile('POST', `/api/projects/${projectId}/library/files?folder=${encodeURIComponent(folder)}&name=${encodeURIComponent(f.name)}`, f, setProgress); }
       catch (e) { problems.push(`${f.name}: ${errorText(e)}`); }
     }
-    setBusy('');
+    setBusy(''); setProgress(null);
     onError(problems.join(' · '));
     expand(folder);
     await fetchList(folder);
@@ -217,7 +218,8 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
 
   return (
     <div className="panel-body library">
-      {busy && <p className="muted small">{busy}</p>}
+      {busy && <p className="muted small">{busy}{progress !== null ? ` · ${Math.round(progress * 100)}%` : ''}</p>}
+      {busy && progress !== null && <div className="upload-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}><div style={{ width: `${progress * 100}%` }} /></div>}
       {!busy && info && <p className="muted small">{info}</p>}
       {renderFolder({ ...ROOT, writable: !readOnly }, 0, true)}
       <input ref={reInput} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; const t = reTarget.current; if (f && t) void reupload(t.file, t.folder, f); e.target.value = ''; }} />

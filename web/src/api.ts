@@ -23,16 +23,24 @@ export async function api<T = any>(method: string, url: string, body?: unknown):
   return data as T;
 }
 
-/** Sends a file as the raw request body (the library's upload routes). */
-export async function uploadFile<T = any>(method: 'PUT' | 'POST', url: string, file: File | Blob): Promise<T> {
-  const res = await fetch(url, { method, credentials: 'same-origin', headers: { 'content-type': 'application/octet-stream' }, body: file });
-  let data: any = null;
-  try { data = await res.json(); } catch { /* no body */ }
-  if (!res.ok) {
-    if (res.status === 401) onUnauthorized();
-    throw new ApiError(res.status, data?.error ?? 'error', data?.message ?? data?.error ?? `Error ${res.status}`, data);
-  }
-  return data as T;
+/** Sends a file as the raw request body (the library's upload routes). `onProgress` gets the share sent, 0 to 1. */
+export function uploadFile<T = any>(method: 'PUT' | 'POST', url: string, file: File | Blob, onProgress?: (done: number) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open(method, url);
+    x.withCredentials = true;
+    x.setRequestHeader('content-type', 'application/octet-stream');
+    if (onProgress) x.upload.onprogress = (e) => { if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total); };
+    x.onerror = () => reject(new ApiError(0, 'network', 'The upload could not reach the server.', null));
+    x.onload = () => {
+      let data: any = null;
+      try { data = JSON.parse(x.responseText); } catch { /* no body */ }
+      if (x.status >= 200 && x.status < 300) { onProgress?.(1); resolve(data as T); return; }
+      if (x.status === 401) onUnauthorized();
+      reject(new ApiError(x.status, data?.error ?? 'error', data?.message ?? data?.error ?? `Error ${x.status}`, data));
+    };
+    x.send(file);
+  });
 }
 
 /** The address of an asset's bytes (the reduced copy for thumbnails, when there is one). */
