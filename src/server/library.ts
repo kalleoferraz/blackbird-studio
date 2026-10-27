@@ -1,10 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { and, count, eq, inArray } from 'drizzle-orm';
+import { and, count, eq, inArray, ne, or } from 'drizzle-orm';
 import { withDb, type Q } from '../db/client.js';
-import { asset, assetPeaks, character, clip, cue, note, project } from '../db/schema.js';
+import { asset, assetPeaks, chapter, character, clip, cue, note, project, scene, segment } from '../db/schema.js';
 import { clearCover, uploadCover, useEarlierCover, EARLIER_COVER } from '../library/covers.js';
 import {
-  MAX_PICTURE, MAX_UPLOAD, assetsUnder, checkFolder, cleanFileName, findByHash, join, removeFiles, replaceFile, sha256, splitName, storeFile,
+  MAX_PICTURE, MAX_UPLOAD, assetsUnder, checkFolder, cleanFileName, findByHash, extensionOf, freeName, join, moveAsset, removeFiles, renameDerived, replaceFile, sha256, splitName, storeFile,
   type AssetRow,
 } from '../library/files.js';
 import { kickAudioJobs, retryAudio } from '../audio/jobs.js';
@@ -404,6 +404,102 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       await removeFiles(a);
       await touchProject(db, a.projectId, request.account!.id);
       return { ok: true };
+    });
+  });
+
+  // Moves one file to another folder (drag and drop in the Library). The file keeps its id, so clips, notes and
+  // pictures that use it are untouched. A name already taken in the target gets a number, as with uploads.
+  app.post('/api/assets/:id/move', { ...auth, bodyLimit: 2048 }, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    const to = checkFolder(asBody(request.body).folder ?? '');
+    return withDb(async (db) => {
+      const a = (await db.select().from(asset).where(eq(asset.id, id)).limit(1))[0];
+      if (!a) throw new HttpError(404, 'not_found');
+      await accessTo(db, request.account!.id, a.projectId, { edit: true });
+      const from = a.path.includes('/') ? a.path.slice(0, a.path.lastIndexOf('/')) : '';
+      if (lockedForWrite(from)) {
+        throw new HttpError(400, 'managed_folder', 'Files in a folder managed by the app cannot be moved.');
+      }
+      if (lockedForWrite(to)) throw new HttpError(400, 'managed_folder', 'Files cannot be moved into a folder managed by the app.');
+      if (lower(from) === lower(to)) return assetView(a);
+      const oldLight = a.lightweightPath ? a.lightweightPath.slice(a.lightweightPath.lastIndexOf('/') + 1) : '';
+      const name = await freeName(db, a.projectId, to, a.path.slice(a.path.lastIndexOf('/') + 1), (n) => (a.lightweightPath ? renameDerived(oldLight, join('', n), a.mediaKind) : null));
+      await moveAsset(db, a, join(to, name));
+      await touchProject(db, a.projectId, request.account!.id);
+      const fresh = (await db.select().from(asset).where(eq(asset.id, id)).limit(1))[0]!;
+      return assetView(fresh);
+    });
+  });
+
+  // Renames one file (its context menu). Clips, notes and pictures keep pointing at it; the MP3 or reduced copy is renamed too.
+  app.patch('/api/assets/:id', { ...auth, bodyLimit: 2048 }, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    const body = asBody(request.body);
+    let name = cleanFileName(typeof body.name === 'string' ? body.name : '');
+    return withDb(async (db) => {
+      const a = (await db.select().from(asset).where(eq(asset.id, id)).limit(1))[0];
+      if (!a) throw new HttpError(404, 'not_found');
+      await accessTo(db, request.account!.id, a.projectId, { edit: true });
+      const dir = a.path.includes('/') ? a.path.slice(0, a.path.lastIndexOf('/')) : '';
+      const old = a.path.slice(a.path.lastIndexOf('/') + 1);
+      if (isStoryline(dir)) throw new HttpError(400, 'managed_folder', 'Files in Storyline are named by the app.');
+      const usage = (await usageOf(db, a.projectId, [id])).get(id) ?? [];
+      if (usage.some((u) => u === 'the cover' || u.startsWith('the picture of '))) {
+        throw new HttpError(400, 'managed_file', 'This file is a cover or a character picture and keeps its name.');
+      }
+      // The extension is the file's kind: it stays, whatever is typed.
+      const ext = extensionOf(old);
+      if (ext && extensionOf(name) !== ext) name = (extensionOf(name) ? name.slice(0, name.lastIndexOf('.')) : name) + old.slice(old.lastIndexOf('.'));
+      name = cleanFileName(name);
+      if (name === old) return assetView(a);
+      const to = join(dir, name);
+      const oldLight = a.lightweightPath ? a.lightweightPath.slice(a.lightweightPath.lastIndexOf('/') + 1) : '';
+      const toLight = a.lightweightPath ? join(dir, renameDerived(oldLight, to, a.mediaKind)) : null;
+      if (to.length > PATH_MAX || (toLight && toLight.length > PATH_MAX)) throw new HttpError(400, 'path_too_long', 'The name makes the path too long.');
+      const wanted = [to, ...(toLight ? [toLight] : [])];
+      const clash = await db
+        .select({ id: asset.id })
+        .from(asset)
+        .where(and(eq(asset.projectId, a.projectId), ne(asset.id, id), or(inArray(asset.path, wanted), inArray(asset.lightweightPath, wanted))))
+        .limit(1);
+      if (clash.length > 0) throw new HttpError(409, 'name_taken', 'A file with that name already exists in this folder.');
+      await moveAsset(db, a, to);
+      await touchProject(db, a.projectId, request.account!.id);
+      return assetView((await db.select().from(asset).where(eq(asset.id, id)).limit(1))[0]!);
+    });
+  });
+
+  // The cues that play a file, with their place in the story, for the file's preview.
+  app.get('/api/assets/:id/cues', auth, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    return withDb(async (db) => {
+      const a = (await db.select().from(asset).where(eq(asset.id, id)).limit(1))[0];
+      if (!a) throw new HttpError(404, 'not_found');
+      await accessTo(db, request.account!.id, a.projectId);
+      const rows = await db
+        .select({
+          clipId: clip.id, cueId: cue.id, chosen: cue.clipId, text: cue.textMd, startMs: cue.startMs,
+          sceneId: scene.id, sceneNo: scene.position, segmentId: segment.id, segment: segment.title, chapterId: chapter.id, chapter: chapter.title,
+          chapterPos: chapter.position, segmentPos: segment.position,
+        })
+        .from(clip)
+        .innerJoin(cue, eq(cue.id, clip.cueId))
+        .innerJoin(scene, eq(scene.id, cue.sceneId))
+        .innerJoin(segment, eq(segment.id, scene.segmentId))
+        .innerJoin(chapter, eq(chapter.id, segment.chapterId))
+        .where(eq(clip.assetId, id));
+      rows.sort((x, y) => x.chapterPos - y.chapterPos || x.segmentPos - y.segmentPos || x.sceneNo - y.sceneNo || x.startMs - y.startMs);
+      const seen = new Set<string>();
+      const cues = [];
+      for (const r of rows) {
+        if (seen.has(r.cueId)) continue;
+        seen.add(r.cueId);
+        cues.push({
+          cueId: r.cueId, sceneId: r.sceneId, sceneNo: r.sceneNo, segmentId: r.segmentId, segment: r.segment, chapterId: r.chapterId, chapter: r.chapter,
+          text: r.text.replace(/\s+/g, ' ').trim().slice(0, 80), chosen: r.chosen === r.clipId,
+        });
+      }
+      return { cues };
     });
   });
 

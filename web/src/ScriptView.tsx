@@ -81,6 +81,13 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   const onContent = (c: SegmentContent) => { setContent(c); refreshAfterEdit(); };
   const openSegment = (id: string) => go(`/p/${projectId}/s/${id}`);
 
+  // A cue picked in the Library (a file's preview): open its segment, put the playhead on it and scroll to it.
+  const [showing, setShowing] = useState<{ segmentId: string; cueId: string } | null>(null);
+  const showCue = (c: { segmentId: string; cueId: string }) => {
+    setShowing({ segmentId: c.segmentId, cueId: c.cueId });
+    if (c.segmentId !== segmentId) { expectedNav.current = c.segmentId; openSegment(c.segmentId); }
+  };
+
   // ---- navigation bar: one playhead for the whole script view ----
   const [playback] = useState(() => new PlaybackStore());
   useEffect(() => () => playback.dispose(), [playback]);
@@ -159,6 +166,15 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
     const el = (curCue && document.querySelector(`[data-cue-id="${curCue}"]`)) || (curScene && document.querySelector(`[data-scene-id="${curScene}"]`));
     if (el) { scrolled.current = id; (el as HTMLElement).scrollIntoView({ block: 'center', behavior: 'smooth' }); }
   }, [follow, editing, curCue, curScene, content]);
+  useEffect(() => {
+    if (!showing || !content || content.segment.id !== showing.segmentId) return;
+    const si = content.scenes.findIndex((sc) => sc.cues.some((q) => q.id === showing.cueId));
+    setShowing(null);
+    if (si < 0) return;
+    const q = content.scenes[si]!.cues.find((x) => x.id === showing.cueId)!;
+    playback.seek({ segmentId: content.segment.id, scene: si, ms: q.startMs });
+    setTimeout(() => (document.querySelector(`[data-cue-id="${showing.cueId}"]`) as HTMLElement | null)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60);
+  }, [showing, content, playback]);
 
   const renameTitle = async (kind: 'chapter' | 'segment', id: string, title: string) => {
     try { await api(`PATCH`, `/api/${kind === 'chapter' ? 'chapters' : 'segments'}/${id}`, { title }); await loadStory(); if (segmentId) setContent(await api<SegmentContent>('GET', `/api/segments/${segmentId}`)); }
@@ -211,7 +227,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
         </main>
         <RightPanel projectId={projectId} meId={me.user.id} characters={panelCharacters} readOnly={!!readOnly}
           onCharacters={() => void loadCharacters()} onError={setError} openDialog={setDialog}
-          notes={notes} story={story} noteFocus={noteFocus} noteRequest={noteRequest} onNotesChanged={() => { void loadNotes(); void loadProject(); }} onAssetChanged={refreshAfterEdit} />
+          notes={notes} story={story} noteFocus={noteFocus} noteRequest={noteRequest} onNotesChanged={() => { void loadNotes(); void loadProject(); }} onAssetChanged={refreshAfterEdit} onOpenCue={showCue} />
       </div>
       {content && project.type !== 'textbook' && tlOpen && <Timeline content={content} readOnly={!!readOnly} onContent={onContent} onError={setError} />}
       <NavBar store={playback} story={story} follow={follow} onFollow={setFollow} editing={editing}

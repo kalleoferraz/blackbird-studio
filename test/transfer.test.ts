@@ -338,6 +338,68 @@ describe('export, import and library zip', () => {
     assert.equal((await call('cy', 'DELETE', `/api/clips/${await clipIdOf(c4)}?deleteAsset=1`)).status >= 400, true);
   });
 
+  it('moves a file to another folder: same asset, files follow, clashes get a number, managed folders are refused', async () => {
+    const { existsSync } = await import('node:fs');
+    const up = async (folder: string, name: string, seed: number) => {
+      const r = await call('ann', 'POST', `/api/projects/${ids.p}/library/files?folder=${folder}&name=${name}`, wavFile({ seconds: 1, seed }), { 'content-type': 'application/octet-stream' });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      await audioJobsIdle();
+      return r.body as { id: string; path: string };
+    };
+    const abs = (p: string) => path.join(root, ids.p!, p);
+    assert.equal((await call('ann', 'POST', `/api/projects/${ids.p}/library/folders`, { parent: '', name: 'Moved' })).status, 201);
+    const a = await up('', 'mv-a.wav', 61);
+    assert.ok(existsSync(abs('mv-a.mp3')));
+    const m = await call('ann', 'POST', `/api/assets/${a.id}/move`, { folder: 'Moved' });
+    assert.equal(m.status, 200, JSON.stringify(m.body));
+    assert.equal(m.body.id, a.id);
+    assert.equal(m.body.path, 'Moved/mv-a.wav');
+    assert.ok(existsSync(abs('Moved/mv-a.wav')) && existsSync(abs('Moved/mv-a.mp3')));
+    assert.ok(!existsSync(abs('mv-a.wav')) && !existsSync(abs('mv-a.mp3')));
+    // same name already there: numbered
+    const b = await up('', 'mv-a.wav', 62);
+    const m2 = await call('ann', 'POST', `/api/assets/${b.id}/move`, { folder: 'Moved' });
+    assert.equal(m2.body.path, 'Moved/mv-a (2).wav');
+    // back to the root, same folder is a no-op
+    assert.equal((await call('ann', 'POST', `/api/assets/${a.id}/move`, { folder: '' })).body.path, 'mv-a.wav');
+    assert.equal((await call('ann', 'POST', `/api/assets/${a.id}/move`, { folder: '' })).body.path, 'mv-a.wav');
+    // managed folders, strangers
+    assert.equal((await call('ann', 'POST', `/api/assets/${a.id}/move`, { folder: 'Storyline' })).status, 400);
+    assert.equal((await call('cy', 'POST', `/api/assets/${a.id}/move`, { folder: 'Moved' })).status >= 400, true);
+  });
+
+  it('renames a file (extension kept, MP3 follows, clashes refused) and tells which cues play it', async () => {
+    const { existsSync } = await import('node:fs');
+    const abs = (p: string) => path.join(root, ids.p!, p);
+    const up = async (name: string, seed: number) => {
+      const r = await call('ann', 'POST', `/api/projects/${ids.p}/library/files?folder=&name=${name}`, wavFile({ seconds: 1, seed }), { 'content-type': 'application/octet-stream' });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      await audioJobsIdle();
+      return r.body as { id: string; path: string };
+    };
+    const a = await up('rn-a.wav', 71);
+    const b = await up('rn-b.wav', 72);
+    const r = await call('ann', 'PATCH', `/api/assets/${a.id}`, { name: 'Door slam' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.path, 'Door slam.wav');
+    assert.ok(existsSync(abs('Door slam.wav')) && existsSync(abs('Door slam.mp3')));
+    assert.ok(!existsSync(abs('rn-a.wav')) && !existsSync(abs('rn-a.mp3')));
+    assert.equal((await call('ann', 'PATCH', `/api/assets/${b.id}`, { name: 'door slam.wav' })).status, 409);
+    assert.equal((await call('ann', 'PATCH', `/api/assets/${b.id}`, { name: 'x.mp3' })).body.path, 'x.wav'); // a typed extension is replaced by the file's own
+    assert.equal((await call('cy', 'PATCH', `/api/assets/${b.id}`, { name: 'nope' })).status >= 400, true);
+    // cues that play it
+    assert.deepEqual((await call('ann', 'GET', `/api/assets/${a.id}/cues`)).body.cues, []);
+    const cueId = (await call('ann', 'POST', `/api/scenes/${ids.scene}/cues`, { type: 'sfx', text: 'The door slams shut' })).body.created as string;
+    assert.equal((await call('ann', 'POST', `/api/cues/${cueId}/clips`, { assetId: a.id, offsetMs: 0, lengthMs: 500, choose: true })).status, 201);
+    const c = (await call('ann', 'GET', `/api/assets/${a.id}/cues`)).body.cues;
+    assert.equal(c.length, 1);
+    assert.equal(c[0].cueId, cueId);
+    assert.equal(c[0].segmentId, ids.seg);
+    assert.equal(c[0].text, 'The door slams shut');
+    assert.equal(c[0].chosen, true);
+    assert.equal((await call('cy', 'GET', `/api/assets/${a.id}/cues`)).status >= 400, true);
+  });
+
   it('deletes projects with note threads and chosen clips, original and imported copy', async () => {
     const title = (await call('cy', 'GET', `/api/projects/${ids.copy}`)).body.title;
     assert.equal((await call('cy', 'DELETE', `/api/projects/${ids.copy}`, { confirmTitle: title, deleteFiles: true })).status, 200);

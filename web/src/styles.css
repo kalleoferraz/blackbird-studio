@@ -366,3 +366,16 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .restore-row:last-child { border-bottom: 0; }
 .restore-row select { width: auto; flex: none; }
 .clash-existing { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+.wave-player { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; align-items: center; }
+.wp-play { width: 40px; height: 40px; padding: 0; border-radius: 50%; font-size: 14px; }
+.wp-wave { position: relative; cursor: pointer; touch-action: none; border-radius: 6px; outline-offset: 2px; }
+.wp-head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #EF9B0B; pointer-events: none; }
+.wp-time { grid-column: 2; }
+.file-detail { margin-top: 12px; } .file-detail h4 { margin: 0 0 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.file-detail ul { list-style: none; margin: 0; padding: 0; max-height: 140px; overflow: auto; }
+.link-btn { all: unset; display: block; width: 100%; box-sizing: border-box; padding: 4px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-btn:hover { background: rgba(239,155,11,.12); }
+.file-note { display: flex; gap: 6px; align-items: baseline; padding: 4px 6px; font-size: 13px; line-height: 1.35; min-width: 0; }
+.file-note-type { flex: none; font-weight: 700; color: var(--muted); } .file-note-type.task { color: var(--primary); } .file-note-type.reference { color: var(--green); }
+.file-note-ref { flex: none; color: var(--green); font-weight: 600; } a.file-note-ref { text-decoration: underline; }
+.link-btn.inline { display: inline-block; width: auto; min-width: 0; flex: 1; padding: 0 4px; }

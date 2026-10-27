@@ -106,7 +106,7 @@ export const mp3Name = (name: string): string => splitName(name).base + '.mp3';
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, '\\$&');
 
 /** A path not used by any asset (master or lightweight) in this project: `name`, then `name (2)`, ... */
-async function freeName(q: Q, projectId: string, folder: string, name: string, derived: (n: string) => string | null): Promise<string> {
+export async function freeName(q: Q, projectId: string, folder: string, name: string, derived: (n: string) => string | null): Promise<string> {
   const { base, ext } = splitName(name);
   for (let n = 1; n < 1000; n++) {
     const candidate = n === 1 ? name : `${base} (${n})${ext}`;
@@ -348,13 +348,14 @@ export async function removeFiles(a: Pick<AssetRow, 'projectId' | 'path' | 'ligh
 export async function moveAsset(q: Q, a: AssetRow, toPath: string): Promise<void> {
   const blobs = blobStore();
   const toLight = a.lightweightPath ? join(dirOf(toPath), renameDerived(a.lightweightPath.slice(a.lightweightPath.lastIndexOf('/') + 1), toPath, a.mediaKind)) : null;
-  await blobs.rename(a.projectId, a.path, toPath);
+  // A file that is already missing has no bytes to move: only its address changes.
+  if (a.fileState !== 'missing') await blobs.rename(a.projectId, a.path, toPath);
   if (a.lightweightPath && toLight) await blobs.rename(a.projectId, a.lightweightPath, toLight).catch(() => undefined);
   await q.update(asset).set({ path: toPath, lightweightPath: toLight, updatedAt: new Date() }).where(eq(asset.id, a.id));
 }
 
 /** The derived name for a renamed master: keeps the `_WxH` part of the old derived name. */
-function renameDerived(oldDerivedName: string, newMasterPath: string, kind: MediaKind): string {
+export function renameDerived(oldDerivedName: string, newMasterPath: string, kind: MediaKind): string {
   if (kind === 'audio') return mp3Name(newMasterPath.slice(newMasterPath.lastIndexOf('/') + 1));
   const m = /_(\d+x\d+)(\.[^.]*)?$/.exec(oldDerivedName);
   const { base, ext } = splitName(newMasterPath.slice(newMasterPath.lastIndexOf('/') + 1));

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, assetUrl, uploadFile } from './api.ts';
-import { LibraryPanel } from './Library.tsx';
+import { LibraryPanel, type FileCue } from './Library.tsx';
 import { NotesPanel } from './NotesPanel.tsx';
 import type { Character, NoteFocus, NoteItem, NoteRequest, Story } from './types.ts';
 import { ColourPicker, Confirm, Dialog, MenuButton, PlusIcon, errorText, useLocalState } from './ui.tsx';
@@ -77,11 +77,11 @@ export function CharacterDialog({ projectId, state, characters, onClose, onSaved
   );
 }
 
-export function RightPanel({ projectId, meId, characters, readOnly, onCharacters, onError, openDialog, notes, story, noteFocus, noteRequest, onNotesChanged, onAssetChanged }: {
+export function RightPanel({ projectId, meId, characters, readOnly, onCharacters, onError, openDialog, notes, story, noteFocus, noteRequest, onNotesChanged, onAssetChanged, onOpenCue }: {
   projectId: string; meId: string; characters: Character[]; readOnly: boolean;
   onCharacters: () => void; onError: (m: string) => void;
   openDialog: (s: CharacterDialogState) => void;
-  notes: NoteItem[]; story: Story; noteFocus: NoteFocus; noteRequest: NoteRequest | null; onNotesChanged: () => void; onAssetChanged: () => void;
+  notes: NoteItem[]; story: Story; noteFocus: NoteFocus; noteRequest: NoteRequest | null; onNotesChanged: () => void; onAssetChanged: () => void; onOpenCue: (c: FileCue) => void;
 }) {
   const [remove, setRemove] = useState<Character | null>(null);
   const [tab, setTab] = useLocalState<'characters' | 'library' | 'notes'>('rs.rightTab', 'characters');
@@ -96,7 +96,7 @@ export function RightPanel({ projectId, meId, characters, readOnly, onCharacters
       </div>
       {tab === 'notes' && <NotesPanel projectId={projectId} meId={meId} readOnly={readOnly} notes={notes} story={story} focus={noteFocus}
         request={noteRequest} onChanged={onNotesChanged} onError={onError} />}
-      {tab === 'library' && <LibraryPanel projectId={projectId} readOnly={readOnly} onError={onError} onAssetChanged={onAssetChanged} />}
+      {tab === 'library' && <LibraryPanel projectId={projectId} readOnly={readOnly} onError={onError} onAssetChanged={onAssetChanged} notes={notes} onOpenCue={onOpenCue} />}
       {tab === 'characters' && (
         <div className="panel-body">
           {characters.map((c) => (
