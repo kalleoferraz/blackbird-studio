@@ -108,6 +108,56 @@ describe('timeline placement', () => {
     assert.equal(cueOf(g.body, ids.a).startMs, a.startMs - 500 + 2000);
   });
 
+  it('pushes the cues in the way ahead of a cue moved right with push, and refuses without it', async () => {
+    const x = await add('music', 'theme one');
+    const y = await add('music', 'theme two', x);
+    const z = await add('music', 'theme three', y);
+    let c = await content();
+    const [cx, cy, cz] = [cueOf(c, x), cueOf(c, y), cueOf(c, z)];
+    assert.ok(cx.laneId === cy.laneId && cy.laneId === cz.laneId);
+    assert.equal(cy.startMs, cx.startMs + cx.lengthMs); // a chain, back to back
+    assert.equal(cz.startMs, cy.startMs + cy.lengthMs);
+    const refused = await place(x, { startMs: cx.startMs + 1000 });
+    assert.equal(refused.status, 409);
+    assert.equal(refused.body.error, 'lane_overlap');
+    const r = await place(x, { startMs: cx.startMs + 1000, push: true });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const nx = cueOf(r.body, x).startMs;
+    assert.equal(nx, cx.startMs + 1000);
+    assert.equal(cueOf(r.body, y).startMs, nx + cx.lengthMs);
+    assert.equal(cueOf(r.body, z).startMs, nx + cx.lengthMs + cy.lengthMs);
+    // moving left into a cue before it is still refused, push or not
+    const back = await place(z, { startMs: cueOf(r.body, y).startMs + 1, push: true });
+    assert.equal(back.status, 409);
+    assert.equal((await place(x, { startMs: 0, push: 'yes' })).status, 400);
+  });
+
+  it('fits the chosen clip\'s piece to the cue when it is resized, from the same start and up to the end of the file', async () => {
+    const up = await upload('fit.wav', wavFile({ seconds: 10, seed: 5 }));
+    assert.equal(up.status, 201, JSON.stringify(up.body));
+    await audioJobsIdle();
+    const k = await add('sfx', 'fit');
+    const made = await call('ann', 'POST', `/api/cues/${k}/clips`, { assetId: up.body.id, offsetMs: 2000, lengthMs: 3000 });
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    const clipOf = (body: any) => cueOf(body, k).clips[0];
+    // shrink: the piece ends where the cue ends
+    let r = await place(k, { lengthMs: 1500, mode: 'trim' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual([clipOf(r.body).offsetMs, clipOf(r.body).lengthMs], [2000, 1500]);
+    // grow: the piece follows the cue
+    r = await place(k, { lengthMs: 6000, mode: 'trim' });
+    assert.deepEqual([clipOf(r.body).offsetMs, clipOf(r.body).lengthMs], [2000, 6000]);
+    // grow past the end of the 10 s file: the piece stops at the end of the file (offset 2000 + 8000), the cue goes on
+    r = await place(k, { lengthMs: 9000, mode: 'trim' });
+    assert.equal(cueOf(r.body, k).lengthMs, 9000);
+    assert.deepEqual([clipOf(r.body).offsetMs, clipOf(r.body).lengthMs], [2000, 8000]);
+    // a looping clip keeps its piece
+    const loop = await call('ann', 'PATCH', `/api/clips/${clipOf(r.body).id}`, { loops: 2, lengthMs: 1000 });
+    assert.equal(loop.status, 200, JSON.stringify(loop.body));
+    r = await place(k, { lengthMs: 5000, mode: 'trim' });
+    assert.equal(clipOf(r.body).lengthMs, 1000);
+  });
+
   it('validates the input and needs write access', async () => {
     assert.equal((await place(ids.a, { mode: 'squash', lengthMs: 2000 })).status, 400);
     assert.equal((await place(ids.a, { startMs: -5 })).status, 400);

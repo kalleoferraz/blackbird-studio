@@ -21,7 +21,7 @@ const DRAG_PX = 3;
 const clock = (ms: number) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 const laneColour = (c: string) => (c.toLowerCase() === '#000000' ? '#EDE4DC' : c);
 
-interface Drag { cueId: string; kind: 'move' | 'resize'; startMs: number; lengthMs: number; shift: number }
+interface Drag { cueId: string; kind: 'move' | 'resize'; startMs: number; lengthMs: number; shift: number; /** Cues of the lane pushed ahead of a cue moved to the right: id to new start. */ pushed?: Map<string, number> }
 /** A resized speech cue waiting for the answer to "shift the later cues too?". */
 interface Ask { drag: Drag; later: number; x: number; y: number; clamped: boolean }
 
@@ -151,6 +151,18 @@ export function Timeline({ content, readOnly, onContent, onError }: {
     const mates = scene.cues.filter((c) => c.laneId === cue.laneId && c.id !== cue.id);
     const prevEnd = mates.filter((c) => c.startMs < cue.startMs).reduce((m, c) => Math.max(m, c.startMs + c.lengthMs), 0);
     const nextStart = mates.filter((c) => c.startMs > cue.startMs).reduce((m, c) => Math.min(m, c.startMs), Infinity);
+    // Cues to the right on the lane: a cue moved to the right pushes the ones in its way ahead of it (a narrator's chain of paragraphs).
+    const ahead = mates.filter((c) => c.startMs > cue.startMs).sort((a, b) => a.startMs - b.startMs);
+    const pushFor = (start: number): { pushed: Map<string, number>; end: number } => {
+      const pushed = new Map<string, number>();
+      let edge = start + cue.lengthMs;
+      for (const o of ahead) {
+        if (o.startMs >= edge) break;
+        pushed.set(o.id, edge);
+        edge += o.lengthMs;
+      }
+      return { pushed, end: edge };
+    };
     let moved = false;
     let last: Drag = { cueId: cue.id, kind, startMs: cue.startMs, lengthMs: cue.lengthMs, shift: 0 };
     const move = (ev: PointerEvent) => {
@@ -158,8 +170,11 @@ export function Timeline({ content, readOnly, onContent, onError }: {
       moved = true;
       const dms = Math.round(((ev.clientX - x0) / pps) * 100) * 10; // steps of 10 ms
       if (kind === 'move') {
-        const start = Math.min(Math.max(cue.startMs + dms, prevEnd), Math.min(nextStart, MAX_MS) - cue.lengthMs);
-        last = { cueId: cue.id, kind, startMs: Math.max(0, start), lengthMs: cue.lengthMs, shift: 0 };
+        let start = Math.max(0, cue.startMs + dms, prevEnd);
+        let push = pushFor(start);
+        // The pushed chain must still fit in the scene: stop where its last cue reaches the end.
+        for (let i = 0; i < 20 && push.end > MAX_MS && start > cue.startMs; i++) { start = Math.max(cue.startMs, start - (push.end - MAX_MS)); push = pushFor(start); }
+        last = { cueId: cue.id, kind, startMs: start, lengthMs: cue.lengthMs, shift: 0, pushed: push.pushed };
       } else {
         let len = Math.max(MIN_CUE_MS, cue.lengthMs + dms);
         // A sound effect or music stops at the next cue of its lane; a speech cue may grow, and the author decides on release.
@@ -174,7 +189,7 @@ export function Timeline({ content, readOnly, onContent, onError }: {
       document.body.classList.remove('resizing');
       setDrag(null); // a speech cue's new length is kept in `ask` until it is answered
       if (!moved) { if (kind === 'move') seek(cue.startMs); return; }
-      if (kind === 'move') { if (last.startMs !== cue.startMs) void commit(cue.id, { startMs: last.startMs }); }
+      if (kind === 'move') { if (last.startMs !== cue.startMs) void commit(cue.id, { startMs: last.startMs, push: true }); }
       else if (last.lengthMs !== cue.lengthMs) {
         const oldEnd = cue.startMs + cue.lengthMs;
         const later = scene.cues.filter((c) => c.id !== cue.id && c.startMs >= oldEnd).length;
@@ -244,6 +259,8 @@ export function Timeline({ content, readOnly, onContent, onError }: {
   const view = drag ?? ask?.drag ?? null;
   const shown = (c: Cue): { start: number; len: number } => {
     if (view && c.id === view.cueId) return { start: view.startMs, len: view.lengthMs };
+    const pushedTo = view?.pushed?.get(c.id);
+    if (pushedTo !== undefined) return { start: pushedTo, len: c.lengthMs };
     return { start: c.startMs, len: c.lengthMs };
   };
 
@@ -323,6 +340,9 @@ const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top,
   const past = useStoreValue(nav?.store, (s) => s.cueState(cue.id) === 2000, false);
   const clip = cue.clips.find((k) => k.id === cue.clipId) ?? null;
   const colour = laneColour(lane.colour);
+  // While the cue is stretched, its audio piece is shown fitting the new length (from the same start, up to the end of the file); the server does the same on release.
+  const stretching = dragging && lengthMs !== cue.lengthMs;
+  const clipMs = clip && stretching && clip.loops === 0 && clip.assetDurationMs !== null ? Math.max(0, Math.min(lengthMs, clip.assetDurationMs - clip.offsetMs)) : clip?.lengthMs ?? 0;
   const [peaks, setPeaks] = useState<Peaks | null>(null);
   useEffect(() => {
     setPeaks(null);
@@ -335,7 +355,7 @@ const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top,
     <div className={'tl-cue' + (now ? ' now' : '') + (sel ? ' sel' : '') + (past ? ' past' : '') + (dragging ? ' dragging' : '') + (clip ? '' : ' empty')} data-cue-id={cue.id}
       style={{ left, width, top: top + 3, height: LANE_H - 6, '--c': colour } as React.CSSProperties}
       onPointerDown={onMove} onContextMenu={onMenu} title={cue.text || cue.type}>
-      {clip && peaks && <Wave peaks={peaks} offsetMs={clip.offsetMs} clipMs={clip.lengthMs} lengthMs={lengthMs} width={width} colour={colour} />}
+      {clip && peaks && <Wave peaks={peaks} offsetMs={clip.offsetMs} clipMs={clipMs} lengthMs={lengthMs} width={width} colour={colour} />}
       <span className="tl-text">{cue.text || (cue.type === 'speech' ? '' : cue.type)}</span>
       {!readOnly && <div className="tl-grip" onPointerDown={onResize} />}
     </div>

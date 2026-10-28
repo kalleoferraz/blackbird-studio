@@ -380,3 +380,11 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .file-note-ref { flex: none; color: var(--green); font-weight: 600; } a.file-note-ref { text-decoration: underline; }
 .link-btn.inline { display: inline-block; width: auto; min-width: 0; flex: 1; padding: 0 4px; }
 .upload-bar { height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; margin: 0 0 8px; } .upload-bar > div { height: 100%; background: var(--primary); transition: width .15s linear; }
+
+/* Right panel: the Characters / Library / Notes tab header stays put while the panel body scrolls */
+.right { padding-top: 0; }
+.right > .tabs { position: sticky; top: 0; z-index: 10; background: var(--panel); }
+.right > .panel-body { padding-top: 18px; }
+
+/* A cue whose audio file is missing: the audio icon is red (same red as the Library's missing mark) */
+.audio-btn.missing { color: #e5484d; } button.audio-btn.missing:hover { color: #ff6369; }

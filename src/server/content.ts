@@ -373,13 +373,17 @@ export interface CuePlace {
   lengthMs?: number;
   /** For a new length: `ripple` moves the later cues by the change, `trim` cuts the cue where the next one on its lane begins. */
   mode?: 'ripple' | 'trim';
+  /** For a new start: cues of the lane that the moved cue runs into (to its right) are pushed ahead of it instead of refusing the move. */
+  push?: boolean;
 }
 
 /**
- * The timeline's move and resize. A move changes only the cue's start and never touches another cue; it is refused
- * when it would overlap a cue on the same lane. A resize keeps the start: in ripple mode the later cues move by the
- * change (as with a length typed in the writing panel), in trim mode nothing else moves and the length stops where
- * the next cue of the lane begins. A hand-set length turns length auto off.
+ * The timeline's move and resize. A move changes the cue's start; it is refused when it would overlap a cue on the
+ * same lane, except with `push`, where the cues of the lane to its right that are in the way are pushed ahead of it
+ * (a chain of back-to-back cues moves right as one). A resize keeps the start: in ripple mode the later cues move by
+ * the change (as with a length typed in the writing panel), in trim mode nothing else moves and the length stops where
+ * the next cue of the lane begins; the chosen clip's piece of audio then follows the new length (see fitClipToCue).
+ * A hand-set length turns length auto off.
  */
 export async function placeCue(tx: Tx, cueId: string, place: CuePlace): Promise<CueRow> {
   let current = await cueRow(tx, cueId);
@@ -388,8 +392,25 @@ export async function placeCue(tx: Tx, cueId: string, place: CuePlace): Promise<
   if (place.startMs !== undefined && place.startMs !== current.startMs) {
     const startMs = Math.max(0, place.startMs);
     checkSpan(startMs, current.lengthMs);
-    if (siblings.some((o) => o.startMs < startMs + current.lengthMs && startMs < o.startMs + o.lengthMs)) {
+    const endMs = startMs + current.lengthMs;
+    // Cues of the lane that begin before this one's old start are never pushed: running into them is refused.
+    if (siblings.some((o) => o.startMs < current.startMs && o.startMs + o.lengthMs > startMs)) {
       throw new HttpError(409, 'lane_overlap', 'Another cue on this lane is in the way.');
+    }
+    const ahead = siblings.filter((o) => o.startMs >= current.startMs).sort((a, b) => a.startMs - b.startMs);
+    if (!place.push) {
+      if (ahead.some((o) => o.startMs < endMs && startMs < o.startMs + o.lengthMs)) {
+        throw new HttpError(409, 'lane_overlap', 'Another cue on this lane is in the way.');
+      }
+    } else {
+      // A chain of cues (a narrator speaking paragraph after paragraph): each cue in the way is pushed to where the one before it ends.
+      let edge = endMs;
+      for (const o of ahead) {
+        if (o.startMs >= edge) break; // a gap: the cues after this one are already clear
+        checkSpan(edge, o.lengthMs);
+        await tx.update(cue).set({ startMs: edge, updatedAt: new Date() }).where(eq(cue.id, o.id));
+        edge += o.lengthMs;
+      }
     }
     await tx.update(cue).set({ startMs, updatedAt: new Date() }).where(eq(cue.id, cueId));
     current = await cueRow(tx, cueId);
@@ -405,8 +426,29 @@ export async function placeCue(tx: Tx, cueId: string, place: CuePlace): Promise<
     const delta = lengthMs - current.lengthMs;
     await tx.update(cue).set({ lengthMs, lengthAuto: false, updatedAt: new Date() }).where(eq(cue.id, cueId));
     if (place.mode !== 'trim' && delta !== 0) await applyRipple(tx, current.sceneId, current.startMs + current.lengthMs, delta, [cueId]);
+    await fitClipToCue(tx, current, lengthMs);
   }
   return cueRow(tx, cueId);
+}
+
+/**
+ * After the timeline stretches or shrinks a cue, the chosen clip's piece of audio follows the cue's new length:
+ * it keeps its start in the file and ends where the cue ends, or where the file ends if that comes first (the cue
+ * is then silent after the audio). A clip that loops keeps its piece, because the author shaped it to repeat.
+ */
+async function fitClipToCue(tx: Tx, current: CueRow, cueLengthMs: number): Promise<void> {
+  if (!current.clipId) return;
+  const row = (await tx.select().from(clip).where(eq(clip.id, current.clipId)).limit(1))[0];
+  if (!row || row.loops !== 0) return;
+  const { projectId } = await cueProject(tx, current.id);
+  let duration: number;
+  try { duration = await audioDuration(tx, projectId, row.assetId); } catch { return; } // audio not ready: leave the clip alone
+  const lengthMs = Math.min(cueLengthMs, duration - row.offsetMs);
+  if (lengthMs < MIN_CLIP_MS || lengthMs === row.lengthMs) return;
+  // A shorter piece squeezes its fades (as when the piece is trimmed by hand).
+  const fadeInMs = Math.min(row.fadeInMs, Math.floor(lengthMs / 2));
+  const fadeOutMs = Math.min(row.fadeOutMs, lengthMs - fadeInMs);
+  await tx.update(clip).set({ lengthMs, fadeInMs, fadeOutMs }).where(eq(clip.id, row.id));
 }
 
 export async function deleteCue(tx: Tx, cueId: string): Promise<void> {
@@ -549,6 +591,8 @@ export interface ClipView {
   hasPeaks: boolean;
   /** The MP3 playback copy exists (the player asks for it); otherwise the file itself plays. */
   light: boolean;
+  /** The audio file behind the clip is missing on the server (the library flags it); the script shows the cue's audio icon in red. */
+  fileMissing: boolean;
 }
 
 /** The clips of some cues, with what the timeline needs of their audio (never the peaks themselves). */
@@ -566,6 +610,7 @@ export async function clipsOfCues(q: Q, cueIds: string[]): Promise<Map<string, C
       lightweightPath: asset.lightweightPath,
       sizeLightweight: asset.sizeLightweight,
       status: asset.status,
+      fileState: asset.fileState,
       offsetMs: clip.offsetMs,
       lengthMs: clip.lengthMs,
       gainDb: clip.gainDb,
@@ -599,6 +644,7 @@ export async function clipsOfCues(q: Q, cueIds: string[]): Promise<Map<string, C
       status: r.status,
       hasPeaks: r.peaks !== null,
       light: r.lightweightPath !== null && r.sizeLightweight !== null,
+      fileMissing: r.fileState === 'missing',
     };
     (out.get(r.cueId) ?? out.set(r.cueId, []).get(r.cueId)!).push(view);
   }

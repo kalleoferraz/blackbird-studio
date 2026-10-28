@@ -407,6 +407,10 @@ export function registerStoryRoutes(app: FastifyInstance): void {
       if (body.mode !== 'ripple' && body.mode !== 'trim') throw badRequest('invalid_mode');
       place.mode = body.mode;
     }
+    if ('push' in body) {
+      if (typeof body.push !== 'boolean') throw badRequest('invalid_push');
+      place.push = body.push;
+    }
     return segmentWrite(request, 'cue', id, async (tx) => {
       await placeCue(tx, id, place);
     });

@@ -272,7 +272,11 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
   });
   // A length that is only an estimate (no audio, not set by hand) is shown in gray.
   const estimated = !chosenClip && cue.lengthAuto ? ' est' : '';
+  // The chosen take's audio file is gone from the server: the audio icon turns red.
+  const audioMissing = !!chosenClip?.fileMissing;
+  const audioClass = 'audio-btn' + (audioMissing ? ' missing' : chosenClip ? ' has' : ' none');
   const audioTitle = cue.clips.length ? 'No take chosen' : 'No audio yet: record a take or choose audio';
+  const audioName = chosenClip ? (audioMissing ? `${chosenClip.name} – file missing: re-upload it in the Library` : chosenClip.name) : audioTitle;
   const placeholder = cue.type === 'speech' ? 'Spoken text (Markdown)…' : cue.type === 'sfx' ? 'Describe the sound effect…' : 'Describe the music…';
   const black = colour.toLowerCase() === '#000000';
   const showAudio = !drafting && (readOnly ? cue.clips.length > 0 : true);
@@ -325,8 +329,8 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
               onKeyDown={(e) => { if (e.key === 'Enter') commitLen(); if (e.key === 'Escape') setEditLen(null); }} />
           ) : drafting ? <span className="len">–</span> : readOnly ? <span className={'len' + estimated}>{formatTenths(cue.lengthMs)}</span> : (
             <MenuButton className={'len' + estimated} items={lengthMenu} title={`${formatSeconds(cue.lengthMs)}${cue.lengthAuto ? ' · follows the text (auto)' : ''}`}>{formatTenths(cue.lengthMs)}</MenuButton>)}
-          {showAudio && (readOnly ? <span className={'audio-btn' + (chosenClip ? ' has' : ' none')} title={chosenClip?.name ?? audioTitle}><AudioIcon /></span> :
-            <MenuButton className={'audio-btn' + (chosenClip ? ' has' : ' none')} items={audioMenu} title={chosenClip ? chosenClip.name : audioTitle}><AudioIcon /></MenuButton>)}
+          {showAudio && (readOnly ? <span className={audioClass} title={audioName}><AudioIcon /></span> :
+            <MenuButton className={audioClass} items={audioMenu} title={audioName}><AudioIcon /></MenuButton>)}
         </div>
         {cue.lengthAuto && !drafting && <span className="auto" title="The length follows the text until you set it by hand">auto</span>}
       </div>
