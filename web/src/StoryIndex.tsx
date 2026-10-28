@@ -8,9 +8,11 @@ import { useNotes } from './notesContext.tsx';
 
 type Drag = { kind: 'chapter'; id: string } | { kind: 'segment'; id: string } | null;
 
-export function StoryIndex({ projectId, story, currentSegmentId, readOnly, onStory, onOpenSegment, onError, onChanged }: {
+export function StoryIndex({ projectId, story, currentSegmentId, readOnly, onStory, onOpenSegment, onPick, onError, onChanged }: {
   projectId: string; story: Story; currentSegmentId?: string; readOnly: boolean;
   onStory: (s: Story) => void; onOpenSegment: (id: string) => void; onError: (m: string) => void; onChanged: () => void;
+  /** The reader clicked a segment row (not a segment made or opened by a menu action). */
+  onPick?: (id: string) => void;
 }) {
   const [collapsed, setCollapsed] = useLocalState<string[]>(`story-collapsed-${projectId}`, []);
   const [editing, setEditing] = useState<string | null>(null); // chapter or segment id; 'new-chapter' for the new row
@@ -76,7 +78,7 @@ export function StoryIndex({ projectId, story, currentSegmentId, readOnly, onSto
                 onDragLeave={() => setOver(null)}
                 onDrop={(e) => { e.stopPropagation(); const d = drag.current; drag.current = null; setOver(null);
                   if (d?.kind === 'segment' && d.id !== s.id) void run(() => api<Story>('POST', `/api/segments/${d.id}/move`, { chapterId: c.id, position: s.position })); }}
-                onClick={() => editing !== s.id && onOpenSegment(s.id)}>
+                onClick={() => { if (editing !== s.id) { onOpenSegment(s.id); onPick?.(s.id); } }}>
                 <span className="idx seg-idx">{plainIndex(c.index)}.{s.position}</span>
                 {editing === s.id ? (
                   <TitleInput value={s.title} onDone={(v) => { setEditing(null); if (v && v !== s.title) void run(() => api<Story>('PATCH', `/api/segments/${s.id}`, { title: v })); }} />

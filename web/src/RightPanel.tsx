@@ -77,16 +77,19 @@ export function CharacterDialog({ projectId, state, characters, onClose, onSaved
   );
 }
 
-export function RightPanel({ projectId, meId, characters, readOnly, onCharacters, onError, openDialog, notes, story, noteFocus, noteRequest, onNotesChanged, onAssetChanged, onOpenCue }: {
+export function RightPanel({ projectId, meId, characters, readOnly, onCharacters, onError, openDialog, notes, story, noteFocus, noteRequest, onNotesChanged, onAssetChanged, onOpenCue, mobileTab }: {
   projectId: string; meId: string; characters: Character[]; readOnly: boolean;
   onCharacters: () => void; onError: (m: string) => void;
   openDialog: (s: CharacterDialogState) => void;
   notes: NoteItem[]; story: Story; noteFocus: NoteFocus; noteRequest: NoteRequest | null; onNotesChanged: () => void; onAssetChanged: () => void; onOpenCue: (c: FileCue) => void;
+  /** On a phone: the panel the menu picked. The tab header is not shown then. */
+  mobileTab?: 'characters' | 'library' | 'notes';
 }) {
   const [remove, setRemove] = useState<Character | null>(null);
-  const [tab, setTab] = useLocalState<'characters' | 'library' | 'notes'>('rs.rightTab', 'characters');
+  const [storedTab, setTab] = useLocalState<'characters' | 'library' | 'notes'>('rs.rightTab', 'characters');
+  const tab = mobileTab ?? storedTab;
   // A cue's notes icon or a Library badge asks for the Notes tab.
-  useEffect(() => { if (noteRequest) setTab('notes'); }, [noteRequest?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (noteRequest && !mobileTab) setTab('notes'); }, [noteRequest?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <aside className="right">
       <div className="tabs">

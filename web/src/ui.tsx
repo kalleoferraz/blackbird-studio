@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { PALETTE } from '../../src/shared/palette.ts';
 
@@ -106,6 +106,16 @@ export function ColourPicker({ value, onChange }: { value: string; onChange: (he
         {inPalette && <PlusIcon />}
       </label>
     </div>
+  );
+}
+
+/** A phone: a narrow screen, or a landscape phone (short and touch). Keep in step with the `@media` blocks marked "phone" in styles.css. */
+export const MOBILE_QUERY = '(max-width: 720px), (max-height: 500px) and (pointer: coarse)';
+export function useIsMobile(): boolean {
+  return useSyncExternalStore(
+    (cb) => { const m = window.matchMedia(MOBILE_QUERY); m.addEventListener('change', cb); return () => m.removeEventListener('change', cb); },
+    () => window.matchMedia(MOBILE_QUERY).matches,
+    () => false,
   );
 }
 

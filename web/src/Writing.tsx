@@ -2,12 +2,12 @@ import { useEffect, useRef, useState, type MouseEvent as RMouseEvent } from 'rea
 import { api } from './api.ts';
 import type { Character, Cue, CueType, Lane, SegmentContent, Scene } from './types.ts';
 import { formatClock, formatMinutes, formatMs, formatSeconds, formatTenths, parseLength } from './format.ts';
-import { Confirm, MenuButton, errorText, type MenuItem } from './ui.tsx';
+import { Confirm, MenuButton, errorText, useIsMobile, type MenuItem } from './ui.tsx';
 import { useNav, useStoreValue } from './playback.ts';
 import { AudioPicker } from './AudioPicker.tsx';
 import { audioMenuItems } from './audioMenu.ts';
 import { RemoveAudioDialog } from './RemoveAudio.tsx';
-import { AddCueNoteButton, CueNoteIcons, useNotes } from './notesContext.tsx';
+import { CueNoteIcons, useNotes } from './notesContext.tsx';
 
 interface Props {
   content: SegmentContent;
@@ -150,6 +150,7 @@ function SceneBlock({ seg, index, total, segmentId, chapterId, lanes, characters
               {i === 0 && draftAfter(null)}
               {i === 0 && !readOnly && <Gap seg={seg} afterId={null} canSplit={false} call={call} onAdd={add} before />}
               <CueBlock cue={c} lane={lanes.get(c.laneId)} characters={characters} readOnly={readOnly} call={call} isLast={i === seg.cues.length - 1}
+                around={{ above: () => add(i === 0 ? null : seg.cues[i - 1]!.id), split: i > 0 ? () => void call('POST', `/api/scenes/${seg.id}/split`, { beforeCueId: c.id }) : undefined }}
                 startDraft={() => startDraft(seg.id, c.id)} setConfirm={setConfirm} setPicking={setPicking} setRemoving={setRemoving} onNewCharacter={onNewCharacter}
                 onSeek={() => nav?.store.seek({ segmentId, scene: index, ms: c.startMs })} place={{ segmentId, sceneId: seg.id, chapterId }} />
               {draftAfter(c.id)}
@@ -178,8 +179,10 @@ function Gap({ seg, afterId, canSplit, nextId, call, onAdd, last, before, always
   );
 }
 
-function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, drafting, setConfirm, setPicking, setRemoving, onNewCharacter, onSeek, place }: {
+function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, around, drafting, setConfirm, setPicking, setRemoving, onNewCharacter, onSeek, place }: {
   cue: Cue; lane?: Lane; characters: Character[]; readOnly: boolean; call: Call; isLast: boolean; startDraft: () => void;
+  /** Adding above and splitting the scene here: the gaps between cues have these buttons on a mouse; on a phone the cue's own menu does. */
+  around?: { above: () => void; split?: () => void };
   /** Present for a cue that only exists in the browser so far. */
   drafting?: { patch: (b: Partial<Draft>) => void; save: (text: string, more: boolean) => Promise<boolean>; cancel: () => void };
   setConfirm: (c: any) => void; setPicking: (p: { cue: Cue; colour: string } | null) => void; setRemoving: (c: Cue | null) => void; onNewCharacter: Props['onNewCharacter'];
@@ -188,6 +191,8 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
   /** The cue's segment, scene and chapter (for its notes icon); absent for a draft. */
   place?: { segmentId: string; sceneId: string; chapterId: string };
 }) {
+  const notes = useNotes();
+  const isMobile = useIsMobile();
   const [editing, setEditing] = useState(!!drafting);
   const [text, setText] = useState(cue.text);
   const [editLen, setEditLen] = useState<string | null>(null);
@@ -297,7 +302,6 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
       {!editing && (!drafting || isNow) && (
         <div className="tag-row">
           {!drafting && place && <CueNoteIcons cueId={cue.id} segmentId={place.segmentId} sceneId={place.sceneId} chapterId={place.chapterId} />}
-          {!readOnly && !drafting && <AddCueNoteButton cueId={cue.id} label={`this cue: “${cue.text.replace(/\s+/g, ' ').trim().slice(0, 40) || name}”`} />}
           {isNow && <span className="now-tag">now</span>}
         </div>)}
       {editing && (
@@ -335,12 +339,18 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, d
         {cue.lengthAuto && !drafting && <span className="auto" title="The length follows the text until you set it by hand">auto</span>}
       </div>
       <div className="cue-actions">
-        {readOnly || drafting ? <span /> : (
-          <button type="button" className="icon more-cue remove-cue" title="Delete cue" aria-label="Delete cue" onClick={askDelete}>
-            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
-              <circle cx="8" cy="8" r="6.2" /><path d="M5.600 5.600l4.800 4.800M10.400 5.600l-4.800 4.800" />
-            </svg>
-          </button>)}
+        {readOnly || drafting ? <span /> : (<>
+          {!editing && <MenuButton className="cue-menu" title="Cue options" items={[
+            { label: 'Edit text', onClick: () => { clearTimeout(seekTimer.current); setEditing(true); } },
+            { label: 'Add note…', onClick: () => notes.add({ kind: 'cue', id: cue.id }, `this cue: “${cue.text.replace(/\s+/g, ' ').trim().slice(0, 40) || name}”`) },
+            ...(around && isMobile ? [
+              { label: 'Add cue above', onClick: around.above } as MenuItem,
+              { label: 'Add cue below', onClick: startDraft } as MenuItem,
+              { label: 'Split scene here', disabled: !around.split, onClick: () => around.split?.() } as MenuItem] : []),
+            'sep',
+            { label: 'Delete cue', danger: true, onClick: askDelete },
+          ]}>⋯</MenuButton>}
+        </>)}
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import type { Story } from './types.ts';
 import { where, type Level } from './nav.ts';
 import type { PlaybackStore } from './playback.ts';
 import { formatClock, plainIndex } from './format.ts';
+import { useLocalState } from './ui.tsx';
 
 const ICONS = {
   segPrev: <><rect x="4" y="6" width="2.6" height="12" rx="1" /><path d="M20 6.2v11.6L9 12z" /></>,
@@ -27,8 +28,10 @@ const BUTTONS: { icon: keyof typeof ICONS; label: string; keys: string; dir: 'pr
 ];
 
 /** The one navigation bar of the Script View: position at the left, controls in the centre, clock and Follow at the right. */
-export function NavBar({ store, story, follow, onFollow, editing, timeline }: {
+export function NavBar({ store, story, follow, onFollow, editing, timeline, mobile }: {
   store: PlaybackStore; story: Story; follow: boolean; onFollow: (v: boolean) => void; editing: boolean;
+  /** A phone: the bar can be folded away to a slim handle, and it makes room for the keyboard while a cue is edited. */
+  mobile?: boolean;
   /** The timeline panel's switch; absent where there is no timeline (a textbook). */
   timeline?: { open: boolean; onToggle: () => void };
 }) {
@@ -37,6 +40,9 @@ export function NavBar({ store, story, follow, onFollow, editing, timeline }: {
   const pos = store.pos;
   const recView = store.recView();
   const recKind = recView.startsWith('count') ? 'count' : recView;
+  // The fold is remembered; it opens by itself while a take is being recorded, so the stop button is never out of reach.
+  const [folded, setFolded] = useLocalState('rs.navFolded', false);
+  const hidden = !!mobile && folded && !recView;
 
   // ---- the position readout, with the higher levels dropped one by one when there is no room ----
   const chapter = pos && story.chapters.find((c) => c.segments.some((s) => s.id === pos.segmentId));
@@ -85,7 +91,13 @@ export function NavBar({ store, story, follow, onFollow, editing, timeline }: {
       disabled={!store.can(b.level, b.dir)} onClick={() => store.move(b.level, b.dir)}><Icon>{ICONS[b.icon]}</Icon></button>
   );
   return (
-    <div className="navbar" role="toolbar" aria-label="Script navigation">
+    <div className={'navbar' + (mobile ? ' mobile' : '') + (hidden ? ' folded' : '') + (mobile && editing ? ' typing' : '')} role="toolbar" aria-label="Script navigation">
+      {mobile && (
+        <button type="button" className="nav-fold" aria-expanded={!hidden} aria-label={hidden ? 'Show the navigation bar' : 'Hide the navigation bar'}
+          title={hidden ? 'Show the navigation bar' : 'Hide the navigation bar'} onClick={() => setFolded(!folded)}>
+          <svg viewBox="0 0 24 12" width="24" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d={hidden ? 'M5 9l7-6 7 6' : 'M5 3l7 6 7-6'} /></svg>
+        </button>)}
       <div className="nav">
         <div className="nav-pos" ref={box} aria-label={levels.map(([n, v]) => `${n} ${v}`).join(', ')}>
           <div className="measure" aria-hidden="true">

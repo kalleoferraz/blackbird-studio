@@ -3,7 +3,7 @@ import { api, assetUrl, uploadFile } from './api.ts';
 import { formatBytes, formatDuration } from './format.ts';
 import type { LibFile, LibFolder, LibListing, NoteItem } from './types.ts';
 import { Confirm, Dialog, MenuButton, errorText, useLocalState } from './ui.tsx';
-import { AssetNotesBadge, useNotes } from './notesContext.tsx';
+import { AssetNoteIcons, useNotes } from './notesContext.tsx';
 import { forgetPeaks } from './peaks.ts';
 import { WavePlayer } from './WavePlayer.tsx';
 
@@ -192,7 +192,7 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
                 draggable={!readOnly && l.writable}
                 onDragStart={(e) => { e.dataTransfer.setData(MOVE_TYPE, JSON.stringify({ id: file.id, folder: l.folder })); e.dataTransfer.effectAllowed = 'move'; }}>
                 {file.fileState === 'missing' && <span className="lib-missing" role="img" aria-label="File missing" title="The file is missing: it is listed in the project but its bytes are not here. Re-upload it from the menu.">!</span>}
-                <AssetNotesBadge assetId={file.id} />
+                <span className="note-icons"><AssetNoteIcons assetId={file.id} /></span>
                 <button className="tree-main" onClick={() => setPreview(file)} title={file.usage?.length ? `Used by ${file.usage.join(', ')}` : file.name}>
                   <span className="tree-icon">{file.kind === 'image' ? <img src={assetUrl(file.id, file.hasLightweight)} alt="" loading="lazy" /> : KIND_ICON[file.kind]}</span>
                   <span className="grow"><span className="lib-name">{file.name}</span>

@@ -9,7 +9,7 @@ import { Writing } from './Writing.tsx';
 import { CharacterDialog, RightPanel, type CharacterDialogState } from './RightPanel.tsx';
 import { ago, cueCountOrder, inOrder } from './format.ts';
 import { BlackbirdIcon } from './Brand.tsx';
-import { errorText, useLocalState } from './ui.tsx';
+import { MenuButton, errorText, useIsMobile, useLocalState, type MenuItem } from './ui.tsx';
 import { NavBar } from './NavBar.tsx';
 import { NavContext, PlaybackStore } from './playback.ts';
 import { toNav } from './nav.ts';
@@ -32,6 +32,9 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   const [notes, setNotes] = useState<NoteItem[]>([]);
   const [noteRequest, setNoteRequest] = useState<NoteRequest | null>(null);
   const [addNote, setAddNote] = useState<{ target: { kind: NoteTargetKind; id: string } | null; label: string } | null>(null);
+  // On a phone one panel fills the screen at a time; the menu in the top bar chooses it.
+  const isMobile = useIsMobile();
+  const [mview, setMview] = useState<MobileView>('script');
 
   const loadProject = useCallback(async () => { try { setProject(await api<ProjectCard>('GET', `/api/projects/${projectId}`)); } catch (e) { setError(errorText(e)); } }, [projectId]);
   // The Characters tab lists the most used first. The order is taken once, when the page loads the list, and kept after that.
@@ -85,6 +88,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   const [showing, setShowing] = useState<{ segmentId: string; cueId: string } | null>(null);
   const showCue = (c: { segmentId: string; cueId: string }) => {
     setShowing({ segmentId: c.segmentId, cueId: c.cueId });
+    setMview('script');
     if (c.segmentId !== segmentId) { expectedNav.current = c.segmentId; openSegment(c.segmentId); }
   };
 
@@ -134,7 +138,13 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
       cueLabel: cueRow ? cueRow.text.replace(/\s+/g, ' ').trim().slice(0, 60) || null : null,
     };
   }, [content, curScene, curCue]);
-  const notesInfo = useMemo<NotesInfo>(() => ({ ...badgesOf(notes), show: (r) => setNoteRequest({ ...r, n: Date.now() }), add: (target, label) => setAddNote({ target, label }) }), [notes]);
+  const notesInfo = useMemo<NotesInfo>(() => ({ ...badgesOf(notes),
+    forTarget: (kind, id) => notes.filter((n) => n.target?.kind === kind && n.target.id === id && !n.rootNoteId && !n.deleted),
+    readOnly: !!readOnly,
+    setDone: async (noteId, done) => {
+      try { await api('POST', `/api/notes/${noteId}/done`, { done }); await loadNotes(); void loadProject(); } catch (e) { setError(errorText(e)); }
+    },
+    show: (r) => { setNoteRequest({ ...r, n: Date.now() }); setMview('notes'); }, add: (target, label) => setAddNote({ target, label }) }), [notes, readOnly, loadNotes, loadProject]);
   // Opening a segment yourself (index, address, back button) puts the playhead at its start. Moves the bar makes
   // itself are marked in `expectedNav` so they are not mistaken for that.
   const expectedNav = useRef<string | null>(null);
@@ -195,6 +205,18 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
     <NavContext.Provider value={nav}>
     <NotesContext.Provider value={notesInfo}>
     <div className="script">
+      {isMobile ? (
+        <header className="topbar mobile-top">
+          <a href="#/" className="brand" title="Projects"><BlackbirdIcon /></a>
+          <div className="m-title"><b>{mview === 'script' ? project.title : MOBILE_VIEWS.find((v) => v.id === mview)!.label}</b>
+            {(mview !== 'script' || readOnly) && <span>{mview === 'script' ? 'view only' : project.title + (readOnly ? ' · view only' : '')}</span>}</div>
+          <MenuButton className="m-menu" title="Menu" items={mobileMenu(mview, setMview, {
+            readOnly: !!readOnly, saving, status: project.dirtySince ? 'unsaved' : ago(project.lastSnapshotAt), onSnapshot: () => void saveSnapshot(),
+            onProject: () => go(`/p/${projectId}`), onProjects: () => go('/') })}>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+          </MenuButton>
+        </header>
+      ) : (
       <header className="topbar">
         <a href="#/" className="brand" title="Projects"><BlackbirdIcon /></a>
         <a href={`#/p/${projectId}`}>{project.title}</a>
@@ -204,11 +226,13 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
         <span className="muted small">{project.dirtySince ? 'Unsaved changes' : `Snapshot ${ago(project.lastSnapshotAt)}`}</span>
         {!readOnly && <button onClick={() => void saveSnapshot()} disabled={saving}>{saving ? 'Saving…' : 'Save snapshot'}</button>}
         <span className="muted small">{me.user.displayName}{readOnly && ' · view only'}</span>
-      </header>
-      <div className="script-body" style={{ '--lw': `${leftW}px`, '--rw': `${rightW}px` } as CSSProperties}>
-        <Splitter side="left" width={leftW} onChange={setLeftW} />
-        <Splitter side="right" width={rightW} onChange={setRightW} />
+      </header>)}
+      {isMobile && (error || saved) && <div className={'m-banner ' + (error ? 'error' : 'muted')} onClick={() => { setError(''); setSaved(''); }}>{error || saved}</div>}
+      <div className="script-body" data-mview={isMobile ? mview : undefined} style={{ '--lw': `${leftW}px`, '--rw': `${rightW}px` } as CSSProperties}>
+        {!isMobile && <Splitter side="left" width={leftW} onChange={setLeftW} />}
+        {!isMobile && <Splitter side="right" width={rightW} onChange={setRightW} />}
         <StoryIndex projectId={projectId} story={story} currentSegmentId={segmentId} readOnly={!!readOnly}
+          onPick={() => setMview('script')}
           onStory={setStory} onOpenSegment={openSegment} onError={setError} onChanged={() => { void loadProject(); if (segmentId) void api<SegmentContent>('GET', `/api/segments/${segmentId}`).then(setContent).catch(() => setContent(null)); }} />
         <main className="center-col" ref={mainRef}>
           {content ? (
@@ -227,11 +251,12 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
         </main>
         <RightPanel projectId={projectId} meId={me.user.id} characters={panelCharacters} readOnly={!!readOnly}
           onCharacters={() => void loadCharacters()} onError={setError} openDialog={setDialog}
-          notes={notes} story={story} noteFocus={noteFocus} noteRequest={noteRequest} onNotesChanged={() => { void loadNotes(); void loadProject(); }} onAssetChanged={refreshAfterEdit} onOpenCue={showCue} />
+          notes={notes} story={story} noteFocus={noteFocus} noteRequest={noteRequest} onNotesChanged={() => { void loadNotes(); void loadProject(); }} onAssetChanged={refreshAfterEdit} onOpenCue={showCue}
+          mobileTab={isMobile && (mview === 'characters' || mview === 'library' || mview === 'notes') ? mview : undefined} />
       </div>
-      {content && project.type !== 'textbook' && tlOpen && <Timeline content={content} readOnly={!!readOnly} onContent={onContent} onError={setError} />}
-      <NavBar store={playback} story={story} follow={follow} onFollow={setFollow} editing={editing}
-        timeline={project.type !== 'textbook' ? { open: tlOpen, onToggle: () => setTlOpen(!tlOpen) } : undefined} />
+      {content && project.type !== 'textbook' && tlOpen && !isMobile && <Timeline content={content} readOnly={!!readOnly} onContent={onContent} onError={setError} />}
+      <NavBar store={playback} story={story} follow={follow} onFollow={setFollow} editing={editing} mobile={isMobile}
+        timeline={project.type !== 'textbook' && !isMobile ? { open: tlOpen, onToggle: () => setTlOpen(!tlOpen) } : undefined} />
       {addNote && <AddNoteDialog projectId={projectId} target={addNote.target} label={addNote.label} onClose={() => setAddNote(null)}
         onSaved={() => { void loadNotes(); void loadProject(); }} />}
       {trim && <TrimDialog req={trim} onDone={(keep) => { trim.resolve(keep); setTrim(null); }} />}
@@ -241,6 +266,25 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
     </NotesContext.Provider>
     </NavContext.Provider>
   );
+}
+
+type MobileView = 'script' | 'index' | 'characters' | 'library' | 'notes';
+const MOBILE_VIEWS: { id: MobileView; label: string }[] = [
+  { id: 'script', label: 'Script' }, { id: 'index', label: 'Index' }, { id: 'characters', label: 'Characters' },
+  { id: 'library', label: 'Library' }, { id: 'notes', label: 'Notes' },
+];
+
+/** The phone's menu: which panel fills the screen, then the actions the desktop top bar has. */
+function mobileMenu(current: MobileView, show: (v: MobileView) => void, o: {
+  readOnly: boolean; saving: boolean; status: string; onSnapshot: () => void; onProject: () => void; onProjects: () => void;
+}): MenuItem[] {
+  return [
+    ...MOBILE_VIEWS.map((v): MenuItem => ({ label: v.label, checked: v.id === current, onClick: () => show(v.id) })),
+    'sep',
+    ...(o.readOnly ? [] : [{ label: o.saving ? 'Saving…' : 'Save snapshot', hint: o.status, disabled: o.saving, onClick: o.onSnapshot } as MenuItem]),
+    { label: 'Project details', onClick: o.onProject },
+    { label: 'All projects', onClick: o.onProjects },
+  ];
 }
 
 function TitleEdit({ value, onSave, className, disabled }: { value: string; onSave: (v: string) => void; className: string; disabled: boolean }) {
