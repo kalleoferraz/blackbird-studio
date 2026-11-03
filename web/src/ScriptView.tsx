@@ -307,10 +307,11 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
           onStory={setStory} onOpenSegment={openSegment} onError={setError} onChanged={() => { void loadProject(); if (segmentId) void api<SegmentContent>('GET', `/api/segments/${segmentId}`).then(setContent).catch(() => setContent(null)); }} />
         <main className="center-col" ref={mainRef}>
           {content ? (
+            <>
+            <div className="where-wrap"><div className={'where' + (titlesGone ? ' on' : '')} onClick={() => mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} title="Back to the top" data-testid="where">
+              <b>{content.segment.chapterTitle}</b><span className="sep">›</span><span>{content.segment.title}</span>
+            </div></div>
             <div className="doc">
-              <div className="where-wrap"><div className={'where' + (titlesGone ? ' on' : '')} onClick={() => mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} title="Back to the top" data-testid="where">
-                <b>{content.segment.chapterTitle}</b><span className="sep">›</span><span>{content.segment.title}</span>
-              </div></div>
               <div ref={titlesRef}>
               <TitleEdit className="chapter-title" value={content.segment.chapterTitle} disabled={!!readOnly} onSave={(v) => renameTitle('chapter', content.segment.chapterId, v)} />
               <TitleEdit className="segment-title" value={content.segment.title} disabled={!!readOnly} onSave={(v) => renameTitle('segment', content.segment.id, v)} />
@@ -318,6 +319,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
               <Writing content={content} characters={characters} readOnly={!!readOnly} onContent={onContent} onError={setError}
                 onNewCharacter={(then) => { if (isMobile) showView('characters'); openEditor({ then }); }} />
             </div>
+            </>
           ) : <p className="muted">Select or add a segment.</p>}
         </main>
         <RightPanel projectId={projectId} meId={me.user.id} characters={panelCharacters} readOnly={!!readOnly}
