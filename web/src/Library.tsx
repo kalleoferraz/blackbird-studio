@@ -18,11 +18,16 @@ const MOVE_TYPE = 'application/x-blackbird-asset';
 /** A cue that plays a file, with its place in the story (from `GET /api/assets/:id/cues`). */
 export interface FileCue { cueId: string; sceneId: string; sceneNo: number; segmentId: string; segment: string; chapterId: string; chapter: string; text: string; chosen: boolean }
 
-export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, notes: allNotes, onOpenCue }: {
+export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, notes: allNotes, onOpenCue, root, showAlso }: {
+  /** `root`: show only this folder (e.g. a character's) as the top of the tree, instead of the whole library. */
+  root?: { path: string; name: string };
+  /** With `root`: a folder below it (or '' for the root itself) to open and re-read each time this number changes (the editor bumps it after a picture is added). */
+  showAlso?: { n: number; folder: string };
   projectId: string; readOnly: boolean; onError: (m: string) => void; onAssetChanged: () => void;
   notes: NoteItem[]; onOpenCue: (c: FileCue) => void;
 }) {
-  const [open, setOpen] = useLocalState<string[]>(`rs.libOpen.${projectId}`, []);
+  const rootFolder: LibFolder = root ? { ...ROOT, name: root.name, path: root.path } : ROOT;
+  const [open, setOpen] = useLocalState<string[]>(root ? `rs.libOpen.${projectId}.${root.path}` : `rs.libOpen.${projectId}`, []);
   const [lists, setLists] = useState<Record<string, LibListing>>({});
   const [busy, setBusy] = useState('');
   const [progress, setProgress] = useState<number | null>(null);
@@ -36,10 +41,11 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
   const input = useRef<HTMLInputElement>(null);
   const reInput = useRef<HTMLInputElement>(null);
   const reTarget = useRef<{ file: LibFile; folder: string } | null>(null);
+  const phInput = useRef<HTMLInputElement>(null);
   const [info, setInfo] = useState('');
   const notes = useNotes();
   const target = useRef('');
-  const expanded = new Set(['', ...open]);
+  const expanded = new Set([rootFolder.path, ...open]);
 
   const fetchList = useCallback(async (path: string) => {
     try {
@@ -47,7 +53,7 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
       setLists((prev) => ({ ...prev, [path]: l }));
       return l;
     } catch (e: any) {
-      if (e.status === 404 && path) setOpen(open.filter((o) => o !== path && !o.startsWith(path + '/'))); else onError(errorText(e));
+      if (e.status === 404 && path && path !== rootFolder.path) setOpen(open.filter((o) => o !== path && !o.startsWith(path + '/'))); else onError(errorText(e));
       return null;
     }
   }, [projectId, onError]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -59,10 +65,11 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
 
   const reloadRef = useRef(reloadOpen);
   reloadRef.current = reloadOpen;
-  useEffect(() => { void reloadOpen(['', ...open]); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void reloadOpen([rootFolder.path, ...open]); }, [projectId, rootFolder.path]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When the Library first opens, check that every listed file is really on the server and flag the ones that are not.
   useEffect(() => {
+    if (root) return;
     let live = true;
     void api<{ changed: number }>('POST', `/api/projects/${projectId}/library/verify`)
       .then((r) => { if (live && r.changed) void reloadRef.current(); })
@@ -85,6 +92,14 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
     const timer = setTimeout(() => { for (const p of working) void fetchList(p); }, 2000);
     return () => clearTimeout(timer);
   }, [workingKey, lists]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The Characters folder's menu: the image shown, faded, for characters without a picture (stored there as profile_placeholder).
+  const uploadPlaceholder = async (f: File) => {
+    try {
+      await uploadFile('PUT', `/api/projects/${projectId}/character-placeholder?name=${encodeURIComponent(f.name)}`, f);
+      await reloadOpen(); onAssetChanged();
+    } catch (e) { onError(errorText(e)); }
+  };
 
   const retry = async (file: LibFile, folder: string) => {
     try { await api('POST', `/api/assets/${file.id}/retry`); await fetchList(folder); } catch (e) { onError(errorText(e)); }
@@ -114,6 +129,14 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
     } catch (e) { onError(errorText(e)); }
     setBusy(''); setProgress(null);
   };
+
+  useEffect(() => {
+    if (!root || !showAlso?.n) return;
+    const path = showAlso.folder ? `${root.path}/${showAlso.folder}` : root.path;
+    const next = open.includes(path) ? open : [...open, path];
+    setOpen(next);
+    void reloadOpen([root.path, ...next]);
+  }, [showAlso?.n]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = (path: string) => {
     if (expanded.has(path)) { setOpen(open.filter((o) => o !== path)); return; }
@@ -179,6 +202,7 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
           {!readOnly && <MenuButton className="more show" title="Folder" items={[
             { label: 'Upload…', disabled: !f.writable, onClick: () => { target.current = f.path; input.current?.click(); } },
             { label: 'New folder…', disabled: !f.writable, onClick: () => setNewIn(f) },
+            ...(!root && f.path.toLowerCase() === 'characters' ? [{ label: 'Upload character placeholder image…', onClick: () => phInput.current?.click() }] : []),
             'sep',
             { label: 'Rename…', disabled: f.managed, onClick: () => setRenaming(f) },
             { label: 'Delete…', danger: true, disabled: f.managed, onClick: () => void askRemoveFolder(f) },
@@ -217,11 +241,12 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
   };
 
   return (
-    <div className="panel-body library">
+    <div className={root ? 'library' : 'panel-body library'}>
       {busy && <p className="muted small">{busy}{progress !== null ? ` · ${Math.round(progress * 100)}%` : ''}</p>}
       {busy && progress !== null && <div className="upload-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}><div style={{ width: `${progress * 100}%` }} /></div>}
       {!busy && info && <p className="muted small">{info}</p>}
-      {renderFolder({ ...ROOT, writable: !readOnly }, 0, true)}
+      {renderFolder({ ...rootFolder, writable: !readOnly }, 0, true)}
+      <input ref={phInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadPlaceholder(f); e.target.value = ''; }} />
       <input ref={reInput} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; const t = reTarget.current; if (f && t) void reupload(t.file, t.folder, f); e.target.value = ''; }} />
       <input ref={input} type="file" multiple hidden onChange={(e) => { if (e.target.files) void upload(target.current, e.target.files); e.target.value = ''; }} />
 
@@ -263,7 +288,7 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
         const moved = (p: string) => (p === from || p.startsWith(from + '/') ? r.path + p.slice(from.length) : p);
         const next = open.map(moved);
         setOpen(next); setRenaming(null);
-        await reloadOpen(['', ...next]);
+        await reloadOpen([rootFolder.path, ...next]);
       }} />}
 
       {removeFile && <Confirm title="Delete file" danger confirmLabel="Delete" message={`Delete ${removeFile.name} from the library? This cannot be undone.`}
@@ -279,7 +304,7 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
             await api('DELETE', `/api/projects/${projectId}/library/folders?path=${encodeURIComponent(removeFolder.folder.path)}&recursive=1`);
             const gone = removeFolder.folder.path;
             const next = open.filter((o) => o !== gone && !o.startsWith(gone + '/'));
-            setOpen(next); await reloadOpen(['', ...next]);
+            setOpen(next); await reloadOpen([rootFolder.path, ...next]);
           } catch (e) { onError(errorText(e)); }
         }} onClose={() => setRemoveFolder(null)} />}
     </div>

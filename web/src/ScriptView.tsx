@@ -6,7 +6,7 @@ import { NotesContext, badgesOf, type NotesInfo } from './notesContext.tsx';
 import { AddNoteDialog } from './NotesPanel.tsx';
 import { StoryIndex } from './StoryIndex.tsx';
 import { Writing } from './Writing.tsx';
-import { CharacterDialog, RightPanel, type CharacterDialogState } from './RightPanel.tsx';
+import { RightPanel, type CharacterDialogState } from './RightPanel.tsx';
 import { ago, cueCountOrder, inOrder } from './format.ts';
 import { BlackbirdIcon } from './Brand.tsx';
 import { MenuButton, errorText, useIsMobile, useLocalState, type MenuItem } from './ui.tsx';
@@ -245,12 +245,15 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
               <TitleEdit className="segment-title" value={content.segment.title} disabled={!!readOnly} onSave={(v) => renameTitle('segment', content.segment.id, v)} />
               </div>
               <Writing content={content} characters={characters} readOnly={!!readOnly} onContent={onContent} onError={setError}
-                onNewCharacter={(then) => setDialog({ then })} />
+                onNewCharacter={(then) => { setDialog({ then }); if (isMobile) setMview('characters'); }} />
             </div>
           ) : <p className="muted">Select or add a segment.</p>}
         </main>
         <RightPanel projectId={projectId} meId={me.user.id} characters={panelCharacters} readOnly={!!readOnly}
           onCharacters={() => void loadCharacters()} onError={setError} openDialog={setDialog}
+          editor={dialog} allCharacters={characters}
+          onCloseEditor={() => { if (dialog?.then && isMobile) setMview('script'); setDialog(null); }}
+          onEditorSaved={() => { void loadCharacters(); if (segmentId) void api<SegmentContent>('GET', `/api/segments/${segmentId}`).then(setContent); }}
           notes={notes} story={story} noteFocus={noteFocus} noteRequest={noteRequest} onNotesChanged={() => { void loadNotes(); void loadProject(); }} onAssetChanged={refreshAfterEdit} onOpenCue={showCue}
           mobileTab={isMobile && (mview === 'characters' || mview === 'library' || mview === 'notes') ? mview : undefined} />
       </div>
@@ -260,8 +263,6 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
       {addNote && <AddNoteDialog projectId={projectId} target={addNote.target} label={addNote.label} onClose={() => setAddNote(null)}
         onSaved={() => { void loadNotes(); void loadProject(); }} />}
       {trim && <TrimDialog req={trim} onDone={(keep) => { trim.resolve(keep); setTrim(null); }} />}
-      {dialog && <CharacterDialog projectId={projectId} state={dialog} characters={characters} onClose={() => setDialog(null)}
-        onSaved={() => { void loadCharacters(); if (segmentId) void api<SegmentContent>('GET', `/api/segments/${segmentId}`).then(setContent); }} onError={setError} />}
     </div>
     </NotesContext.Provider>
     </NavContext.Provider>

@@ -582,6 +582,29 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     });
   });
 
+  // ---- character placeholder: Characters/profile_placeholder.<ext>, shown faded for characters without a picture -----
+
+  app.put('/api/projects/:id/character-placeholder', upload(MAX_PICTURE + 4096), async (request) => {
+    const projectId = checkId((request.params as { id: string }).id);
+    const data = rawBody(request);
+    const { ext } = splitName(cleanFileName(queryString(request, 'name') || 'profile_placeholder'));
+    return withDb(async (db) => {
+      await accessTo(db, request.account!.id, projectId, { edit: true });
+      const stem = 'profile_placeholder';
+      const old = (await assetsUnder(db, projectId, CHARACTERS)).filter((a) => {
+        const rest = a.path.slice(CHARACTERS.length + 1);
+        return !rest.includes('/') && splitName(rest).base.toLowerCase() === stem;
+      });
+      const dup = await findByHash(db, projectId, sha256(data));
+      if (dup && old.some((o) => o.id === dup.id)) return { assetId: dup.id, changed: false };
+      if (dup) throw new HttpError(409, 'already_in_library', `This image is already in the library at ${dup.path}. Rename or move it to Characters/${stem}${splitName(dup.path).ext} yourself, or choose another image.`, { path: dup.path });
+      for (const o of old) { await db.delete(asset).where(eq(asset.id, o.id)); await removeFiles(o); }
+      const stored = await storeFile(db, { projectId, folder: CHARACTERS, name: stem + ext, data, only: ['image'], maxBytes: MAX_PICTURE, exactName: true });
+      await touchProject(db, projectId, request.account!.id);
+      return { assetId: stored.asset.id, changed: true };
+    });
+  });
+
   app.delete('/api/projects/:id/cover', auth, async (request) => {
     const projectId = checkId((request.params as { id: string }).id);
     return withDb(async (db) => {
@@ -601,14 +624,28 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     return withDb(async (db) => {
       const access = await accessToEntity(db, request.account!.id, 'character', id, { edit: true });
       const c = (await db.select().from(character).where(eq(character.id, id)).limit(1))[0]!;
+      const dir = pictureFolder(c.folder);
+      // The picture is the file `profile.<ext>` in the character's own folder; a new picture replaces the earlier profile file.
+      const earlier = (await assetsUnder(db, access.projectId, dir)).filter((a) => {
+        const rest = a.path.slice(dir.length + 1);
+        return !rest.includes('/') && splitName(rest).base.toLowerCase() === 'profile';
+      });
       const dup = await findByHash(db, access.projectId, sha256(data));
       let assetId: string;
       if (dup) {
         if (dup.mediaKind !== 'image') throw new HttpError(409, 'already_in_library', `This file is already in the library at ${dup.path}.`, { path: dup.path });
         assetId = dup.id; // the same image is simply used again
       } else {
+        for (const e of earlier) {
+          const others = ((await usageOf(db, access.projectId, [e.id])).get(e.id) ?? []).filter((u) => u !== `the picture of ${c.name}`);
+          if (others.length) throw new HttpError(409, 'in_use', `The file ${e.path} is also used by ${others.join(', ')}.`);
+        }
+        if (earlier.length) {
+          await db.update(character).set({ pictureAssetId: null }).where(eq(character.id, id)); // the picture points at the file with a restricting reference
+          for (const e of earlier) { await db.delete(asset).where(eq(asset.id, e.id)); await removeFiles(e); }
+        }
         const stored = await storeFile(db, {
-          projectId: access.projectId, folder: pictureFolder(c.folder), name: cleanFileName(name), data, only: ['image'], maxBytes: MAX_PICTURE,
+          projectId: access.projectId, folder: dir, name: 'profile' + splitName(cleanFileName(name)).ext, data, only: ['image'], maxBytes: MAX_PICTURE, exactName: true,
         });
         assetId = stored.asset.id;
       }

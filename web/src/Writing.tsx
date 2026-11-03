@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type MouseEvent as RMouseEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent as RDragEvent, type MouseEvent as RMouseEvent } from 'react';
 import { api } from './api.ts';
 import type { Character, Cue, CueType, Lane, SegmentContent, Scene } from './types.ts';
 import { formatClock, formatMinutes, formatMs, formatSeconds, formatTenths, parseLength } from './format.ts';
-import { Confirm, MenuButton, errorText, useIsMobile, type MenuItem } from './ui.tsx';
+import { CHARACTER_DRAG, Confirm, MenuButton, errorText, useIsMobile, type MenuItem } from './ui.tsx';
 import { useNav, useStoreValue } from './playback.ts';
 import { AudioPicker } from './AudioPicker.tsx';
 import { audioMenuItems } from './audioMenu.ts';
@@ -287,8 +287,20 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
   const showAudio = !drafting && (readOnly ? cue.clips.length > 0 : true);
   const name = cue.type === 'speech' ? (character?.name ?? lane?.title ?? 'No character') : (lane?.title ?? TYPE_LABEL[cue.type]);
   const nameStyle = { color: black ? 'var(--text)' : colour };
+  // A character dragged from the Characters tab onto the cue: the cue becomes that character's speech.
+  const [dropHere, setDropHere] = useState(false);
+  const canDrop = (e: RDragEvent) => !readOnly && e.dataTransfer.types.includes(CHARACTER_DRAG);
   return (
-    <div className={'cue ' + cue.type + (editing ? ' editing' : '') + (isNow ? ' playhead' : '') + (played ? ' played' : '') + (recording ? ' recording' : '') + (recPhase === 'count' ? ' armed' : '')} data-cue-id={cue.id} onClick={onCueClick}>
+    <div onDragOver={(e) => { if (canDrop(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDropHere(true); } }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropHere(false); }}
+      onDrop={(e) => {
+        setDropHere(false);
+        if (!canDrop(e)) return;
+        e.preventDefault();
+        const id = e.dataTransfer.getData(CHARACTER_DRAG);
+        if (characters.some((c) => c.id === id)) void patch({ type: 'speech', characterId: id });
+      }}
+      className={'cue ' + (dropHere ? 'drop-char ' : '') + cue.type + (editing ? ' editing' : '') + (isNow ? ' playhead' : '') + (played ? ' played' : '') + (recording ? ' recording' : '') + (recPhase === 'count' ? ' armed' : '')} data-cue-id={cue.id} onClick={onCueClick}>
       {isNow && <span className="progress" style={{ height: `${shown / 10}%` }} />}
       <span className={'strip' + (black ? ' black' : '')} style={{ background: colour }} />
       <div className="tagcol">

@@ -129,3 +129,6 @@ export function useLocalState<T>(key: string, initial: T): [T, (v: T) => void] {
 export function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
+
+/** Drag type of a character tile from the Characters tab; the data is the character's id. Dropped on a cue it makes the cue that character's speech. */
+export const CHARACTER_DRAG = 'application/x-blackbird-character';
