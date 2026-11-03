@@ -5,6 +5,7 @@ import { ChangePassword } from './Login.tsx';
 import type { Language, Me, ProjectCard } from './types.ts';
 import { ago, formatBytes } from './format.ts';
 import { Brand } from './Brand.tsx';
+import { InstallButton } from './install.tsx';
 import { Dialog, errorText } from './ui.tsx';
 import { PROJECT_FILE, RestoreLibrary } from './RestoreLibrary.tsx';
 import { readZipEntry, readZipIndex } from './zip.ts';
@@ -65,6 +66,7 @@ export function Projects({ me, onLogout, onMe }: { me: Me; onLogout: () => void;
     <div className="page">
       <header className="topbar"><Brand /><span className="grow" />
         <span className="muted">{me.user.displayName}</span>
+        <InstallButton />
         <button onClick={() => setPassword(true)}>Password</button><button onClick={onLogout}>Sign out</button></header>
       <div className="row"><h1 className="grow">Projects</h1><button disabled={busy} onClick={() => picker.current?.click()}>Import</button>
         <button className="primary" onClick={() => setCreating(true)}>New project</button>

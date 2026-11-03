@@ -8,7 +8,7 @@ const appFolder = fileURLToPath(new URL('../../public/app/', import.meta.url));
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json', '.map': 'application/json',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.map': 'application/json',
 };
 
 export function registerUi(app: FastifyInstance): void {
@@ -37,6 +37,9 @@ export function registerUi(app: FastifyInstance): void {
     }
     return send(reply, 'index.html');
   });
+  // Installable app (PWA): the manifest and service worker live at the root so the worker can control the whole site.
+  app.get('/manifest.webmanifest', async (_req, reply) => send(reply, 'manifest.webmanifest'));
+  app.get('/sw.js', async (_req, reply) => send(reply, 'sw.js'));
   // Old address of the app.
   app.get('/app', async (_req, reply) => reply.redirect('/'));
   app.get('/app/', async (_req, reply) => reply.redirect('/'));
