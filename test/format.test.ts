@@ -9,6 +9,11 @@ test('characters are ordered by number of cues, ties in creation order', () => {
   assert.deepEqual(cueCountOrder([{ id: 'a' }, { id: 'b' }]), ['a', 'b']); // no counts: creation order
 });
 
+test('characters with a picture come first, then the order by cues', () => {
+  const withPics = [{ id: 'n', cueCount: 3 }, { id: 'm', cueCount: 9 }, { id: 't', cueCount: 3, pictureAssetId: 'p1' }, { id: 'z', cueCount: 0, pictureAssetId: 'p2' }, { id: 'y', cueCount: 5, pictureAssetId: null }];
+  assert.deepEqual(cueCountOrder(withPics), ['t', 'z', 'm', 'y', 'n']);
+});
+
 test('the remembered order holds while counts and members change', () => {
   const ids = cueCountOrder(cs);
   const later = [{ id: 'n', cueCount: 50 }, { id: 'm', cueCount: 1 }, { id: 't', cueCount: 3 }, { id: 'z', cueCount: 0 }, { id: 'new' }];

@@ -9,6 +9,23 @@ import { nextColour } from '../../src/shared/palette.ts';
 /** What the Characters tab is editing: null = the list; {} = a new character; {character} = that character. */
 export type CharacterDialogState = null | { character?: Character; then?: (c: Character) => void };
 
+/** "Passarinho Figurante 2" -> "PF2": the first letter of every word, a number kept whole. */
+export function initialsOf(name: string): string {
+  return name.split(/[\s\-_]+/).map((w) => {
+    if (/^\p{N}+$/u.test(w)) return w;
+    const m = w.match(/[\p{L}\p{N}]/u);
+    return m ? m[0].toLocaleUpperCase() : '';
+  }).join('');
+}
+
+/** The initials over a picture-less character's circle (also over the faded placeholder). */
+function Initials({ name, colour }: { name: string; colour: string }) {
+  const t = initialsOf(name);
+  if (!t) return null;
+  const n = Array.from(t).length;
+  return <span className={'initials ' + (n <= 2 ? 'n2' : n === 3 ? 'n3' : 'n4')} style={{ color: colour.toLowerCase() === '#000000' ? 'var(--text)' : colour }}>{t}</span>;
+}
+
 export function CharacterEditor({ projectId, state, characters, readOnly, showBack, placeholder, onRemove, onClose, onSaved, onError, onAssetChanged, notes, onOpenCue }: {
   projectId: string; state: NonNullable<CharacterDialogState>; characters: Character[]; readOnly: boolean;
   /** A back button above the form: on a phone only (the tab header is hidden there). */
@@ -80,8 +97,7 @@ export function CharacterEditor({ projectId, state, characters, readOnly, showBa
           <button type="button" className="avatar xl picture-pick" style={{ borderColor: colour }} onClick={() => fileInput.current?.click()}
             title={shownPicture ? 'Replace image' : 'Choose image'}>
             {shownPicture ? <img src={shownPicture} alt="" />
-              : placeholder ? <img className="placeholder-img" src={placeholder} alt="" />
-              : <span className="muted">no image</span>}
+              : <>{placeholder && <img className="placeholder-img" src={placeholder} alt="" />}<Initials name={name} colour={colour} /></>}
             <span className="pick-overlay">{shownPicture ? 'Replace image' : 'Choose image'}</span>
           </button>
           <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml" hidden
@@ -160,8 +176,7 @@ export function RightPanel({ projectId, meId, characters, readOnly, onCharacters
                 onKeyDown={(e) => { if (!readOnly && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openDialog({ character: c }); } }}>
                 <span className="avatar tile" style={{ borderColor: c.colour }}>
                   {c.pictureAssetId ? <img src={assetUrl(c.pictureAssetId, true)} alt="" />
-                    : placeholder ? <img className="placeholder-img" src={placeholder} alt="" />
-                    : <span className="muted">{c.name.slice(0, 1).toUpperCase()}</span>}
+                    : <>{placeholder && <img className="placeholder-img" src={placeholder} alt="" />}<Initials name={c.name} colour={c.colour} /></>}
                 </span>
                 <div className="char-name">{c.name}</div>
               </div>))}

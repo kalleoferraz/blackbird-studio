@@ -518,7 +518,7 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .char-open { cursor: pointer; }
 .char-open:hover > div:first-child { text-decoration: underline; }
 .picture-top { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 12px; }
-.avatar.xl { width: 192px; height: 192px; max-width: 100%; font-size: .85rem; }
+.avatar.xl { width: 192px; height: 192px; max-width: 100%; font-size: .85rem; border-width: 4px; }
 .picture-pick { padding: 0; position: relative; background: var(--bg, transparent); cursor: pointer; }
 .pick-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); color: #fff; font-size: .9rem; opacity: 0; transition: opacity .15s; }
 .picture-pick:hover .pick-overlay, .picture-pick:focus-visible .pick-overlay { opacity: 1; }
@@ -544,3 +544,9 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 
 /* A character is being dragged over a cue */
 .cue.drop-char { outline: 2px dashed var(--primary); outline-offset: -2px; }
+
+/* Initials of a character without a picture of its own (kept over the faded placeholder) */
+.avatar.tile { position: relative; }
+.initials { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-weight: 600; line-height: 1; text-shadow: 0 1px 3px rgba(0,0,0,.7); pointer-events: none; }
+.avatar.tile .initials.n2 { font-size: 1.8rem; } .avatar.tile .initials.n3 { font-size: 1.45rem; } .avatar.tile .initials.n4 { font-size: 1.1rem; }
+.avatar.xl .initials.n2 { font-size: 3.4rem; } .avatar.xl .initials.n3 { font-size: 2.8rem; } .avatar.xl .initials.n4 { font-size: 2.1rem; }
