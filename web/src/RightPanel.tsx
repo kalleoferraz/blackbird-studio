@@ -36,15 +36,17 @@ export function CharacterEditor({ projectId, state, characters, readOnly, showBa
   onClose: () => void; onSaved: (c: Character) => void; onError: (m: string) => void;
   onAssetChanged: () => void; notes: NoteItem[]; onOpenCue: (c: FileCue) => void;
 }) {
-  const editing = state.character;
-  const [name, setName] = useState(editing?.name ?? '');
-  const [colour, setColour] = useState(editing?.colour ?? nextColour(characters.map((c) => c.colour)));
-  const [description, setDescription] = useState(editing?.description ?? '');
+  // An existing character opens to look at (name, description, picture); Edit switches to the fields. A new one starts in the fields.
+  const [current, setCurrent] = useState<Character | undefined>(state.character);
+  const [mode, setMode] = useState<'view' | 'edit'>(state.character ? 'view' : 'edit');
+  const [name, setName] = useState(current?.name ?? '');
+  const [colour, setColour] = useState(current?.colour ?? nextColour(characters.map((c) => c.colour)));
+  const [description, setDescription] = useState(current?.description ?? '');
   const [askLanes, setAskLanes] = useState(false);
   const [error, setError] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [pictureId, setPictureId] = useState<string | null>(editing?.pictureAssetId ?? null);
+  const [pictureId, setPictureId] = useState<string | null>(current?.pictureAssetId ?? null);
   const [libShow, setLibShow] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -54,33 +56,48 @@ export function CharacterEditor({ projectId, state, characters, readOnly, showBa
     return () => URL.revokeObjectURL(u);
   }, [file]);
   const shownPicture = previewUrl ?? (pictureId ? assetUrl(pictureId, true) : null);
+  const editingNow = mode === 'edit';
+  const shownName = editingNow ? name : current?.name ?? '';
+  const shownColour = editingNow ? colour : current?.colour ?? colour;
   // A character that already exists gets its picture as soon as one is chosen, so it shows in the library files below at once.
   // A new character has no folder yet: its picture is stored when it is saved.
   const choosePicture = async (f: File) => {
-    if (!editing) { setFile(f); return; }
+    if (!current) { setFile(f); return; }
     try {
-      const r = await uploadFile<{ pictureAssetId: string }>('PUT', `/api/characters/${editing.id}/picture?name=${encodeURIComponent(f.name)}`, f);
-      setPictureId(r.pictureAssetId); setFile(null); setError('');
+      const r = await uploadFile<{ pictureAssetId: string }>('PUT', `/api/characters/${current.id}/picture?name=${encodeURIComponent(f.name)}`, f);
+      const next = { ...current, pictureAssetId: r.pictureAssetId };
+      setPictureId(r.pictureAssetId); setFile(null); setError(''); setCurrent(next);
       setLibShow((n) => n + 1);
-      onSaved({ ...editing, pictureAssetId: r.pictureAssetId });
+      onSaved(next);
     } catch (e) { setError(errorText(e)); }
   };
 
+  const startEdit = () => {
+    if (!current) return;
+    setName(current.name); setColour(current.colour); setDescription(current.description ?? ''); setError(''); setMode('edit');
+  };
+  const cancelEdit = () => {
+    if (!current) { onClose(); return; }
+    setFile(null); setError(''); setMode('view');
+  };
   const save = async (updateLanes?: boolean) => {
     try {
       const body = { name: name.trim(), colour, description: description.trim() || null };
-      const saved = editing
-        ? await api<Character>('PATCH', `/api/characters/${editing.id}`, { ...body, ...(updateLanes !== undefined ? { updateLanes } : {}) })
+      const saved = current
+        ? await api<Character>('PATCH', `/api/characters/${current.id}`, { ...body, ...(updateLanes !== undefined ? { updateLanes } : {}) })
         : await api<Character>('POST', `/api/projects/${projectId}/characters`, body);
       let result = saved;
       if (file) {
         const r = await uploadFile<{ pictureAssetId: string }>('PUT', `/api/characters/${saved.id}/picture?name=${encodeURIComponent(file.name)}`, file);
         result = { ...saved, pictureAssetId: r.pictureAssetId };
       }
-      onSaved(result); state.then?.(result); onClose();
-    } catch (e) { setError(errorText(e)); onError(''); }
+      onSaved(result);
+      // Made from a cue's "New character…": hand it over and go back to the script.
+      if (!current && state.then) { state.then(result); onClose(); return; }
+      setCurrent(result); setPictureId(result.pictureAssetId ?? null); setFile(null); setError(''); setAskLanes(false); setMode('view');
+    } catch (e) { setAskLanes(false); setError(errorText(e)); onError(''); }
   };
-  const colourChanged = !!editing && editing.colour.toLowerCase() !== colour.toLowerCase();
+  const colourChanged = !!current && current.colour.toLowerCase() !== colour.toLowerCase();
   if (askLanes) {
     return (
       <Dialog title="Update lane colours?" onClose={() => setAskLanes(false)}>
@@ -88,36 +105,53 @@ export function CharacterEditor({ projectId, state, characters, readOnly, showBa
         <div className="row end"><button onClick={() => void save(false)}>Keep lane colours</button><button className="primary" onClick={() => void save(true)}>Update lanes</button></div>
       </Dialog>);
   }
+  const pictureButton = (
+    <>
+      <button type="button" className="avatar xl picture-pick" style={{ borderColor: shownColour }} onClick={() => fileInput.current?.click()}
+        title={shownPicture ? 'Replace image' : 'Choose image'}>
+        {shownPicture ? <img src={shownPicture} alt="" />
+          : <>{placeholder && <img className="placeholder-img" src={placeholder} alt="" />}<Initials name={shownName} colour={shownColour} /></>}
+        <span className="pick-overlay">{shownPicture ? 'Replace image' : 'Choose image'}</span>
+      </button>
+      <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml" hidden
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) void choosePicture(f); e.target.value = ''; }} />
+    </>);
   return (
     <div className="panel-body char-editor">
       {showBack && <button type="button" className="back-link" onClick={onClose}>← Characters</button>}
-      <h3 className="char-editor-title">{editing ? 'Edit character' : 'New character'}</h3>
-      <form onSubmit={(e) => { e.preventDefault(); if (colourChanged) setAskLanes(true); else void save(); }}>
-        <div className="picture-top">
-          <button type="button" className="avatar xl picture-pick" style={{ borderColor: colour }} onClick={() => fileInput.current?.click()}
-            title={shownPicture ? 'Replace image' : 'Choose image'}>
-            {shownPicture ? <img src={shownPicture} alt="" />
-              : <>{placeholder && <img className="placeholder-img" src={placeholder} alt="" />}<Initials name={name} colour={colour} /></>}
-            <span className="pick-overlay">{shownPicture ? 'Replace image' : 'Choose image'}</span>
-          </button>
-          <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml" hidden
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) void choosePicture(f); e.target.value = ''; }} />
-        </div>
-        <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} /></label>
-        <label>Default colour</label>
-        <ColourPicker value={colour} onChange={setColour} />
-        <label>Description (Markdown, optional)<textarea rows={4} value={description} onChange={(e) => setDescription(e.target.value)} /></label>
-        {error && <p className="error">{error}</p>}
-        <div className="row end"><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={!name.trim()}>Save</button></div>
-      </form>
+      {!editingNow && current ? (
+        <>
+          <div className="char-view">
+            <div className="picture-side">{pictureButton}</div>
+            <div className="char-view-text">
+              <div className="char-view-name">{current.name}</div>
+              {current.description && <div className="char-view-desc">{current.description}</div>}
+            </div>
+          </div>
+          {error && <p className="error">{error}</p>}
+          {!readOnly && <div className="row char-view-actions">
+            <button type="button" className="primary" onClick={startEdit}>Edit</button>
+          </div>}
+        </>
+      ) : (
+        <form onSubmit={(e) => { e.preventDefault(); if (colourChanged) setAskLanes(true); else void save(); }}>
+          <div className="picture-top">{pictureButton}</div>
+          <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} /></label>
+          <label>Default colour</label>
+          <ColourPicker value={colour} onChange={setColour} />
+          <label>Description (Markdown, optional)<textarea rows={4} value={description} onChange={(e) => setDescription(e.target.value)} /></label>
+          {error && <p className="error">{error}</p>}
+          <div className="row end"><button type="button" onClick={cancelEdit}>Cancel</button><button className="primary" disabled={!name.trim()}>Save</button></div>
+        </form>
+      )}
       <h4 className="char-section">Library files</h4>
-      {editing?.folder
-        ? <LibraryPanel root={{ path: `Characters/${editing.folder}`, name: editing.folder }} showAlso={{ n: libShow, folder: '' }} projectId={projectId} readOnly={readOnly}
+      {current?.folder
+        ? <LibraryPanel root={{ path: `Characters/${current.folder}`, name: current.folder }} hideRoot showAlso={{ n: libShow, folder: '' }} projectId={projectId} readOnly={readOnly}
             onError={onError} onAssetChanged={onAssetChanged} notes={notes} onOpenCue={onOpenCue} />
         : <p className="muted small">Save the character first, then its library folder is here.</p>}
-      {editing && !readOnly && <div className="char-remove">
-        <button type="button" className="danger solid" disabled={editing.isNarrator} title={editing.isNarrator ? 'The Narrator cannot be removed' : undefined}
-          onClick={() => onRemove(editing)}>Remove character</button>
+      {current && !readOnly && <div className="char-remove">
+        <button type="button" className="danger solid" disabled={current.isNarrator} title={current.isNarrator ? 'The Narrator cannot be removed' : undefined}
+          onClick={() => onRemove(current)}>Remove Character</button>
       </div>}
     </div>
   );

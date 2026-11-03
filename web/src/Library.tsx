@@ -18,9 +18,11 @@ const MOVE_TYPE = 'application/x-blackbird-asset';
 /** A cue that plays a file, with its place in the story (from `GET /api/assets/:id/cues`). */
 export interface FileCue { cueId: string; sceneId: string; sceneNo: number; segmentId: string; segment: string; chapterId: string; chapter: string; text: string; chosen: boolean }
 
-export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, notes: allNotes, onOpenCue, root, showAlso }: {
+export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, notes: allNotes, onOpenCue, root, hideRoot, showAlso }: {
   /** `root`: show only this folder (e.g. a character's) as the top of the tree, instead of the whole library. */
   root?: { path: string; name: string };
+  /** With `root`: show what is inside it directly (no row for the folder itself), with Add Folder and Upload buttons below. */
+  hideRoot?: boolean;
   /** With `root`: a folder below it (or '' for the root itself) to open and re-read each time this number changes (the editor bumps it after a picture is added). */
   showAlso?: { n: number; folder: string };
   projectId: string; readOnly: boolean; onError: (m: string) => void; onAssetChanged: () => void;
@@ -176,11 +178,12 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
     if (l) setRemoveFolder({ folder: f, nonEmpty: l.files.length + l.folders.length > 0 });
   };
 
-  const renderFolder = (f: LibFolder, depth: number, isRoot = false) => {
+  const renderFolder = (f: LibFolder, depth: number, isRoot = false, hideRow = false) => {
     const isOpen = expanded.has(f.path);
     const l = lists[f.path];
     return (
       <div key={f.path || 'root'}>
+        {!hideRow && (
         <div className={'tree-row' + (dropOn === f.path ? ' drop' : '')} style={{ paddingLeft: depth * 14 }}
           onDragOver={(e) => { if (!readOnly && f.writable) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = e.dataTransfer.types.includes(MOVE_TYPE) ? 'move' : 'copy'; setDropOn(f.path); } }}
           onDragLeave={() => setDropOn(null)}
@@ -208,8 +211,10 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
             { label: 'Delete…', danger: true, disabled: f.managed, onClick: () => void askRemoveFolder(f) },
           ]}>⋯</MenuButton>}
         </div>
+        )}
         {isOpen && (l ? (
           <>
+            {hideRow && !l.folders.length && !l.files.length && <div className="muted small">Nothing here yet.</div>}
             {l.folders.map((c) => renderFolder(c, depth + 1))}
             {l.files.map((file) => (
               <div key={file.id} className="tree-row" style={{ paddingLeft: (depth + 1) * 14 }}
@@ -245,7 +250,11 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
       {busy && <p className="muted small">{busy}{progress !== null ? ` · ${Math.round(progress * 100)}%` : ''}</p>}
       {busy && progress !== null && <div className="upload-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}><div style={{ width: `${progress * 100}%` }} /></div>}
       {!busy && info && <p className="muted small">{info}</p>}
-      {renderFolder({ ...rootFolder, writable: !readOnly }, 0, true)}
+      {renderFolder({ ...rootFolder, writable: !readOnly }, hideRoot ? -1 : 0, true, !!hideRoot)}
+      {hideRoot && !readOnly && <div className="row lib-actions">
+        <button type="button" onClick={() => setNewIn(rootFolder)}>Add Folder</button>
+        <button type="button" className="primary" onClick={() => { target.current = rootFolder.path; input.current?.click(); }}>Upload</button>
+      </div>}
       <input ref={phInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadPlaceholder(f); e.target.value = ''; }} />
       <input ref={reInput} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; const t = reTarget.current; if (f && t) void reupload(t.file, t.folder, f); e.target.value = ''; }} />
       <input ref={input} type="file" multiple hidden onChange={(e) => { if (e.target.files) void upload(target.current, e.target.files); e.target.value = ''; }} />

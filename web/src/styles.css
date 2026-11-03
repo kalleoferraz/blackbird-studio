@@ -518,7 +518,7 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .char-open { cursor: pointer; }
 .char-open:hover > div:first-child { text-decoration: underline; }
 .picture-top { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 12px; }
-.avatar.xl { width: 192px; height: 192px; max-width: 100%; font-size: .85rem; border-width: 4px; }
+.avatar.xl { width: 192px; height: auto; aspect-ratio: 1 / 1; max-width: 100%; font-size: .85rem; border-width: 4px; }
 .picture-pick { padding: 0; position: relative; background: var(--bg, transparent); cursor: pointer; }
 .pick-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); color: #fff; font-size: .9rem; opacity: 0; transition: opacity .15s; }
 .picture-pick:hover .pick-overlay, .picture-pick:focus-visible .pick-overlay { opacity: 1; }
@@ -550,3 +550,14 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .initials { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-weight: 600; line-height: 1; text-shadow: 0 1px 3px rgba(0,0,0,.7); pointer-events: none; }
 .avatar.tile .initials.n2 { font-size: 1.8rem; } .avatar.tile .initials.n3 { font-size: 1.45rem; } .avatar.tile .initials.n4 { font-size: 1.1rem; }
 .avatar.xl .initials.n2 { font-size: 3.4rem; } .avatar.xl .initials.n3 { font-size: 2.8rem; } .avatar.xl .initials.n4 { font-size: 2.1rem; }
+
+/* Character shown (not edited): name and description on the left, the picture on the right */
+.char-view { display: flex; align-items: flex-start; gap: 12px; }
+.char-view-text { flex: 1 1 0; min-width: 0; }
+.char-view-name { font-size: 1.15rem; font-weight: 600; overflow-wrap: anywhere; }
+.char-view-desc { margin-top: 6px; color: var(--muted); font-size: .9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.picture-side { flex: 0 0 auto; width: min(192px, 56%); }
+.char-view-actions { margin-top: 14px; gap: 8px; }
+.char-view-actions button { flex: 1; }
+.lib-actions { margin-top: 10px; gap: 8px; }
+.lib-actions button { flex: 1; }
