@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as RPointerEvent } from 'react';
-import { api, uploadFile } from './api.ts';
+import { api, assetUrl, uploadFile } from './api.ts';
 import { go } from './App.tsx';
-import type { Character, Me, NoteFocus, NoteItem, NoteRequest, NoteTargetKind, ProjectCard, SegmentContent, Story } from './types.ts';
+import type { Character, LibListing, Me, NoteFocus, NoteItem, NoteRequest, NoteTargetKind, ProjectCard, SegmentContent, Story } from './types.ts';
 import { NotesContext, badgesOf, type NotesInfo } from './notesContext.tsx';
 import { AddNoteDialog } from './NotesPanel.tsx';
 import { StoryIndex } from './StoryIndex.tsx';
 import { Writing } from './Writing.tsx';
+import { PlaceholderContext } from './characterArt.tsx';
 import { RightPanel, type CharacterDialogState } from './RightPanel.tsx';
 import { ago, cueCountOrder, inOrder } from './format.ts';
 import { BlackbirdIcon } from './Brand.tsx';
@@ -34,7 +35,32 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   const [addNote, setAddNote] = useState<{ target: { kind: NoteTargetKind; id: string } | null; label: string } | null>(null);
   // On a phone one panel fills the screen at a time; the menu in the top bar chooses it.
   const isMobile = useIsMobile();
-  const [mview, setMview] = useState<MobileView>('script');
+  const isMobileRef = useRef(isMobile); isMobileRef.current = isMobile;
+  // Each panel the menu opens is a step in the browser's history, so Back returns to the panel shown before (Index, Script, …)
+  // and only leaves the script when there is none. The entries keep the page's address; the panel is in the history state.
+  const [mview, setMview] = useState<MobileView>(() => (history.state?.rsView as MobileView | undefined) ?? 'script');
+  const mviewRef = useRef(mview);
+  // The character view (a character opened from the list) is one more step in that history, so Back, like the title, returns to the list.
+  const openEditor = useCallback((s: CharacterDialogState) => {
+    if (s && isMobileRef.current && !history.state?.rsEditor) history.pushState({ rsView: 'characters', rsEditor: true }, '');
+    setDialog(s);
+  }, []);
+  const closeEditor = (then?: boolean) => {
+    if (isMobile && history.state?.rsEditor) { history.go(then ? -2 : -1); return; } // the popstate handler closes it
+    setDialog(null);
+  };
+  const showView = useCallback((v: MobileView) => {
+    if (v === mviewRef.current) return;
+    history.pushState({ rsView: v }, '');
+    mviewRef.current = v; setMview(v);
+  }, []);
+  useEffect(() => {
+    if (!isMobile) return;
+    if (history.state?.rsView === undefined) history.replaceState({ ...(history.state ?? {}), rsView: mviewRef.current }, '');
+    const pop = (e: PopStateEvent) => { const v = (e.state?.rsView as MobileView | undefined) ?? 'script'; mviewRef.current = v; setMview(v); if (!e.state?.rsEditor) setDialog(null); };
+    window.addEventListener('popstate', pop);
+    return () => window.removeEventListener('popstate', pop);
+  }, [isMobile]);
 
   const loadProject = useCallback(async () => { try { setProject(await api<ProjectCard>('GET', `/api/projects/${projectId}`)); } catch (e) { setError(errorText(e)); } }, [projectId]);
   // The Characters tab lists the most used first. The order is taken once, when the page loads the list, and kept after that.
@@ -80,15 +106,59 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   }, [content?.segment.id]);
 
   const readOnly = project?.role === 'viewer';
-  const refreshAfterEdit = () => { void loadProject(); void loadStory(); void loadNotes(); };
+  // The project's character placeholder (an image called profile_placeholder in the Characters folder).
+  const [placeholder, setPlaceholder] = useState<string | null>(null);
+  const loadPlaceholder = useCallback(() => {
+    void api<LibListing>('GET', `/api/projects/${projectId}/library?folder=Characters`).then((l) => {
+      const f = l.files.find((x) => x.kind === 'image' && x.name.replace(/\.[^.]+$/, '').toLowerCase() === 'profile_placeholder');
+      setPlaceholder(f ? assetUrl(f.id, f.hasLightweight) : null);
+    }).catch(() => undefined);
+  }, [projectId]);
+  useEffect(loadPlaceholder, [loadPlaceholder]);
+  // On a wide screen the script is at its maximum width and leaves room at its left: speech cues show their character there
+  // (the circle is 50 to 100 px, whatever fits). The room is measured, not assumed, so it follows the panels and the window.
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    if (isMobile) { main.removeAttribute('data-faces'); return; }
+    const update = () => {
+      const doc = main.querySelector('.doc');
+      if (!doc) { main.removeAttribute('data-faces'); return; }
+      const free = doc.getBoundingClientRect().left - (main.getBoundingClientRect().left + main.clientLeft);
+      const room = Math.min(100, Math.floor(free - 30)); // 30: the tail, its gap and a margin at the window edge
+      if (room < 50) { main.removeAttribute('data-faces'); return; }
+      main.setAttribute('data-faces', '');
+      // All circles of a scene share one size: the room available, or the shortest cue of that scene if smaller.
+      main.querySelectorAll<HTMLElement>('.scene').forEach((sc) => {
+        let size = room;
+        sc.querySelectorAll<HTMLElement>('.cue.faced').forEach((q) => { size = Math.min(size, Math.floor(q.offsetHeight - 4)); });
+        sc.style.setProperty('--face', Math.max(size, 24) + 'px');
+      });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(main);
+    const watched = new Set<Element>();
+    const watch = () => main.querySelectorAll('.cue.faced').forEach((q) => { if (!watched.has(q)) { watched.add(q); ro.observe(q); } });
+    watch();
+    const mo = new MutationObserver(() => { watch(); update(); });
+    mo.observe(main, { childList: true, subtree: true });
+    return () => { ro.disconnect(); mo.disconnect(); };
+  }, [isMobile, content?.segment.id]);
+  const refreshAfterEdit = () => { void loadProject(); void loadStory(); void loadNotes(); loadPlaceholder(); };
   const onContent = (c: SegmentContent) => { setContent(c); refreshAfterEdit(); };
-  const openSegment = (id: string) => go(`/p/${projectId}/s/${id}`);
+  // On a phone, changing segment must not add history steps (Back would walk through segments instead of panels).
+  const openSegment = (id: string) => {
+    if (!isMobile) { go(`/p/${projectId}/s/${id}`); return; }
+    history.replaceState(history.state, '', `#/p/${projectId}/s/${id}`);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  };
 
   // A cue picked in the Library (a file's preview): open its segment, put the playhead on it and scroll to it.
   const [showing, setShowing] = useState<{ segmentId: string; cueId: string } | null>(null);
   const showCue = (c: { segmentId: string; cueId: string }) => {
     setShowing({ segmentId: c.segmentId, cueId: c.cueId });
-    setMview('script');
+    showView('script');
     if (c.segmentId !== segmentId) { expectedNav.current = c.segmentId; openSegment(c.segmentId); }
   };
 
@@ -144,7 +214,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
     setDone: async (noteId, done) => {
       try { await api('POST', `/api/notes/${noteId}/done`, { done }); await loadNotes(); void loadProject(); } catch (e) { setError(errorText(e)); }
     },
-    show: (r) => { setNoteRequest({ ...r, n: Date.now() }); setMview('notes'); }, add: (target, label) => setAddNote({ target, label }) }), [notes, readOnly, loadNotes, loadProject]);
+    show: (r) => { setNoteRequest({ ...r, n: Date.now() }); showView('notes'); }, add: (target, label) => setAddNote({ target, label }) }), [notes, readOnly, loadNotes, loadProject, showView]);
   // Opening a segment yourself (index, address, back button) puts the playhead at its start. Moves the bar makes
   // itself are marked in `expectedNav` so they are not mistaken for that.
   const expectedNav = useRef<string | null>(null);
@@ -204,13 +274,14 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   return (
     <NavContext.Provider value={nav}>
     <NotesContext.Provider value={notesInfo}>
+    <PlaceholderContext.Provider value={placeholder}>
     <div className="script">
       {isMobile ? (
         <header className="topbar mobile-top">
           <a href="#/" className="brand" title="Projects"><BlackbirdIcon /></a>
-          <div className="m-title"><b>{mview === 'script' ? project.title : MOBILE_VIEWS.find((v) => v.id === mview)!.label}</b>
+          <div className={'m-title' + (mview === 'characters' && dialog ? ' tap' : '')} onClick={() => { if (mview === 'characters' && dialog) closeEditor(!!dialog.then); }}><b>{mview === 'script' ? project.title : MOBILE_VIEWS.find((v) => v.id === mview)!.label}</b>
             {(mview !== 'script' || readOnly) && <span>{mview === 'script' ? 'view only' : project.title + (readOnly ? ' · view only' : '')}</span>}</div>
-          <MenuButton className="m-menu" title="Menu" items={mobileMenu(mview, setMview, {
+          <MenuButton className="m-menu" title="Menu" items={mobileMenu(mview, (v) => (v === 'characters' && mview === 'characters' && dialog ? closeEditor(!!dialog.then) : showView(v)), {
             readOnly: !!readOnly, saving, status: project.dirtySince ? 'unsaved' : ago(project.lastSnapshotAt), onSnapshot: () => void saveSnapshot(),
             onProject: () => go(`/p/${projectId}`), onProjects: () => go('/') })}>
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
@@ -232,7 +303,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
         {!isMobile && <Splitter side="left" width={leftW} onChange={setLeftW} />}
         {!isMobile && <Splitter side="right" width={rightW} onChange={setRightW} />}
         <StoryIndex projectId={projectId} story={story} currentSegmentId={segmentId} readOnly={!!readOnly}
-          onPick={() => setMview('script')}
+          onPick={() => showView('script')}
           onStory={setStory} onOpenSegment={openSegment} onError={setError} onChanged={() => { void loadProject(); if (segmentId) void api<SegmentContent>('GET', `/api/segments/${segmentId}`).then(setContent).catch(() => setContent(null)); }} />
         <main className="center-col" ref={mainRef}>
           {content ? (
@@ -245,14 +316,14 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
               <TitleEdit className="segment-title" value={content.segment.title} disabled={!!readOnly} onSave={(v) => renameTitle('segment', content.segment.id, v)} />
               </div>
               <Writing content={content} characters={characters} readOnly={!!readOnly} onContent={onContent} onError={setError}
-                onNewCharacter={(then) => { setDialog({ then }); if (isMobile) setMview('characters'); }} />
+                onNewCharacter={(then) => { if (isMobile) showView('characters'); openEditor({ then }); }} />
             </div>
           ) : <p className="muted">Select or add a segment.</p>}
         </main>
         <RightPanel projectId={projectId} meId={me.user.id} characters={panelCharacters} readOnly={!!readOnly}
-          onCharacters={() => void loadCharacters()} onError={setError} openDialog={setDialog}
+          onCharacters={() => void loadCharacters()} onError={setError} openDialog={openEditor}
           editor={dialog} allCharacters={characters}
-          onCloseEditor={() => { if (dialog?.then && isMobile) setMview('script'); setDialog(null); }}
+          onCloseEditor={() => closeEditor(!!dialog?.then)}
           onEditorSaved={() => { void loadCharacters(); if (segmentId) void api<SegmentContent>('GET', `/api/segments/${segmentId}`).then(setContent); }}
           notes={notes} story={story} noteFocus={noteFocus} noteRequest={noteRequest} onNotesChanged={() => { void loadNotes(); void loadProject(); }} onAssetChanged={refreshAfterEdit} onOpenCue={showCue}
           mobileTab={isMobile && (mview === 'characters' || mview === 'library' || mview === 'notes') ? mview : undefined} />
@@ -264,6 +335,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
         onSaved={() => { void loadNotes(); void loadProject(); }} />}
       {trim && <TrimDialog req={trim} onDone={(keep) => { trim.resolve(keep); setTrim(null); }} />}
     </div>
+    </PlaceholderContext.Provider>
     </NotesContext.Provider>
     </NavContext.Provider>
   );

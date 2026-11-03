@@ -5,26 +5,10 @@ import { NotesPanel } from './NotesPanel.tsx';
 import type { Character, LibListing, NoteFocus, NoteItem, NoteRequest, Story } from './types.ts';
 import { CHARACTER_DRAG, ColourPicker, Confirm, Dialog, errorText, useLocalState } from './ui.tsx';
 import { nextColour } from '../../src/shared/palette.ts';
+import { Initials } from './characterArt.tsx';
 
 /** What the Characters tab is editing: null = the list; {} = a new character; {character} = that character. */
 export type CharacterDialogState = null | { character?: Character; then?: (c: Character) => void };
-
-/** "Passarinho Figurante 2" -> "PF2": the first letter of every word, a number kept whole. */
-export function initialsOf(name: string): string {
-  return name.split(/[\s\-_]+/).map((w) => {
-    if (/^\p{N}+$/u.test(w)) return w;
-    const m = w.match(/[\p{L}\p{N}]/u);
-    return m ? m[0].toLocaleUpperCase() : '';
-  }).join('');
-}
-
-/** The initials over a picture-less character's circle (also over the faded placeholder). */
-function Initials({ name, colour }: { name: string; colour: string }) {
-  const t = initialsOf(name);
-  if (!t) return null;
-  const n = Array.from(t).length;
-  return <span className={'initials ' + (n <= 2 ? 'n2' : n === 3 ? 'n3' : 'n4')} style={{ color: colour.toLowerCase() === '#000000' ? 'var(--text)' : colour }}>{t}</span>;
-}
 
 export function CharacterEditor({ projectId, state, characters, readOnly, showBack, placeholder, onRemove, onClose, onSaved, onError, onAssetChanged, notes, onOpenCue }: {
   projectId: string; state: NonNullable<CharacterDialogState>; characters: Character[]; readOnly: boolean;
@@ -211,7 +195,7 @@ export function RightPanel({ projectId, meId, characters, readOnly, onCharacters
       {tab === 'library' && <LibraryPanel projectId={projectId} readOnly={readOnly} onError={onError} onAssetChanged={onAssetChanged} notes={notes} onOpenCue={onOpenCue} />}
       {tab === 'characters' && editor && !readOnly && (
         <CharacterEditor key={editor.character?.id ?? 'new'} projectId={projectId} state={editor} characters={allCharacters} readOnly={readOnly}
-          showBack={!!mobileTab} placeholder={placeholder} onRemove={setRemove} onClose={onCloseEditor} onSaved={onEditorSaved} onError={onError}
+          showBack={false} placeholder={placeholder} onRemove={setRemove} onClose={onCloseEditor} onSaved={onEditorSaved} onError={onError}
           onAssetChanged={onAssetChanged} notes={notes} onOpenCue={onOpenCue} />)}
       {tab === 'characters' && !(editor && !readOnly) && (
         <div className="panel-body">

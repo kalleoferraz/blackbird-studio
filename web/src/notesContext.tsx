@@ -144,13 +144,16 @@ function NotePopup({ anchor, type, notes, onGo, onClose }: { anchor: HTMLElement
         return (
           <div key={n.id} className={'np-item ' + n.type}>
             <div className="np-meta"><span className={'note-tag ' + n.type}>{TYPE_WORD[n.type]}</span>
-              {n.author && <span className="muted small">{n.author.name}</span>}</div>
+              {type === 'reference' ? (n.refKey || n.link) && (n.link
+                ? <a className="small" href={n.link} target="_blank" rel="noopener noreferrer" title={n.link}>{n.refKey || n.link}</a>
+                : <span className="muted small">{n.refKey}</span>)
+                : n.author && <span className="muted small">{n.author.name}</span>}</div>
             <div className="note-line">
               {isTask && <input type="checkbox" className="note-check" checked={done} disabled={readOnly || busy} aria-label="Done"
                 onChange={(e) => setTicks({ ...ticks, [n.id]: e.target.checked })} />}
               <div className={'np-text' + (isTask && done ? ' done' : '')}>{n.textMd.replace(/\s+/g, ' ').trim() || n.refKey || n.link || '(no text)'}</div>
             </div>
-            {type === 'reference' && (n.refKey || n.link) && <div className="muted small">{n.refKey ?? n.link}</div>}
+            {type === 'reference' && n.author && <div className="np-author small">{n.author.name}</div>}
           </div>);
       })}
       {notes.length > shown.length && <div className="muted small">+ {notes.length - shown.length} more</div>}

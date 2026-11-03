@@ -72,7 +72,7 @@ input.inline { background: transparent; border: 1px solid transparent; padding: 
 .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; } .dot.big { width: 22px; height: 22px; border: 1px solid #555; } .dot.outlined { outline: 1px solid #777; }
 .lane-colours { width: 100%; }
 .center-col { overflow-y: auto; padding: 22px 32px 80px; }
-.doc { max-width: 940px; margin: 0 auto; }
+.doc { max-width: 750px; margin: 0 auto; }
 .chapter-title { font-size: .85rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; } .segment-title { font-size: 1.7rem; font-weight: 600; margin-bottom: 14px; display: block; }
 input.chapter-title, input.segment-title { width: 100%; }
 .scene { margin-bottom: 22px; }
@@ -570,3 +570,14 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .picture-remove:hover { background: var(--danger); border-color: var(--danger); }
 /* No hover (phones, tablets): the × is always there while the character is being edited */
 @media (hover: none), (max-width: 720px), (max-height: 500px) and (pointer: coarse) { .picture-wrap.editing .picture-remove { opacity: 1; } }
+
+@media (max-width: 720px), (max-height: 500px) and (pointer: coarse) { .m-title.tap { cursor: pointer; } }
+
+.np-author { color: var(--faint); }
+
+/* A speech cue's character, at the left of the cue, in the room left of the script, (the script column gets data-faces and --face from ScriptView) */
+.cue-tail, .cue-face { display: none; }
+.center-col[data-faces] .cue.faced .cue-tail { display: block; position: absolute; right: calc(100% - 4px); top: 50%; width: 14px; height: 22px; margin-top: -11px; clip-path: polygon(100% 0, 0 50%, 100% 100%); pointer-events: none; }
+/* never taller than its cue, so the circles of short cues one after the other do not run into each other */
+.center-col[data-faces] .cue.faced .cue-face { display: flex; position: absolute; right: calc(100% + 16px); top: 50%; transform: translateY(-50%); height: var(--face); max-height: 100%; width: auto; aspect-ratio: 1 / 1; container-type: size; border-width: 3px; pointer-events: none; }
+.cue-face .initials.n2 { font-size: 36cqw; } .cue-face .initials.n3 { font-size: 29cqw; } .cue-face .initials.n4 { font-size: 22cqw; }

@@ -8,6 +8,7 @@ import { AudioPicker } from './AudioPicker.tsx';
 import { audioMenuItems } from './audioMenu.ts';
 import { RemoveAudioDialog } from './RemoveAudio.tsx';
 import { CueNoteIcons, useNotes } from './notesContext.tsx';
+import { CueFace } from './characterArt.tsx';
 
 interface Props {
   content: SegmentContent;
@@ -300,9 +301,10 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
         const id = e.dataTransfer.getData(CHARACTER_DRAG);
         if (characters.some((c) => c.id === id)) void patch({ type: 'speech', characterId: id });
       }}
-      className={'cue ' + (dropHere ? 'drop-char ' : '') + cue.type + (editing ? ' editing' : '') + (isNow ? ' playhead' : '') + (played ? ' played' : '') + (recording ? ' recording' : '') + (recPhase === 'count' ? ' armed' : '')} data-cue-id={cue.id} onClick={onCueClick}>
+      className={'cue ' + (dropHere ? 'drop-char ' : '') + (cue.type === 'speech' && character && !character.isNarrator ? 'faced ' : '') + cue.type + (editing ? ' editing' : '') + (isNow ? ' playhead' : '') + (played ? ' played' : '') + (recording ? ' recording' : '') + (recPhase === 'count' ? ' armed' : '')} data-cue-id={cue.id} onClick={onCueClick}>
       {isNow && <span className="progress" style={{ height: `${shown / 10}%` }} />}
       <span className={'strip' + (black ? ' black' : '')} style={{ background: colour }} />
+      {cue.type === 'speech' && character && !character.isNarrator && <CueFace character={character} colour={black ? '#8a7d76' : colour} />}
       <div className="tagcol">
       <div className="tag">
         {readOnly ? <span className="type-btn"><TypeIcon type={cue.type} /></span> :
