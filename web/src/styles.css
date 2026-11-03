@@ -551,13 +551,22 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .avatar.tile .initials.n2 { font-size: 1.8rem; } .avatar.tile .initials.n3 { font-size: 1.45rem; } .avatar.tile .initials.n4 { font-size: 1.1rem; }
 .avatar.xl .initials.n2 { font-size: 3.4rem; } .avatar.xl .initials.n3 { font-size: 2.8rem; } .avatar.xl .initials.n4 { font-size: 2.1rem; }
 
-/* Character shown (not edited): name and description on the left, the picture on the right */
-.char-view { display: flex; align-items: flex-start; gap: 12px; }
-.char-view-text { flex: 1 1 0; min-width: 0; }
-.char-view-name { font-size: 1.15rem; font-weight: 600; overflow-wrap: anywhere; }
-.char-view-desc { margin-top: 6px; color: var(--muted); font-size: .9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-.picture-side { flex: 0 0 auto; width: min(192px, 56%); }
+/* Character shown (not edited): the picture floats left and the name and description wrap around the circle, then run full width below it */
+.char-view { display: flow-root; }
+.char-view-text { display: block; }
+.char-view-name { font-size: 1.2rem; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; text-wrap: balance; }
+.char-view-desc { margin-top: 8px; color: var(--muted); font-size: .92rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: pretty; }
+.picture-side { float: left; width: min(192px, 56%); /* text follows the circle at an even distance; the distance is cut off at the float's margin box, so the margin must be as big as the shape margin */ shape-outside: circle(50%) border-box; shape-margin: 16px; margin: 0 16px 16px 0; }
 .char-view-actions { margin-top: 14px; gap: 8px; }
 .char-view-actions button { flex: 1; }
 .lib-actions { margin-top: 10px; gap: 8px; }
 .lib-actions button { flex: 1; }
+
+/* The picture circle with a small × (on hover) that removes the picture */
+.picture-wrap { position: relative; width: 192px; max-width: 100%; }
+.picture-wrap .avatar.xl { width: 100%; }
+.picture-remove { position: absolute; top: 6%; right: 6%; z-index: 2; width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: rgba(0,0,0,.75); color: #fff; font-size: 1.1rem; line-height: 1; opacity: 0; transition: opacity .15s; }
+.picture-wrap:hover .picture-remove, .picture-remove:focus-visible { opacity: 1; }
+.picture-remove:hover { background: var(--danger); border-color: var(--danger); }
+/* No hover (phones, tablets): the × is always there while the character is being edited */
+@media (hover: none), (max-width: 720px), (max-height: 500px) and (pointer: coarse) { .picture-wrap.editing .picture-remove { opacity: 1; } }

@@ -72,6 +72,18 @@ export function CharacterEditor({ projectId, state, characters, readOnly, showBa
     } catch (e) { setError(errorText(e)); }
   };
 
+  // Removing the picture only cuts the link: the file stays in the character's library folder (and can then be deleted there).
+  const removePicture = async () => {
+    if (!current) { setFile(null); return; }
+    try {
+      await api('DELETE', `/api/characters/${current.id}/picture`);
+      const next = { ...current, pictureAssetId: null };
+      setPictureId(null); setFile(null); setError(''); setCurrent(next);
+      setLibShow((n) => n + 1);
+      onSaved(next);
+    } catch (e) { setError(errorText(e)); }
+  };
+
   const startEdit = () => {
     if (!current) return;
     setName(current.name); setColour(current.colour); setDescription(current.description ?? ''); setError(''); setMode('edit');
@@ -107,12 +119,15 @@ export function CharacterEditor({ projectId, state, characters, readOnly, showBa
   }
   const pictureButton = (
     <>
-      <button type="button" className="avatar xl picture-pick" style={{ borderColor: shownColour }} onClick={() => fileInput.current?.click()}
-        title={shownPicture ? 'Replace image' : 'Choose image'}>
-        {shownPicture ? <img src={shownPicture} alt="" />
-          : <>{placeholder && <img className="placeholder-img" src={placeholder} alt="" />}<Initials name={shownName} colour={shownColour} /></>}
-        <span className="pick-overlay">{shownPicture ? 'Replace image' : 'Choose image'}</span>
-      </button>
+      <div className={'picture-wrap' + (editingNow ? ' editing' : '')}>
+        <button type="button" className="avatar xl picture-pick" style={{ borderColor: shownColour }} onClick={() => fileInput.current?.click()}
+          title={shownPicture ? 'Replace image' : 'Choose image'}>
+          {shownPicture ? <img src={shownPicture} alt="" />
+            : <>{placeholder && <img className="placeholder-img" src={placeholder} alt="" />}<Initials name={shownName} colour={shownColour} /></>}
+          <span className="pick-overlay">{shownPicture ? 'Replace image' : 'Choose image'}</span>
+        </button>
+        {shownPicture && <button type="button" className="picture-remove" title="Remove picture" aria-label="Remove picture" onClick={() => void removePicture()}>×</button>}
+      </div>
       <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml" hidden
         onChange={(e) => { const f = e.target.files?.[0]; if (f) void choosePicture(f); e.target.value = ''; }} />
     </>);
