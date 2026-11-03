@@ -17,6 +17,10 @@ import { ULID_PATTERN, newUlid } from '../db/ids.js';
 import { team, teamMember, user } from '../db/schema.js';
 import { withDb } from '../db/client.js';
 import { authenticate, bodyString, requireAdmin } from './auth-routes.js';
+import { GitHubVersionStore, REPO_PATTERN } from '../snapshot/version-store.js';
+import { SNAPSHOT_BRANCH, SNAPSHOT_REPO, SNAPSHOT_REPO_TOKEN, encryptSecret, putSetting, snapshotSettings } from '../settings/settings.js';
+import { sessionConfigured } from '../auth/session.js';
+import { HttpError, asBody } from './http.js';
 
 const adminOnly = [authenticate(), requireAdmin];
 
@@ -138,5 +142,50 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (!ULID_PATTERN.test(id) || !ULID_PATTERN.test(userId)) return reply.code(400).send({ error: 'invalid_request' });
     await withDb((db) => db.delete(teamMember).where(and(eq(teamMember.teamId, id), eq(teamMember.userId, userId))));
     return { ok: true };
+  });
+
+  // ---- snapshot repository (saved in the app; the environment variables are the fallback) ----
+  const snapshotView = async () => {
+    const c = await snapshotSettings();
+    return { repo: c.repo, branch: c.branch, tokenSet: c.token !== null, tokenUnreadable: c.tokenUnreadable, source: c.source, canStoreToken: sessionConfigured() };
+  };
+
+  app.get('/api/admin/settings/snapshots', { preHandler: adminOnly }, async () => snapshotView());
+
+  app.put('/api/admin/settings/snapshots', { preHandler: adminOnly, bodyLimit: 4096 }, async (request) => {
+    const b = asBody(request.body);
+    const text = (k: string, max: number) => {
+      const v = b[k];
+      if (v === undefined) return undefined;
+      if (typeof v !== 'string' || v.length > max) throw new HttpError(400, `invalid_${k}`, `The ${k} is not valid.`);
+      return v.trim();
+    };
+    const repo = text('repo', 200);
+    const branch = text('branch', 200);
+    const token = text('token', 500);
+    if (repo && !REPO_PATTERN.test(repo)) throw new HttpError(400, 'invalid_repo', 'The repository must be written owner/name, for example kalleoferraz/media-projects.');
+    if (branch && !/^[\w./-]+$/.test(branch)) throw new HttpError(400, 'invalid_branch', 'The branch name has characters that are not allowed.');
+    if (token && !sessionConfigured()) throw new HttpError(400, 'cannot_store_token', 'The token cannot be stored: SESSION_SECRET is missing on this server.');
+    await withDb(async (db) => {
+      if (repo !== undefined) await putSetting(db, SNAPSHOT_REPO, repo || null);
+      if (branch !== undefined) await putSetting(db, SNAPSHOT_BRANCH, branch || null);
+      if (b.clearToken === true) await putSetting(db, SNAPSHOT_REPO_TOKEN, null);
+      else if (token) await putSetting(db, SNAPSHOT_REPO_TOKEN, encryptSecret(token));
+    });
+    return snapshotView();
+  });
+
+  // Tries the settings against GitHub. Values in the body (not saved yet) replace the saved ones for this test.
+  app.post('/api/admin/settings/snapshots/test', { preHandler: adminOnly, bodyLimit: 4096 }, async (request) => {
+    const b = asBody(request.body);
+    const c = await snapshotSettings();
+    const str = (k: string) => (typeof b[k] === 'string' && (b[k] as string).trim() ? (b[k] as string).trim() : null);
+    const repo = str('repo') ?? c.repo;
+    const token = str('token') ?? c.token;
+    const branch = b.branch === undefined ? c.branch : str('branch');
+    const m = repo ? REPO_PATTERN.exec(repo) : null;
+    if (!m) return { ok: false, message: repo ? 'The repository must be written owner/name.' : 'No repository is set.' };
+    if (!token) return { ok: false, message: c.tokenUnreadable ? 'The saved token can no longer be read: enter it again.' : 'No token is set.' };
+    return new GitHubVersionStore(m[1]!, m[2]!, token, branch ?? undefined).check();
   });
 }

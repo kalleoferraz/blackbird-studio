@@ -50,6 +50,8 @@ docs/         Project Bible
 
 In the Library, drag a file onto a folder to move it there; **Rename…** in the file or folder menu renames it. A file's preview lists its notes and the cues that play it; click a cue to jump to it in the script.
 
+Snapshots: the administrator sets the GitHub repository and token in **Administration → Snapshots** (token stored encrypted; **Test connection** checks them). `SNAPSHOT_REPO`, `SNAPSHOT_BRANCH` and `SNAPSHOT_REPO_TOKEN` still work as a fallback.
+
 The library (covers, pictures, uploads) is stored on disk under `LIBRARY_ROOT` (default `./library`, git-ignored). On the host set it to a folder that survives deploys, such as `/private/library`.
 
 Two repos, two jobs: this repo deploys the app; a separate snapshot repo receives text versions at runtime.

@@ -9,8 +9,8 @@ import { authenticate } from './auth-routes.js';
 import { HttpError, asBody, optString } from './http.js';
 
 /** Tests replace the store; production builds the GitHub one from the environment. */
-let storeFactory: () => VersionStore = () => GitHubVersionStore.fromEnv();
-export function setVersionStoreFactory(f: () => VersionStore): void { storeFactory = f; }
+let storeFactory: () => VersionStore | Promise<VersionStore> = () => GitHubVersionStore.fromSettings();
+export function setVersionStoreFactory(f: () => VersionStore | Promise<VersionStore>): void { storeFactory = f; }
 
 export function registerSnapshotRoutes(app: FastifyInstance): void {
   const auth = { preHandler: authenticate() };
@@ -20,7 +20,7 @@ export function registerSnapshotRoutes(app: FastifyInstance): void {
     const label = optString(asBody(request.body), 'label', 200, { allowNull: true });
     await withDb((db) => accessTo(db, request.account!.id, id, { edit: true }));
     let store: VersionStore;
-    try { store = storeFactory(); } catch (e) {
+    try { store = await storeFactory(); } catch (e) {
       if (e instanceof SnapshotsNotConfigured) throw new HttpError(503, 'snapshots_not_configured', e.message);
       throw e;
     }

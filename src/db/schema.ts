@@ -415,3 +415,12 @@ export const snapshot = mysqlTable(
   },
   (t) => [index('snapshot_project_created_idx').on(t.projectId, t.createdAt)],
 );
+
+// ---- settings -------------------------------------------------------------
+
+/** Server settings the administrator edits in the app (the snapshot repository and its token). A secret value is stored encrypted. */
+export const appSetting = mysqlTable('app_setting', {
+  key: asciiVarchar('key', { length: 64 }).primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: updatedAt(),
+});

@@ -9,6 +9,8 @@ export interface VersionStore {
 
 export class SnapshotsNotConfigured extends Error {}
 
+export const REPO_PATTERN = /^([\w.-]+)\/([\w.-]+)$/;
+
 export function gitBlobSha(content: string): string {
   const buf = Buffer.from(content, 'utf8');
   return createHash('sha1').update(`blob ${buf.length}\0`).update(buf).digest('hex');
@@ -23,9 +25,41 @@ export class GitHubVersionStore implements VersionStore {
   static fromEnv(): GitHubVersionStore {
     const repo = process.env.SNAPSHOT_REPO?.trim();
     const token = process.env.SNAPSHOT_REPO_TOKEN?.trim();
-    const m = repo ? /^([\w.-]+)\/([\w.-]+)$/.exec(repo) : null;
+    const m = repo ? REPO_PATTERN.exec(repo) : null;
     if (!m || !token) throw new SnapshotsNotConfigured('Snapshots are not configured on this server.');
     return new GitHubVersionStore(m[1]!, m[2]!, token, process.env.SNAPSHOT_BRANCH?.trim() || undefined);
+  }
+
+  /** From the settings saved in the admin area, falling back to the environment. Says what is missing. */
+  static async fromSettings(): Promise<GitHubVersionStore> {
+    const { snapshotSettings } = await import('../settings/settings.js');
+    const c = await snapshotSettings();
+    const m = c.repo ? REPO_PATTERN.exec(c.repo) : null;
+    const missing = [
+      !m && (c.repo ? 'a valid repository (owner/name)' : 'the repository'),
+      !c.token && (c.tokenUnreadable ? 'the token (the saved one can no longer be read: enter it again)' : 'the token'),
+    ].filter(Boolean);
+    if (missing.length > 0 || !m || !c.token) {
+      throw new SnapshotsNotConfigured(`Snapshots are not configured: missing ${missing.join(' and ')}. The administrator sets them in Administration, under Snapshots.`);
+    }
+    return new GitHubVersionStore(m[1]!, m[2]!, c.token, c.branch ?? undefined);
+  }
+
+  /** Checks that the token reaches the repository, can write to it, and that the branch exists. */
+  async check(): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
+    const { owner, repo } = this;
+    try {
+      const r = (await this.octokit.rest.repos.get({ owner, repo })).data;
+      if (r.permissions && !r.permissions.push) return { ok: false, message: `The token can see ${owner}/${repo} but cannot write to it. Give it "Contents: Read and write".` };
+      const branch = this.branch ?? r.default_branch;
+      await this.octokit.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
+      return { ok: true, message: `Connected to ${owner}/${repo}, branch ${branch}.` };
+    } catch (e: any) {
+      const status = e?.status;
+      if (status === 401) return { ok: false, message: 'GitHub does not accept the token (wrong or expired).' };
+      if (status === 404) return { ok: false, message: `GitHub cannot find ${owner}/${repo} with this token: the name is wrong, or the token has no access to this repository, or the branch does not exist.` };
+      return { ok: false, message: `GitHub answered: ${e?.message ?? 'an error'}` };
+    }
   }
 
   async commit({ folder, files, message }: { folder: string; files: Record<string, string>; message: string }) {

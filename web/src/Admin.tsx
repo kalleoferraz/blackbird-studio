@@ -85,6 +85,8 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
         </form>
       </section>
 
+      <SnapshotSettings />
+
       {secret && (
         <Dialog title="Temporary password" onClose={() => setSecret(null)}>
           <p>For <strong>{secret.email}</strong>. It is shown only now; the person must choose their own at first sign-in.</p>
@@ -95,6 +97,53 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
         onConfirm={act(() => api('DELETE', `/api/admin/teams/${confirmTeam.id}`))} onClose={() => setConfirmTeam(null)} />}
       {rename && <RenameTeam team={rename} onClose={() => setRename(null)} onSave={(n) => act(() => api('PATCH', `/api/admin/teams/${rename.id}`, { name: n }))()} />}
     </div>
+  );
+}
+
+interface SnapshotConfig { repo: string | null; branch: string | null; tokenSet: boolean; tokenUnreadable: boolean; canStoreToken: boolean; source: { repo: string | null; branch: string | null; token: string | null } }
+
+/** Where snapshots go: a GitHub repository and a token that can write to it. Saved here, so no server variables are needed. */
+function SnapshotSettings() {
+  const [cfg, setCfg] = useState<SnapshotConfig | null>(null);
+  const [repo, setRepo] = useState('');
+  const [branch, setBranch] = useState('');
+  const [token, setToken] = useState('');
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const show = (c: SnapshotConfig) => { setCfg(c); setRepo(c.source.repo === 'app' ? c.repo ?? '' : ''); setBranch(c.source.branch === 'app' ? c.branch ?? '' : ''); setToken(''); };
+  useEffect(() => { api<SnapshotConfig>('GET', '/api/admin/settings/snapshots').then(show).catch((e) => setNote({ ok: false, text: errorText(e) })); }, []);
+  const run = async (fn: () => Promise<void>) => { setBusy(true); setNote(null); try { await fn(); } catch (e) { setNote({ ok: false, text: errorText(e) }); } setBusy(false); };
+  const save = () => run(async () => {
+    const r = await api<SnapshotConfig>('PUT', '/api/admin/settings/snapshots', { repo, branch, ...(token ? { token } : {}) });
+    show(r); setNote({ ok: true, text: 'Saved.' });
+  });
+  const test = () => run(async () => {
+    const r = await api<{ ok: boolean; message: string }>('POST', '/api/admin/settings/snapshots/test', { repo: repo || undefined, branch: branch || undefined, ...(token ? { token } : {}) });
+    setNote({ ok: r.ok, text: r.message });
+  });
+  const clearToken = () => run(async () => { show(await api<SnapshotConfig>('PUT', '/api/admin/settings/snapshots', { clearToken: true })); setNote({ ok: true, text: 'The saved token was removed.' }); });
+  const state = !cfg ? '' : cfg.repo && cfg.tokenSet ? 'Snapshots are set up.' : `Snapshots are not set up: ${[!cfg.repo && 'no repository', !cfg.tokenSet && (cfg.tokenUnreadable ? 'the saved token can no longer be read' : 'no token')].filter(Boolean).join(', ')}.`;
+  const from = (s: string | null) => (s === 'env' ? ' (now taken from the server settings)' : '');
+  return (
+    <section className="card">
+      <h2>Snapshots</h2>
+      <p className="muted">Saving a snapshot commits the project's text to a private GitHub repository. {state}</p>
+      <form className="settings-form" onSubmit={(e) => { e.preventDefault(); void save(); }}>
+        <label>Repository<input placeholder="owner/name" value={repo} onChange={(e) => setRepo(e.target.value)} autoComplete="off" />
+          <span className="muted small">For example kalleoferraz/media-projects{cfg ? from(cfg.source.repo) : ''}</span></label>
+        <label>Branch (optional)<input placeholder="the repository's default branch" value={branch} onChange={(e) => setBranch(e.target.value)} autoComplete="off" />
+          <span className="muted small">{cfg ? from(cfg.source.branch) : ''}</span></label>
+        <label>Access token<input type="password" placeholder={cfg?.tokenSet ? '•••••••• saved (type to replace)' : 'Paste a GitHub token'} value={token} onChange={(e) => setToken(e.target.value)} autoComplete="new-password" />
+          <span className="muted small">A fine-grained token with access to that repository and Contents: Read and write. It is stored encrypted and never shown again{cfg ? from(cfg.source.token) : ''}.</span></label>
+        {cfg && !cfg.canStoreToken && <p className="error">A token cannot be stored: SESSION_SECRET is missing on this server.</p>}
+        <div className="row">
+          <button className="primary" disabled={busy || !cfg}>Save</button>
+          <button type="button" disabled={busy || !cfg} onClick={() => void test()}>Test connection</button>
+          {cfg?.source.token === 'app' && <button type="button" disabled={busy} onClick={() => void clearToken()}>Remove saved token</button>}
+        </div>
+      </form>
+      {note && <p className={note.ok ? 'muted' : 'error'} role="status">{note.text}</p>}
+    </section>
   );
 }
 

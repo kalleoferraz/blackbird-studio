@@ -581,3 +581,4 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 /* never taller than its cue, so the circles of short cues one after the other do not run into each other */
 .center-col[data-faces] .cue.faced .cue-face { display: flex; position: absolute; right: calc(100% + 16px); top: 50%; transform: translateY(-50%); height: var(--face); max-height: 100%; width: auto; aspect-ratio: 1 / 1; container-type: size; border-width: 3px; pointer-events: none; }
 .cue-face .initials.n2 { font-size: 36cqw; } .cue-face .initials.n3 { font-size: 29cqw; } .cue-face .initials.n4 { font-size: 22cqw; }
+.settings-form { display: grid; gap: 12px; max-width: 520px; } .settings-form label { display: grid; gap: 4px; }
