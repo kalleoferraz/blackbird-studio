@@ -18,6 +18,8 @@ import { recordTake } from './recording.ts';
 import { TrimDialog, type TrimRequest } from './TrimDialog.tsx';
 import { Timeline } from './Timeline.tsx';
 import { AudioPlayer } from './audio-playback.ts';
+import { LibPlayContext, LibraryPlayer, type LibTrack } from './libplayer.ts';
+import { FileInfoPanel } from './Library.tsx';
 
 export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: string; segmentId?: string }) {
   const [project, setProject] = useState<ProjectCard | null>(null);
@@ -166,6 +168,17 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   const [playback] = useState(() => new PlaybackStore());
   useEffect(() => () => playback.dispose(), [playback]);
   useEffect(() => { const player = new AudioPlayer(playback); return () => player.dispose(); }, [playback]);
+  // A sound played from the Library: the bar takes the library layout, and the script waits where it was until "Return to script".
+  const [lib] = useState(() => new LibraryPlayer());
+  useEffect(() => () => lib.dispose(), [lib]);
+  const libTrack = useSyncExternalStore(lib.subscribe, () => lib.track);
+  const [libInfo, setLibInfo] = useState(false);
+  useEffect(() => { if (!libTrack) setLibInfo(false); }, [libTrack]);
+  const playLib = useCallback((t: LibTrack, startFrac?: number) => {
+    if (playback.rec) { setError('Stop the recording first.'); return; } // the sound would go into the microphone
+    playback.pause();
+    lib.play(t, startFrac);
+  }, [playback, lib]);
   const [follow, setFollow] = useLocalState('rs.follow', true);
   const [editingN, setEditingN] = useState(0);
   const editing = editingN > 0;
@@ -177,6 +190,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
     const c = contentRef.current;
     const si = c ? c.scenes.findIndex((s) => s.cues.some((q) => q.id === cueId)) : -1;
     if (!c || si < 0) return;
+    lib.close();
     const q = c.scenes[si]!.cues.find((x) => x.id === cueId)!;
     void recordTake({
       store: playback, cueId,
@@ -188,7 +202,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
       },
       onError: setError,
     });
-  }, [playback]);
+  }, [playback, lib]);
   const nav = useMemo(() => ({ store: playback, setEditing, record }), [playback, setEditing, record]);
   const order = useMemo(() => (story ? story.chapters.flatMap((c) => c.segments.map((x) => x.id)) : []), [story]);
   useEffect(() => playback.setOrder(order), [playback, order]);
@@ -273,6 +287,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
 
   return (
     <NavContext.Provider value={nav}>
+    <LibPlayContext.Provider value={playLib}>
     <NotesContext.Provider value={notesInfo}>
     <PlaceholderContext.Provider value={placeholder}>
     <div className="script">
@@ -331,7 +346,9 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
           mobileTab={isMobile && (mview === 'characters' || mview === 'library' || mview === 'notes') ? mview : undefined} />
       </div>
       {content && project.type !== 'textbook' && tlOpen && !isMobile && <Timeline content={content} readOnly={!!readOnly} onContent={onContent} onError={setError} />}
-      <NavBar store={playback} story={story} follow={follow} onFollow={setFollow} editing={editing} mobile={isMobile}
+      {libTrack && libInfo && <FileInfoPanel file={libTrack} notes={notes} onClose={() => setLibInfo(false)} onError={setError}
+        onOpenCue={(c) => { lib.close(); showCue(c); }} onShowNote={() => notesInfo.show({ assetId: libTrack.id })} />}
+      <NavBar store={playback} lib={lib} libInfo={{ open: libInfo, onToggle: () => setLibInfo((v) => !v) }} story={story} follow={follow} onFollow={setFollow} editing={editing} mobile={isMobile}
         timeline={project.type !== 'textbook' && !isMobile ? { open: tlOpen, onToggle: () => setTlOpen(!tlOpen) } : undefined} />
       {addNote && <AddNoteDialog projectId={projectId} target={addNote.target} label={addNote.label} onClose={() => setAddNote(null)}
         onSaved={() => { void loadNotes(); void loadProject(); }} />}
@@ -339,6 +356,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
     </div>
     </PlaceholderContext.Provider>
     </NotesContext.Provider>
+    </LibPlayContext.Provider>
     </NavContext.Provider>
   );
 }

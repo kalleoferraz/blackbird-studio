@@ -205,9 +205,13 @@ label.check input[type=checkbox] { width: auto; flex: none; }
 .nav { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 8px 14px; }
 .nav-pos { position: relative; min-width: 0; overflow: hidden; white-space: nowrap; font-size: .8rem; color: var(--muted); }
 .nav-pos .measure { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; white-space: nowrap; }
-.nav-pos .lv { display: inline-block; margin-right: 6px; }
-.nav-pos .measure .lv::before, .nav-pos .shown .lv + .lv::before { content: "›"; margin-right: 6px; color: var(--faint); }
-.nav-pos b { color: var(--text); font-weight: 600; } .nav-pos .lv.last b { color: var(--primary); }
+.nav-pos .cand { width: max-content; }
+.nav-pos .shown { overflow: hidden; }
+.nav-pos .lv { display: inline-block; margin-right: 6px; color: var(--text); }
+.nav-pos .cand .lv + .lv::before, .nav-pos .shown .lv + .lv::before { content: "›"; margin-right: 6px; color: var(--faint); }
+.nav-pos .lv.omit { color: var(--muted); } .nav-pos .lv.last { color: var(--primary); font-weight: 600; }
+/* Only when even the last node alone is too long: it is cut with an ellipsis (the nodes before it are never cut, they are compacted or dropped). */
+.nav-pos .shown .lv.last { max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .nav-ctrls { display: flex; align-items: center; gap: 2px; }
 .nav-ctrls button { width: 36px; height: 36px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text); display: grid; place-items: center; }
 .nav-ctrls button:hover:not(:disabled) { background: var(--line); }
@@ -218,9 +222,6 @@ label.check input[type=checkbox] { width: auto; flex: none; }
 .nav-ctrls button.play:hover:not(:disabled) { background: #f6ad32; } .nav-ctrls button.play:disabled { background: var(--line); color: var(--faint); }
 .nav-right { display: flex; justify-content: flex-end; align-items: center; gap: 12px; min-width: 0; font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .nav-clock b { color: var(--text); }
-.nav-follow { display: flex; align-items: center; gap: 6px; margin: 0; font-size: inherit; color: inherit; cursor: pointer; user-select: none; }
-.nav-follow input { width: auto; padding: 0; margin: 0; accent-color: var(--primary); }
-.nav-follow.paused { opacity: .5; }
 @container (max-width: 640px) { .nav-clock { display: none; } }
 @container (max-width: 470px) { .nav-right { display: none; } .nav { grid-template-columns: 1fr; gap: 6px; justify-items: center; } .nav-pos { text-align: center; max-width: 100%; } .nav-ctrls { justify-content: center; } }
 
@@ -366,11 +367,8 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .restore-row:last-child { border-bottom: 0; }
 .restore-row select { width: auto; flex: none; }
 .clash-existing { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
-.wave-player { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; align-items: center; }
-.wp-play { width: 40px; height: 40px; padding: 0; border-radius: 50%; font-size: 14px; }
 .wp-wave { position: relative; cursor: pointer; touch-action: none; border-radius: 6px; outline-offset: 2px; }
 .wp-head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #EF9B0B; pointer-events: none; }
-.wp-time { grid-column: 2; }
 .file-detail { margin-top: 12px; } .file-detail h4 { margin: 0 0 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
 .file-detail ul { list-style: none; margin: 0; padding: 0; max-height: 140px; overflow: auto; }
 .link-btn { all: unset; display: block; width: 100%; box-sizing: border-box; padding: 4px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -475,7 +473,6 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
   .navbar.mobile .nav-ctrls { grid-area: ctrls; justify-content: center; gap: 4px; }
   .nav-ctrls button { width: 38px; height: 40px; }
   .nav-ctrls button.play { width: 46px; height: 46px; margin: 0 6px; }
-  .nav-follow { padding: 6px 0; } .nav-follow input { width: 18px; height: 18px; }
 }
 
 /* ---- Cue options menu (all screens): a faint ⋯ on the cue, a yolk circle under the pointer ---- */
@@ -582,3 +579,45 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .center-col[data-faces] .cue.faced .cue-face { display: flex; position: absolute; right: calc(100% + 16px); top: 50%; transform: translateY(-50%); height: var(--face); max-height: 100%; width: auto; aspect-ratio: 1 / 1; container-type: size; border-width: 3px; pointer-events: none; }
 .cue-face .initials.n2 { font-size: 36cqw; } .cue-face .initials.n3 { font-size: 29cqw; } .cue-face .initials.n4 { font-size: 22cqw; }
 .settings-form { display: grid; gap: 12px; max-width: 520px; } .settings-form label { display: grid; gap: 4px; }
+
+/* ---- Follow: an icon that is filled in yellow when on ---- */
+.followbtn { width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.followbtn:hover { background: var(--line); color: var(--text); }
+.followbtn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.followbtn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+.followbtn.on { color: var(--primary); }
+.followbtn.on .disc { fill: var(--primary); }
+.followbtn.on .dot { fill: var(--on-primary); stroke: var(--on-primary); }
+.followbtn.paused { opacity: .5; }
+
+/* ---- A library sound in the bar: the navigation buttons run to the left and vanish, the wave appears by the Play button ---- */
+.nav-extras { display: flex; align-items: center; gap: 12px; min-width: 0; max-width: 520px; transition: max-width .3s ease, opacity .2s ease, visibility 0s; }
+.nav-ctrls .navbtn { overflow: hidden; transition: width .3s ease, margin .3s ease, opacity .2s ease, visibility 0s; }
+.navbar.lib .nav-ctrls .navbtn { width: 0; margin: 0; opacity: 0; pointer-events: none; visibility: hidden; transition: width .3s ease, margin .3s ease, opacity .2s ease, visibility 0s .3s; }
+.navbar.lib .nav-extras { max-width: 0; opacity: 0; overflow: hidden; pointer-events: none; visibility: hidden; transition: max-width .3s ease, opacity .2s ease, visibility 0s .3s; }
+.navbar.lib:not(.mobile) .nav { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; }
+.navbar.lib .nav-ctrls { justify-content: flex-start; min-width: 0; }
+.lib-wave { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; animation: lib-in .3s ease both; }
+.lib-wave .wp-wave { flex: 1; min-width: 0; }
+.lib-time { flex: none; font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@keyframes lib-in { from { opacity: 0; transform: translateX(-24px); } }
+.lib-return { width: 36px; height: 36px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text); display: grid; place-items: center; cursor: pointer; }
+.lib-return:hover { background: var(--line); }
+.lib-return:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.lib-return svg { width: 22px; height: 22px; }
+.navbar.lib .nav-right { display: flex; }
+@container (max-width: 470px) {
+  .navbar.lib:not(.mobile) .nav { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "pos ret" "ctrls ctrls"; justify-items: stretch; }
+  .navbar.lib:not(.mobile) .nav-pos { grid-area: pos; text-align: left; } .navbar.lib:not(.mobile) .nav-right { grid-area: ret; } .navbar.lib:not(.mobile) .nav-ctrls { grid-area: ctrls; }
+}
+@media (prefers-reduced-motion: reduce) { .nav-extras, .nav-ctrls .navbtn, .lib-wave { transition: none; animation: none; } }
+
+.lib-return.on { color: var(--primary); background: color-mix(in srgb, var(--primary) 14%, transparent); }
+/* The file info panel above the player bar */
+.lib-info { flex: none; max-height: 45vh; overflow: auto; padding: 12px 14px 8px; background: var(--panel2); border-top: 1px solid var(--line); }
+.lib-info-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.lib-info-head b { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.lib-info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px 16px; margin: 0 0 6px; }
+.lib-info-grid .wide { grid-column: 1 / -1; }
+.lib-info-grid dt { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.lib-info-grid dd { margin: 2px 0 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

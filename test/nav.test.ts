@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { advance, arrive, clampPos, nextMove, prevMove, where, type NavSegment, type Pos } from '../web/src/nav.ts';
+import { advance, arrive, clampPos, libraryPathCandidates, nextMove, prevMove, scriptPathCandidates, where, type NavSegment, type Pos } from '../web/src/nav.ts';
 
 // Two scenes: 4 s + 6 s of cues (a, b, then c), and a second segment, and a third.
 const A: NavSegment = { id: 'A', scenes: [
@@ -77,4 +77,20 @@ test('positions are kept inside the segment after edits', () => {
 test('readout numbers', () => {
   assert.deepEqual(where(A, P('A', 0, 5000)), { scene: 1, scenes: 2, cue: 2, cues: 2, sceneMs: 5000, sceneLengthMs: 10000 });
   assert.equal(where(B, P('B', 1, 0)).cues, 0);
+});
+
+test('the script path is named, without the cue, and loses its beginning first', () => {
+  const info = { chapterIndex: '2', chapterTitle: 'O Feitiço', segmentPosition: 3, segmentTitle: 'A floresta', scene: 4, sceneLabel: 'Na clareira' };
+  assert.deepEqual(scriptPathCandidates(info), [
+    ['2. O Feitiço', 'A floresta', 'Na clareira'], ['Ch.2', 'A floresta', 'Na clareira'], ['Ch.2', 'Seg.3', 'Na clareira'],
+    ['…', 'Seg.3', 'Na clareira'], ['Na clareira'],
+  ]);
+  assert.equal(scriptPathCandidates({ ...info, sceneLabel: null, segmentTitle: ' ' })[0]!.join('|'), '2. O Feitiço|Seg.3|Scene 4');
+});
+
+test('the library path drops folders from the beginning', () => {
+  assert.deepEqual(libraryPathCandidates('Characters/Narrator/hello.wav'), [
+    ['Characters', 'Narrator', 'hello.wav'], ['…', 'Narrator', 'hello.wav'], ['hello.wav'],
+  ]);
+  assert.deepEqual(libraryPathCandidates('hello.wav'), [['hello.wav']]);
 });

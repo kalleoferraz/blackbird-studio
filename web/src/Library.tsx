@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api, assetUrl, uploadFile } from './api.ts';
 import { formatBytes, formatDuration } from './format.ts';
 import type { LibFile, LibFolder, LibListing, NoteItem } from './types.ts';
 import { Confirm, Dialog, MenuButton, errorText, useLocalState } from './ui.tsx';
 import { AssetNoteIcons, useNotes } from './notesContext.tsx';
 import { forgetPeaks } from './peaks.ts';
-import { WavePlayer } from './WavePlayer.tsx';
+import { LibPlayContext } from './libplayer.ts';
 
 /** Dispatched on `window` when files are added to the library from outside the Library panel. */
 export const LIBRARY_CHANGED = 'library-changed';
@@ -46,6 +46,13 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
   const phInput = useRef<HTMLInputElement>(null);
   const [info, setInfo] = useState('');
   const notes = useNotes();
+  const playInBar = useContext(LibPlayContext);
+  // An audio file plays in the player bar, which also holds its details (the (i) button).
+  const playFile = (f: LibFile) => {
+    if (f.fileState === 'missing') { onError('The file is missing on the server. Re-upload it from the file’s menu.'); return; }
+    if (!(f.status === 'ready' || f.format === 'mp3')) { onError(f.status === 'failed' ? `The MP3 could not be made: ${f.error ?? 'unknown error'}` : 'The MP3 playback copy is being made…'); return; }
+    playInBar?.(f);
+  };
   const target = useRef('');
   const expanded = new Set([rootFolder.path, ...open]);
 
@@ -222,7 +229,7 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
                 onDragStart={(e) => { e.dataTransfer.setData(MOVE_TYPE, JSON.stringify({ id: file.id, folder: l.folder })); e.dataTransfer.effectAllowed = 'move'; }}>
                 {file.fileState === 'missing' && <span className="lib-missing" role="img" aria-label="File missing" title="The file is missing: it is listed in the project but its bytes are not here. Re-upload it from the menu.">!</span>}
                 <span className="note-icons"><AssetNoteIcons assetId={file.id} /></span>
-                <button className="tree-main" onClick={() => setPreview(file)} title={file.usage?.length ? `Used by ${file.usage.join(', ')}` : file.name}>
+                <button className="tree-main" onClick={() => (file.kind === 'audio' ? playFile(file) : setPreview(file))} title={file.usage?.length ? `Used by ${file.usage.join(', ')}` : file.name}>
                   <span className="tree-icon">{file.kind === 'image' ? <img src={assetUrl(file.id, file.hasLightweight)} alt="" loading="lazy" /> : KIND_ICON[file.kind]}</span>
                   <span className="grow"><span className="lib-name">{file.name}</span>
                     <span className="muted small lib-meta">{formatBytes(file.size)}{file.width ? ` · ${file.width}×${file.height}` : ''}{file.durationMs ? ` · ${formatDuration(file.durationMs)}` : ''}{file.usage?.length ? ` · ${file.usage.join(', ')}` : ''}
@@ -230,7 +237,7 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
                     {file.status === 'failed' && <span className="lib-status failed" title={file.error ?? ''}> · encoding failed</span>}</span></span>
                 </button>
                 <MenuButton className="more show" title="File" items={[
-                  { label: file.kind === 'image' ? 'Preview' : file.kind === 'audio' ? 'Play' : 'Details', onClick: () => setPreview(file) },
+                  { label: file.kind === 'image' ? 'Preview' : file.kind === 'audio' ? 'Play' : 'Details', onClick: () => (file.kind === 'audio' ? playFile(file) : setPreview(file)) },
                   { label: file.kind === 'audio' && file.format === 'wav' ? 'Download WAV' : 'Download', onClick: () => { window.location.href = assetUrl(file.id, false, true); } },
                   ...(file.kind === 'audio' && file.hasLightweight ? [{ label: 'Download MP3', onClick: () => { window.location.href = assetUrl(file.id, true, true); } }] : []),
                   ...(file.fileState === 'missing' && !readOnly ? [{ label: 'Re-upload file…', onClick: () => { reTarget.current = { file, folder: l.folder }; if (reInput.current) { reInput.current.accept = /\.[A-Za-z0-9]+$/.test(file.name) ? file.name.slice(file.name.lastIndexOf('.')) : ''; reInput.current.click(); } } }] : []),
@@ -261,12 +268,6 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
 
       {preview && <Dialog title={preview.name} wide onClose={() => setPreview(null)}>
         {preview.kind === 'image' ? <div className="preview"><img src={assetUrl(preview.id)} alt={preview.name} /></div>
-          : preview.kind === 'audio' ? (
-            preview.fileState === 'missing'
-              ? <p className="muted">The file is missing on the server. Re-upload it from the file's menu.</p>
-              : preview.status === 'ready' || preview.format === 'mp3'
-              ? <WavePlayer key={preview.id + preview.createdAt + preview.size} assetId={preview.id} light={preview.hasLightweight} hasPeaks={preview.hasPeaks} durationMs={preview.durationMs} />
-              : <p className="muted">{preview.status === 'failed' ? `The MP3 could not be made: ${preview.error ?? 'unknown error'}` : 'The MP3 playback copy is being made…'}</p>)
           : <p className="muted">No preview for this kind of file.</p>}
         <p className="muted small">{preview.path} · {formatBytes(preview.size)}{preview.width ? ` · ${preview.width}×${preview.height}` : ''}
           {preview.durationMs ? ` · ${formatDuration(preview.durationMs)}` : ''}{preview.sampleRate ? ` · ${(preview.sampleRate / 1000).toString().replace(/\.0+$/, '')} kHz ${preview.channels === 1 ? 'mono' : 'stereo'}` : ''}
@@ -358,6 +359,36 @@ function FileDetails({ file, notes, onOpenCue, onShowNote, onError }: {
             </li>))}</ul>
         </div>)}
     </>
+  );
+}
+
+/** The panel above the player bar with everything about the library sound: its facts, the cues that play it, its notes. */
+export function FileInfoPanel({ file, notes, onOpenCue, onShowNote, onError, onClose }: {
+  file: LibFile; notes: NoteItem[]; onOpenCue: (c: FileCue) => void; onShowNote: () => void; onError: (m: string) => void; onClose: () => void;
+}) {
+  const khz = file.sampleRate ? `${(file.sampleRate / 1000).toString().replace(/\.0+$/, '')} kHz` : '';
+  const rows: [string, string][] = [
+    ['Format', (file.format ?? '').toUpperCase() || '–'],
+    ['Length', file.durationMs ? formatDuration(file.durationMs) : '–'],
+    ['Sample rate', khz ? `${khz}${file.channels ? (file.channels === 1 ? ' · mono' : ' · stereo') : ''}` : '–'],
+    ['Size', formatBytes(file.size)],
+    ...(file.sizeLightweight ? [['MP3 copy', formatBytes(file.sizeLightweight)] as [string, string]] : []),
+    ['Added', new Date(file.createdAt).toLocaleDateString()],
+  ];
+  return (
+    <section className="lib-info" aria-label="File info">
+      <div className="lib-info-head">
+        <b>{file.name}</b>
+        <a className="button" href={assetUrl(file.id, false, true)}>{file.format === 'wav' ? 'Download WAV' : 'Download'}</a>
+        {file.hasLightweight && file.format === 'wav' && <a className="button" href={assetUrl(file.id, true, true)}>Download MP3</a>}
+        <button type="button" onClick={onClose} aria-label="Close file info" title="Close file info">✕</button>
+      </div>
+      <dl className="lib-info-grid">
+        <div className="wide"><dt>Path</dt><dd>{file.path}</dd></div>
+        {rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
+      </dl>
+      <FileDetails file={file} notes={notes} onOpenCue={onOpenCue} onShowNote={onShowNote} onError={onError} />
+    </section>
   );
 }
 

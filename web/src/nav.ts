@@ -11,7 +11,7 @@ export type Level = 'cue' | 'scene' | 'segment';
 /** The audio a cue plays (its chosen clip). */
 export interface NavClip { assetId: string; light: boolean; offsetMs: number; lengthMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number }
 export interface NavCue { id: string; startMs: number; lengthMs: number; clip?: NavClip | null }
-export interface NavScene { id: string; startMs: number; lengthMs: number; cues: NavCue[] }
+export interface NavScene { id: string; startMs: number; lengthMs: number; cues: NavCue[]; /** The scene's title, when it has one. */ label?: string | null }
 export interface NavSegment { id: string; scenes: NavScene[] }
 /** `ms` is counted from the start of the scene. */
 export interface Pos { segmentId: string; scene: number; ms: number }
@@ -29,7 +29,7 @@ export function toNav(c: SegmentContent): NavSegment {
   return {
     id: c.segment.id,
     scenes: c.scenes.map((s) => ({
-      id: s.id, startMs: s.startMs, lengthMs: s.lengthMs,
+      id: s.id, startMs: s.startMs, lengthMs: s.lengthMs, label: s.label,
       cues: s.cues.map((q) => ({ id: q.id, startMs: q.startMs, lengthMs: q.lengthMs, clip: chosenClip(q) })).sort((a, b) => a.startMs - b.startMs),
     })),
   };
@@ -140,4 +140,27 @@ export function where(seg: NavSegment, p: Pos) {
   const sc = seg.scenes[p.scene];
   const cues = sc?.cues ?? [];
   return { scene: p.scene + 1, scenes: seg.scenes.length, cue: cues.filter((c) => c.startMs <= p.ms).length, cues: cues.length, sceneMs: p.ms, sceneLengthMs: sc?.lengthMs ?? 0 };
+}
+
+/** What the path in the bar needs to name the place of the playhead. */
+export interface PathInfo { chapterIndex: string; chapterTitle: string; segmentPosition: number; segmentTitle: string; scene: number; sceneLabel?: string | null }
+
+/**
+ * The path "Chapter › Segment › Scene" by name (the cue is not part of it), as candidates from the fullest to the shortest.
+ * The end of the path matters most, so the beginning is compacted first ("2. O Feitiço" → "Ch.2"), then dropped ("…").
+ */
+export function scriptPathCandidates(i: PathInfo): string[][] {
+  const chC = `Ch.${i.chapterIndex}`;
+  const ch = i.chapterTitle.trim() ? `${i.chapterIndex}. ${i.chapterTitle.trim()}` : chC;
+  const segC = `Seg.${i.segmentPosition}`;
+  const seg = i.segmentTitle.trim() || segC;
+  const sc = i.sceneLabel?.trim() || `Scene ${i.scene}`;
+  return [[ch, seg, sc], [chC, seg, sc], [chC, segC, sc], ['…', segC, sc], [sc]];
+}
+
+/** The path of a library file (folders and file name), as candidates: folders from the beginning are dropped one by one ("…"). */
+export function libraryPathCandidates(path: string): string[][] {
+  const parts = path.split('/').filter(Boolean);
+  if (parts.length === 0) return [[path]];
+  return parts.map((_, i) => (i === 0 ? parts : i === parts.length - 1 ? [parts[i]!] : ['…', ...parts.slice(i)]));
 }

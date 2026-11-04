@@ -1,9 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { Story } from './types.ts';
-import { where, type Level } from './nav.ts';
+import { libraryPathCandidates, scriptPathCandidates, where, type Level } from './nav.ts';
 import type { PlaybackStore } from './playback.ts';
 import { formatClock, plainIndex } from './format.ts';
 import { useLocalState } from './ui.tsx';
+import { useLibValue, type LibraryPlayer } from './libplayer.ts';
+import { LibWave } from './WavePlayer.tsx';
 
 const ICONS = {
   segPrev: <><rect x="4" y="6" width="2.6" height="12" rx="1" /><path d="M20 6.2v11.6L9 12z" /></>,
@@ -14,6 +16,7 @@ const ICONS = {
   segNext: <><path d="M4 6.2v11.6L15 12z" /><rect x="17.4" y="6" width="2.6" height="12" rx="1" /></>,
   play: <path d="M8 5.2v13.6L19 12z" />,
   rec: <circle cx="12" cy="12" r="6.5" />,
+  back: <path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />,
   pause: <><rect x="6.5" y="5" width="3.8" height="14" rx="1" /><rect x="13.7" y="5" width="3.8" height="14" rx="1" /></>,
 };
 const Icon = ({ children }: { children: ReactNode }) => <svg viewBox="0 0 24 24" aria-hidden="true">{children}</svg>;
@@ -27,9 +30,46 @@ const BUTTONS: { icon: keyof typeof ICONS; label: string; keys: string; dir: 'pr
   { icon: 'segNext', label: 'Next segment', keys: 'Alt+→', dir: 'next', level: 'segment' },
 ];
 
+/**
+ * The path of the playhead (or of the library sound) by name, at the left of the bar. When the whole path does not fit, the
+ * beginning is compacted and then dropped, so the end, the most relevant part, stays.
+ */
+function PathBar({ candidates, label }: { candidates: string[][]; label: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  const measured = useRef<(HTMLDivElement | null)[]>([]);
+  const [pick, setPick] = useState(0);
+  const fit = () => {
+    const avail = box.current?.clientWidth ?? 0;
+    let k = candidates.length - 1;
+    for (let i = 0; i < candidates.length; i++) if ((measured.current[i]?.offsetWidth ?? 0) <= avail) { k = i; break; }
+    setPick(k);
+  };
+  const fitRef = useRef(fit);
+  useLayoutEffect(() => { fitRef.current = fit; fit(); });
+  useEffect(() => {
+    if (!box.current) return;
+    const ro = new ResizeObserver(() => fitRef.current());
+    ro.observe(box.current);
+    return () => ro.disconnect();
+  }, []);
+  const nodes = (c: string[]) => c.map((n, i) => <span className={'lv' + (i === c.length - 1 ? ' last' : n === '…' ? ' omit' : '')} key={i}>{n}</span>);
+  return (
+    <div className="nav-pos" ref={box} aria-label={label} title={label}>
+      <div className="measure" aria-hidden="true">
+        {candidates.map((c, i) => <div className="cand" key={i} ref={(el) => { measured.current[i] = el; }}>{nodes(c)}</div>)}
+      </div>
+      <div className="shown">{nodes(candidates[Math.min(pick, candidates.length - 1)] ?? [])}</div>
+    </div>
+  );
+}
+
 /** The one navigation bar of the Script View: position at the left, controls in the centre, clock and Follow at the right. */
-export function NavBar({ store, story, follow, onFollow, editing, timeline, mobile }: {
+export function NavBar({ store, lib, libInfo, story, follow, onFollow, editing, timeline, mobile }: {
   store: PlaybackStore; story: Story; follow: boolean; onFollow: (v: boolean) => void; editing: boolean;
+  /** The library sound player: while it has a sound, the bar takes the library layout. */
+  lib: LibraryPlayer;
+  /** The (i) button of the library layout: the file info panel above the bar. */
+  libInfo?: { open: boolean; onToggle: () => void };
   /** A phone: the bar can be folded away to a slim handle, and it makes room for the keyboard while a cue is edited. */
   mobile?: boolean;
   /** The timeline panel's switch; absent where there is no timeline (a textbook). */
@@ -42,34 +82,19 @@ export function NavBar({ store, story, follow, onFollow, editing, timeline, mobi
   const recKind = recView.startsWith('count') ? 'count' : recView;
   // The fold is remembered; it opens by itself while a take is being recorded, so the stop button is never out of reach.
   const [folded, setFolded] = useLocalState('rs.navFolded', false);
-  const hidden = !!mobile && folded && !recView;
+  const libOn = useLibValue(lib, (l) => !!l.track);
+  const libPlaying = useLibValue(lib, (l) => l.playing);
+  const libPath = useLibValue(lib, (l) => l.track?.path ?? '');
+  const hidden = !!mobile && folded && !recView && !libOn;
 
-  // ---- the position readout, with the higher levels dropped one by one when there is no room ----
-  const chapter = pos && story.chapters.find((c) => c.segments.some((s) => s.id === pos.segmentId));
-  const segInfo = chapter?.segments.find((s) => s.id === pos!.segmentId);
+  // ---- the path of the playhead by name (chapter › segment › scene; the cue is not part of it) ----
+  const chapter = pos && story.chapters.find((c) => c.segments.some((x) => x.id === pos.segmentId));
+  const segInfo = chapter?.segments.find((x) => x.id === pos!.segmentId);
   const w = seg && pos ? where(seg, pos) : null;
-  const levels: [string, string][] = w && chapter && segInfo ? [
-    ['Chapter', plainIndex(chapter.index)], ['Segment', String(segInfo.position)], ['Scene', String(w.scene)],
-    ['Cue', w.cues ? `${w.cue || '–'}/${w.cues}` : '–'],
-  ] : [];
-  const box = useRef<HTMLDivElement>(null);
-  const measured = useRef<(HTMLSpanElement | null)[]>([]);
-  const [from, setFrom] = useState(0);
-  const fit = () => {
-    const avail = box.current?.clientWidth ?? 0;
-    const widths = measured.current.slice(0, levels.length).map((s) => s?.offsetWidth ?? 0);
-    let f = 0;
-    while (f < widths.length && widths.slice(f).reduce((a, b) => a + b, 0) > avail) f++;
-    setFrom(f);
-  };
-  const fitRef = useRef(fit);
-  useLayoutEffect(() => { fitRef.current = fit; fit(); });
-  useEffect(() => {
-    if (!box.current) return;
-    const ro = new ResizeObserver(() => fitRef.current());
-    ro.observe(box.current);
-    return () => ro.disconnect();
-  }, []);
+  const scriptPath = w && chapter && segInfo && pos ? scriptPathCandidates({
+    chapterIndex: plainIndex(chapter.index), chapterTitle: chapter.title, segmentPosition: segInfo.position, segmentTitle: segInfo.title,
+    scene: w.scene, sceneLabel: seg?.scenes[pos.scene]?.label }) : [];
+  const candidates = libOn ? libraryPathCandidates(libPath) : scriptPath;
 
   // ---- keys: Space, ← → (Shift: scene, Alt: segment). Ignored while typing or when a dialog is open ----
   useEffect(() => {
@@ -77,6 +102,7 @@ export function NavBar({ store, story, follow, onFollow, editing, timeline, mobi
       if (e.defaultPrevented || e.ctrlKey || e.metaKey) return;
       const t = e.target as HTMLElement | null;
       if (t?.closest('input, textarea, select, [contenteditable="true"]') || document.querySelector('.backdrop')) return;
+      if (lib.track) { if (e.key === ' ') { if (t?.closest('button, a')) return; e.preventDefault(); lib.toggle(); } return; } // the library sound has no script keys
       if (e.key === ' ') { if (t?.closest('button, a')) return; e.preventDefault(); if (store.rec) store.rec.stop(); else store.toggle(); return; }
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       e.preventDefault();
@@ -84,14 +110,14 @@ export function NavBar({ store, story, follow, onFollow, editing, timeline, mobi
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [store]);
+  }, [store, lib]);
 
   const btn = (b: (typeof BUTTONS)[number]) => (
-    <button key={b.icon} type="button" title={`${b.label} (${b.keys})`} aria-label={b.label}
+    <button key={b.icon} type="button" className="navbtn" title={`${b.label} (${b.keys})`} aria-label={b.label}
       disabled={!store.can(b.level, b.dir)} onClick={() => store.move(b.level, b.dir)}><Icon>{ICONS[b.icon]}</Icon></button>
   );
   return (
-    <div className={'navbar' + (mobile ? ' mobile' : '') + (hidden ? ' folded' : '') + (mobile && editing ? ' typing' : '')} role="toolbar" aria-label="Script navigation">
+    <div className={'navbar' + (libOn ? ' lib' : '') + (mobile ? ' mobile' : '') + (hidden ? ' folded' : '') + (mobile && editing ? ' typing' : '')} role="toolbar" aria-label="Script navigation">
       {mobile && (
         <button type="button" className="nav-fold" aria-expanded={!hidden} aria-label={hidden ? 'Show the navigation bar' : 'Hide the navigation bar'}
           title={hidden ? 'Show the navigation bar' : 'Hide the navigation bar'} onClick={() => setFolded(!folded)}>
@@ -99,17 +125,13 @@ export function NavBar({ store, story, follow, onFollow, editing, timeline, mobi
             <path d={hidden ? 'M5 9l7-6 7 6' : 'M5 3l7 6 7-6'} /></svg>
         </button>)}
       <div className="nav">
-        <div className="nav-pos" ref={box} aria-label={levels.map(([n, v]) => `${n} ${v}`).join(', ')}>
-          <div className="measure" aria-hidden="true">
-            {levels.map(([n, v], i) => <span className="lv" key={n} ref={(el) => { measured.current[i] = el; }}>{n} <b>{v}</b></span>)}
-          </div>
-          <div className="shown">
-            {levels.slice(from).map(([n, v], i, a) => <span className={'lv' + (i === a.length - 1 ? ' last' : '')} key={n}>{n} <b>{v}</b></span>)}
-          </div>
-        </div>
+        <PathBar candidates={candidates} label={candidates[0]?.join(' › ') ?? ''} />
         <div className="nav-ctrls">
           {BUTTONS.slice(0, 3).map(btn)}
-          {recView ? (
+          {libOn ? (
+            <button type="button" className="play" aria-label={libPlaying ? 'Pause' : 'Play'} title={libPlaying ? 'Pause (Space)' : 'Play (Space)'}
+              onClick={() => lib.toggle()}><Icon>{libPlaying ? ICONS.pause : ICONS.play}</Icon></button>
+          ) : recView ? (
             <button type="button" className={'play rec ' + recKind} disabled={recView === 'saving'}
               aria-label={recView === 'saving' ? 'Saving the take' : store.rec?.phase === 'count' ? 'Cancel the recording' : 'Stop recording'}
               title={recView === 'saving' ? 'Saving the take…' : store.rec?.phase === 'count' ? 'Cancel (Space)' : 'Stop recording (Space)'}
@@ -121,13 +143,19 @@ export function NavBar({ store, story, follow, onFollow, editing, timeline, mobi
           <button type="button" className="play" disabled={!pos} aria-label={store.playing ? 'Pause' : 'Play'} title={store.playing ? 'Pause (Space)' : 'Play (Space)'}
             onClick={() => store.toggle()}><Icon>{store.playing ? ICONS.pause : ICONS.play}</Icon></button>)}
           {BUTTONS.slice(3).map(btn)}
+          {libOn && <LibWave lib={lib} />}
         </div>
         <div className="nav-right">
+          <div className="nav-extras">
           {w && <span className="nav-clock"><b>{formatClock(w.sceneMs)}</b> / {formatClock(w.sceneLengthMs)} in scene</span>}
-          <label className={'nav-follow' + (editing ? ' paused' : '')}
-            title={editing ? 'Follow is paused while you edit a cue' : 'When on, the script scrolls (and opens the next segment) to follow the playhead'}>
-            <input type="checkbox" checked={follow} onChange={(e) => onFollow(e.target.checked)} /> Follow
-          </label>
+          <button type="button" className={'followbtn' + (follow ? ' on' : '') + (editing ? ' paused' : '')} aria-pressed={follow}
+            aria-label="Script follows playback" title={'Script follows playback' + (editing ? ' (paused while you edit a cue)' : '')} onClick={() => onFollow(!follow)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle className="disc" cx="12" cy="12" r="6.5" />
+              <circle className="dot" cx="12" cy="12" r="2" />
+              <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
+            </svg>
+          </button>
           {timeline && (
             <button type="button" className={'tlbtn' + (timeline.open ? ' on' : '')} aria-pressed={timeline.open} data-testid="timeline-toggle"
               title={timeline.open ? 'Hide the timeline' : 'Show the timeline'} onClick={timeline.onToggle}>
@@ -139,6 +167,17 @@ export function NavBar({ store, story, follow, onFollow, editing, timeline, mobi
               </svg>
             </button>
           )}
+          </div>
+          {libOn && libInfo && (
+            <button type="button" className={'lib-return' + (libInfo.open ? ' on' : '')} aria-pressed={libInfo.open} aria-label="File info" title="File info" onClick={libInfo.onToggle}>
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <circle cx="12" cy="12" r="9" /><path d="M12 11v5.5" /><circle cx="12" cy="7.8" r=".6" fill="currentColor" />
+              </svg>
+            </button>)}
+          {libOn && (
+            <button type="button" className="lib-return" aria-label="Return to script" title="Return to script" onClick={() => lib.close()}>
+              <Icon>{ICONS.back}</Icon>
+            </button>)}
         </div>
       </div>
     </div>
