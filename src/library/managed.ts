@@ -17,7 +17,7 @@ const lower = (s: string) => s.toLowerCase();
 export const isStoryline = (p: string) => lower(p) === lower(STORYLINE) || lower(p).startsWith(lower(STORYLINE) + '/');
 export const isCharactersRoot = (p: string) => lower(p) === lower(CHARACTERS);
 
-/** The library folder of a character; its profile picture is the file `profile.<ext>` in it. */
+/** The library folder of a character; its profile picture is the file `Profile.<ext>` in it. */
 export const pictureFolder = (characterFolder: string) => `${CHARACTERS}/${characterFolder}`;
 
 /**

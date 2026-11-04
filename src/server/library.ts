@@ -625,7 +625,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       const access = await accessToEntity(db, request.account!.id, 'character', id, { edit: true });
       const c = (await db.select().from(character).where(eq(character.id, id)).limit(1))[0]!;
       const dir = pictureFolder(c.folder);
-      // The picture is the file `profile.<ext>` in the character's own folder; a new picture replaces the earlier profile file.
+      // The picture is the file `Profile.<ext>` in the character's own folder; a new picture replaces the earlier profile file.
       const earlier = (await assetsUnder(db, access.projectId, dir)).filter((a) => {
         const rest = a.path.slice(dir.length + 1);
         return !rest.includes('/') && splitName(rest).base.toLowerCase() === 'profile';
@@ -645,7 +645,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
           for (const e of earlier) { await db.delete(asset).where(eq(asset.id, e.id)); await removeFiles(e); }
         }
         const stored = await storeFile(db, {
-          projectId: access.projectId, folder: dir, name: 'profile' + splitName(cleanFileName(name)).ext, data, only: ['image'], maxBytes: MAX_PICTURE, exactName: true,
+          projectId: access.projectId, folder: dir, name: 'Profile' + splitName(cleanFileName(name)).ext, data, only: ['image'], maxBytes: MAX_PICTURE, exactName: true,
         });
         assetId = stored.asset.id;
       }

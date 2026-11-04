@@ -258,12 +258,12 @@ describe('cover', () => {
 });
 
 describe('character pictures', () => {
-  it('stores the picture as Characters/{name}/profile.{ext}, replaces it and reuses identical images', async () => {
+  it('stores the picture as Characters/{name}/Profile.{ext}, replaces it and reuses identical images', async () => {
     const ch = await call('ann', 'POST', `/api/projects/${ids.p}/characters`, { name: 'Marta' });
     ids.marta = ch.body.id;
     const r = await put('ann', `/api/characters/${ids.marta}/picture?name=marta.png`, png(300, 300, 7));
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.ok(existsSync(path.join(root, ids.p!, 'Characters', 'Marta', 'profile.png')));
+    assert.ok(existsSync(path.join(root, ids.p!, 'Characters', 'Marta', 'Profile.png')));
     const list = await call('ann', 'GET', `/api/projects/${ids.p}/characters`);
     assert.equal(list.body.characters.find((c: any) => c.id === ids.marta).pictureAssetId, r.body.pictureAssetId);
     const again = await put('ann', `/api/characters/${ids.marta}/picture?name=other.png`, png(300, 300, 7));
@@ -274,9 +274,9 @@ describe('character pictures', () => {
     const newer = await put('ann', `/api/characters/${ids.marta}/picture?name=new.png`, png(300, 300, 11));
     assert.equal(newer.status, 200, JSON.stringify(newer.body));
     assert.notEqual(newer.body.pictureAssetId, r.body.pictureAssetId);
-    assert.ok(existsSync(path.join(root, ids.p!, 'Characters', 'Marta', 'profile.png')));
+    assert.ok(existsSync(path.join(root, ids.p!, 'Characters', 'Marta', 'Profile.png')));
     const folder = await call('ann', 'GET', `/api/projects/${ids.p}/library?folder=${encodeURIComponent('Characters/Marta')}`);
-    assert.deepEqual(folder.body.files.map((f: any) => f.name), ['profile.png']);
+    assert.deepEqual(folder.body.files.map((f: any) => f.name), ['Profile.png']);
     assert.equal((await call('ann', 'DELETE', `/api/characters/${ids.marta}/picture`)).status, 200);
     assert.equal((await call('cy', 'PUT', `/api/characters/${ids.marta}/picture?name=x.png`, png(30, 30, 8), { 'content-type': 'application/octet-stream' })).status, 404);
   });
@@ -334,7 +334,7 @@ describe('managed folder names', () => {
     assert.equal(done.folders, 1);
     assert.ok(done.files >= 1);
     assert.ok(readdirSync(path.join(root, pid)).includes('Characters'));
-    assert.ok(existsSync(path.join(root, pid, 'Characters', 'Rita', 'profile.png')));
+    assert.ok(existsSync(path.join(root, pid, 'Characters', 'Rita', 'Profile.png')));
     const rows = await withDb((db) => db.execute(sql`SELECT path FROM asset WHERE project_id = ${pid}`));
     for (const r of (rows as unknown as [{ path: string }[]])[0]) assert.ok(r.path.startsWith('Characters/'), r.path);
     const again = await withDb((db) => normalizeManagedFolders(db, pid));

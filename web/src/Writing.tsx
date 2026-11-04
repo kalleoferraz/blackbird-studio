@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent as RDragEvent, type MouseEvent as RMouseEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type DragEvent as RDragEvent, type MouseEvent as RMouseEvent } from 'react';
 import { api } from './api.ts';
 import type { Character, Cue, CueType, Lane, SegmentContent, Scene } from './types.ts';
 import { formatClock, formatMinutes, formatMs, formatSeconds, formatTenths, parseLength } from './format.ts';
@@ -285,6 +285,7 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
   const audioName = chosenClip ? (audioMissing ? `${chosenClip.name} – file missing: re-upload it in the Library` : chosenClip.name) : audioTitle;
   const placeholder = cue.type === 'speech' ? 'Spoken text (Markdown)…' : cue.type === 'sfx' ? 'Describe the sound effect…' : 'Describe the music…';
   const black = colour.toLowerCase() === '#000000';
+  const isNarr = cue.type === 'speech' && !!character?.isNarrator;
   const showAudio = !drafting && (readOnly ? cue.clips.length > 0 : true);
   const name = cue.type === 'speech' ? (character?.name ?? lane?.title ?? 'No character') : (lane?.title ?? TYPE_LABEL[cue.type]);
   const nameStyle = { color: black ? 'var(--text)' : colour };
@@ -301,31 +302,13 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
         const id = e.dataTransfer.getData(CHARACTER_DRAG);
         if (characters.some((c) => c.id === id)) void patch({ type: 'speech', characterId: id });
       }}
-      className={'cue ' + (dropHere ? 'drop-char ' : '') + (cue.type === 'speech' && character && !character.isNarrator ? 'faced ' : '') + cue.type + (editing ? ' editing' : '') + (isNow ? ' playhead' : '') + (played ? ' played' : '') + (recording ? ' recording' : '') + (recPhase === 'count' ? ' armed' : '')} data-cue-id={cue.id} onClick={onCueClick}>
+      style={isNarr ? ({ '--lane': colour } as CSSProperties) : undefined}
+      className={'cue ' + (dropHere ? 'drop-char ' : '') + (cue.type === 'speech' && character && !character.isNarrator ? 'faced ' : '') + cue.type + (isNarr ? ' narrator' : '') + (editing ? ' editing' : '') + (isNow ? ' playhead' : '') + (played ? ' played' : '') + (recording ? ' recording' : '') + (recPhase === 'count' ? ' armed' : '')} data-cue-id={cue.id} onClick={onCueClick}>
       {isNow && <span className="progress" style={{ height: `${shown / 10}%` }} />}
-      <span className={'strip' + (black ? ' black' : '')} style={{ background: colour }} />
+      <span className={'strip' + (black ? ' black' : '') + (isNarr ? ' dotted' : '')} style={isNarr ? { borderColor: colour } : { background: colour }} />
+      {isNarr && <svg className="ntail" viewBox="0 0 14 22" aria-hidden="true"><path className="fill" d="M14 0 1.5 11 14 22Z" /><path className="edge" d="M14 .5 1.5 11 14 21.5" /></svg>}
+      {cue.type !== 'speech' && <span className="cue-icon" style={{ color: black ? '#8a7d76' : colour }} aria-hidden="true"><TypeIcon type={cue.type} /></span>}
       {cue.type === 'speech' && character && !character.isNarrator && <CueFace character={character} colour={black ? '#8a7d76' : colour} />}
-      <div className="tagcol">
-      <div className="tag">
-        {readOnly ? <span className="type-btn"><TypeIcon type={cue.type} /></span> :
-          <MenuButton className="type-btn" items={typeMenu} title={TYPE_LABEL[cue.type]}><TypeIcon type={cue.type} /></MenuButton>}
-        {cue.type === 'speech' && !readOnly ?
-          <MenuButton className="name" items={charMenu} title="Character"><b style={nameStyle}>{name}</b></MenuButton> :
-          <span className="name"><b style={nameStyle}>{name}</b></span>}
-      </div>
-      {!editing && (!drafting || isNow) && (
-        <div className="tag-row">
-          {!drafting && place && <CueNoteIcons cueId={cue.id} segmentId={place.segmentId} sceneId={place.sceneId} chapterId={place.chapterId} />}
-          {isNow && <span className="now-tag">now</span>}
-        </div>)}
-      {editing && (
-        <div className="edit-actions">
-          <button className="round cancel" title="Cancel (Esc)" onMouseDown={(e) => e.preventDefault()} onClick={cancel}>
-            <svg viewBox="0 0 12 12" width="12" height="12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></button>
-          <button className="round confirm" title="Save (Enter)" onMouseDown={(e) => e.preventDefault()} onClick={() => void save(false)}>
-            <svg viewBox="0 0 12 12" width="12" height="12"><path d="M2 6.5l2.8 2.8L10 3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
-        </div>)}
-      </div>
       <div className="cue-main">
         {editing ? (
           <textarea ref={area} rows={1} className="cue-text" value={text} placeholder={placeholder} onChange={(e) => setText(e.target.value)}
@@ -339,32 +322,54 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
           <div className={'cue-text' + (cue.text ? '' : ' empty')} onDoubleClick={() => { clearTimeout(seekTimer.current); if (!readOnly) setEditing(true); }}>
             {cue.text ? (cue.type === 'speech' && !character?.isNarrator ? '— ' : '') + cue.text : placeholder}</div>)}
       </div>
-      <div className={'times' + (showAudio ? ' with-audio' : '')}>
-        <span className="start" title="Start within the scene">{formatClock(cue.startMs)}</span>
-        <div className="len-row">
-          {editLen !== null ? (
-            <input className="len-input" autoFocus value={editLen} onChange={(e) => setEditLen(e.target.value)} onBlur={commitLen}
-              onKeyDown={(e) => { if (e.key === 'Enter') commitLen(); if (e.key === 'Escape') setEditLen(null); }} />
-          ) : drafting ? <span className="len">–</span> : readOnly ? <span className={'len' + estimated}>{formatTenths(cue.lengthMs)}</span> : (
-            <MenuButton className={'len' + estimated} items={lengthMenu} title={`${formatSeconds(cue.lengthMs)}${cue.lengthAuto ? ' · follows the text (auto)' : ''}`}>{formatTenths(cue.lengthMs)}</MenuButton>)}
-          {showAudio && (readOnly ? <span className={audioClass} title={audioName}><AudioIcon /></span> :
-            <MenuButton className={audioClass} items={audioMenu} title={audioName}><AudioIcon /></MenuButton>)}
+      <div className="cue-side">
+        <div className="side-row side-top">
+          {!editing && (!drafting || isNow) && (
+            <div className="tag-row">
+              {isNow && <span className="now-tag">now</span>}
+              {!drafting && place && <CueNoteIcons cueId={cue.id} segmentId={place.segmentId} sceneId={place.sceneId} chapterId={place.chapterId} />}
+            </div>)}
+          {editing && (
+            <div className="edit-actions">
+              <button className="round cancel" title="Cancel (Esc)" onMouseDown={(e) => e.preventDefault()} onClick={cancel}>
+                <svg viewBox="0 0 12 12" width="12" height="12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></button>
+              <button className="round confirm" title="Save (Enter)" onMouseDown={(e) => e.preventDefault()} onClick={() => void save(false)}>
+                <svg viewBox="0 0 12 12" width="12" height="12"><path d="M2 6.5l2.8 2.8L10 3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
+            </div>)}
+          {readOnly || drafting ? null : (<>
+            {!editing && <MenuButton className="cue-menu" title="Cue options" items={[
+              { label: 'Edit text', onClick: () => { clearTimeout(seekTimer.current); setEditing(true); } },
+              { label: 'Add note…', onClick: () => notes.add({ kind: 'cue', id: cue.id }, `this cue: “${cue.text.replace(/\s+/g, ' ').trim().slice(0, 40) || name}”`) },
+              ...(around && isMobile ? [
+                { label: 'Add cue above', onClick: around.above } as MenuItem,
+                { label: 'Add cue below', onClick: startDraft } as MenuItem,
+                { label: 'Split scene here', disabled: !around.split, onClick: () => around.split?.() } as MenuItem] : []),
+              'sep',
+              { label: 'Delete cue', danger: true, onClick: askDelete },
+            ]}>⋯</MenuButton>}
+          </>)}
         </div>
-        {cue.lengthAuto && !drafting && <span className="auto" title="The length follows the text until you set it by hand">auto</span>}
-      </div>
-      <div className="cue-actions">
-        {readOnly || drafting ? <span /> : (<>
-          {!editing && <MenuButton className="cue-menu" title="Cue options" items={[
-            { label: 'Edit text', onClick: () => { clearTimeout(seekTimer.current); setEditing(true); } },
-            { label: 'Add note…', onClick: () => notes.add({ kind: 'cue', id: cue.id }, `this cue: “${cue.text.replace(/\s+/g, ' ').trim().slice(0, 40) || name}”`) },
-            ...(around && isMobile ? [
-              { label: 'Add cue above', onClick: around.above } as MenuItem,
-              { label: 'Add cue below', onClick: startDraft } as MenuItem,
-              { label: 'Split scene here', disabled: !around.split, onClick: () => around.split?.() } as MenuItem] : []),
-            'sep',
-            { label: 'Delete cue', danger: true, onClick: askDelete },
-          ]}>⋯</MenuButton>}
-        </>)}
+        <div className="side-row side-mid">
+          {cue.type === 'speech' && !readOnly ?
+            <MenuButton className="name" items={charMenu} title="Character"><b style={nameStyle}>{name}</b></MenuButton> :
+            <span className="name"><b style={nameStyle}>{name}</b></span>}
+          {readOnly ? <span className="type-btn"><TypeIcon type={cue.type} /></span> :
+            <MenuButton className="type-btn" items={typeMenu} title={TYPE_LABEL[cue.type]}><TypeIcon type={cue.type} /></MenuButton>}
+        </div>
+        <div className="side-row side-bot">
+          <div className={'times' + (showAudio ? ' with-audio' : '')}>
+            <span className="start" title="Start within the scene">{formatClock(cue.startMs)}</span>
+            <div className="len-row">
+              {editLen !== null ? (
+                <input className="len-input" autoFocus value={editLen} onChange={(e) => setEditLen(e.target.value)} onBlur={commitLen}
+                  onKeyDown={(e) => { if (e.key === 'Enter') commitLen(); if (e.key === 'Escape') setEditLen(null); }} />
+              ) : drafting ? <span className="len">–</span> : readOnly ? <span className={'len' + estimated}>{formatTenths(cue.lengthMs)}</span> : (
+                <MenuButton className={'len' + estimated} items={lengthMenu} title={`${formatSeconds(cue.lengthMs)}${cue.lengthAuto ? ' · follows the text (auto)' : ''}`}>{formatTenths(cue.lengthMs)}</MenuButton>)}
+              {showAudio && (readOnly ? <span className={audioClass} title={audioName}><AudioIcon /></span> :
+                <MenuButton className={audioClass} items={audioMenu} title={audioName}><AudioIcon /></MenuButton>)}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

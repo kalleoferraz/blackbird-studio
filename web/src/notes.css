@@ -50,4 +50,3 @@ button.linklike { border: 0; background: none; padding: 2px 0; color: var(--mute
 .note-where { margin: 0 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* the audio icon sits at the right of the cue's length; the start and "auto" labels keep to the length's column */
 .len-row { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
-.times.with-audio .start, .times.with-audio .auto { margin-right: 23px; }

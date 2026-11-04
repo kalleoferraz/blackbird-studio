@@ -79,16 +79,39 @@ input.chapter-title, input.segment-title { width: 100%; }
 .scene-head { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .8rem; margin-bottom: 4px; }
 .seg-label { background: transparent; border: 0; padding: 2px 4px; width: 160px; color: var(--muted); } span.seg-label { width: auto; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .seg-length { color: #fff; font-weight: 700; } .line { flex: 1; height: 1px; background: var(--line); }
 .icon { border: 0; background: none; color: var(--muted); padding: 0 6px; }
-.cue { display: grid; grid-template-columns: 150px minmax(0, 1fr) 76px 24px; gap: 12px; align-items: center; padding: 8px 10px 8px 16px; border-radius: 5px; position: relative; margin: 2px 0; min-height: 56px; }
+.cue { display: grid; grid-template-columns: minmax(0, 1fr) 124px; gap: 12px; align-items: center; padding: 6px 10px 6px 16px; border-radius: 5px; position: relative; margin: 2px 0; }
 .cue:hover, .cue.editing { background: var(--panel2); }
 .cue:hover::after, .cue.editing::after { content: ""; position: absolute; inset: 0; border: 1px solid var(--primary); border-radius: 5px; pointer-events: none; }
 .strip { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: 3px 0 0 3px; }
 .strip.black { outline: 1px solid #8a7d76; outline-offset: -1px; }
-.times { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.times .start { font-size: 10.5px; color: var(--muted); }
-.times .len { border: 0; background: none; padding: 0; font: inherit; font-size: 17px; font-weight: 700; color: var(--text); white-space: nowrap; }
+/* The narrator's bar is dotted */
+.strip.dotted { width: 0; border-left: 4px dotted; border-radius: 0; background: none; }
+.cue.playhead .strip.dotted { border-color: var(--primary) !important; background: none !important; }
+.cue.recording .strip.dotted { border-color: var(--alert) !important; background: none !important; }
+/* Where the balloons are (desktop): the narrator's cue is outlined at the top, left and bottom with a dotted line and
+   round corners, and a dotted-edged tail with a black fill points left from its middle: a dotted { */
+.center-col[data-faces] .cue.narrator .strip { display: none; }
+.center-col[data-faces] .cue.narrator::before { content: ""; position: absolute; inset: 0; border: 2px dotted var(--lane); border-right: 0; border-top-color: transparent; border-bottom-color: transparent; border-radius: 14px 0 0 14px; pointer-events: none; }
+.ntail { display: none; }
+.center-col[data-faces] .cue.narrator .ntail { display: block; position: absolute; right: calc(100% - 2px); top: 50%; width: 10px; height: 16px; margin-top: -8px; overflow: visible; pointer-events: none; color: var(--lane); }
+.ntail .fill { fill: var(--bg, #0E0B10); stroke: none; }
+.ntail .edge { fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 0 5.5; }
+.cue.playhead.narrator { --lane: var(--primary) !important; } .cue.recording.narrator { --lane: var(--alert) !important; }
+/* Sound effects and music: no bar, a bigger icon at the left instead of the character's balloon (where there is room for it) */
+.cue-icon { display: none; }
+.center-col[data-faces] .cue.sfx .strip, .center-col[data-faces] .cue.music .strip { display: none; }
+.center-col[data-faces] .cue.sfx .cue-icon, .center-col[data-faces] .cue.music .cue-icon { display: flex; align-items: center; justify-content: center; position: absolute; right: calc(100% + 16px); top: 50%; transform: translateY(-50%); width: min(calc(var(--face, 44px) * .75), 36px); aspect-ratio: 1 / 1; max-height: 100%; pointer-events: none; }
+.cue-icon .type-icon { width: 100%; height: 100%; stroke-width: 1.2; }
+/* The cue's right gutter: three rows, right-aligned: tags and menu / character and type / length and audio */
+.cue-side { align-self: stretch; display: flex; flex-direction: column; justify-content: space-between; gap: 2px; min-width: 0; min-height: 68px; }
+.side-row { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 22px; min-width: 0; }
+.side-mid .name { flex: 0 1 auto; text-align: right; font-size: 13px; }
+.side-mid .name { white-space: normal; line-height: 1.15; overflow: visible; } .side-mid .name b { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.times { display: flex; align-items: center; gap: 7px; line-height: 1.15; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.times .start { font-size: 10px; color: var(--faint); opacity: 0; transition: opacity .12s; }
+.side-bot:hover .start, .len-row:focus-within ~ .start { opacity: 1; }
+.times .len { border: 0; background: none; padding: 0; font: inherit; font-size: 11px; font-weight: 700; color: var(--text); white-space: nowrap; }
 .times .len:hover { color: var(--primary); }
-.times .auto { font-size: 9px; color: var(--faint); letter-spacing: .04em; }
 .len-input { width: 60px; padding: 0 4px; font: inherit; }
 .tag { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted); }
 .type-btn { border: 0; background: none; padding: 2px; display: grid; place-items: center; color: var(--muted); flex: none; }
@@ -185,7 +208,6 @@ label.check input[type=checkbox] { width: auto; flex: none; }
 .caret { flex: none; width: 12px; display: inline-flex; color: var(--muted); transition: transform .12s; } .caret.open { transform: rotate(90deg); }
 .idx.seg-idx { width: auto; min-width: 30px; margin-right: 6px; color: #6b5f59; }
 /* Cue editing */
-.tagcol { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .edit-actions { display: flex; gap: 8px; }
 .round { width: 24px; height: 24px; padding: 0; border-radius: 50%; border: 0; display: inline-flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; }
 .round.cancel { background: var(--danger); } .round.confirm { background: #3fa45b; }
@@ -227,14 +249,14 @@ label.check input[type=checkbox] { width: auto; flex: none; }
 
 /* The cue under the playhead (yolk edge, soft fill that grows) and cues already passed */
 .cue { cursor: pointer; }
-.cue > .tagcol, .cue > .cue-main, .cue > .times { position: relative; }
+.cue > .cue-side, .cue > .cue-main { position: relative; }
 .cue .progress { position: absolute; left: 0; right: 0; top: 0; background: rgba(239, 155, 11, .14); border-radius: 5px 5px 0 0; pointer-events: none; }
 /* A cue that has finished sinks into the shadow; hovering or editing it brings it back */
 .cue.played { opacity: .5; transition: opacity .15s; }
 .cue.played:hover, .cue.played.editing { opacity: 1; }
 .cue.playhead::after { content: ""; position: absolute; inset: 0; border: 2px solid var(--primary); border-radius: 5px; pointer-events: none; }
 .cue.playhead .strip { background: var(--primary) !important; outline: 0; }
-.now-tag { align-self: flex-start; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: var(--primary); color: var(--on-primary); }
+.now-tag { align-self: center; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: var(--primary); color: var(--on-primary); }
 textarea.cue-text { cursor: text; }
 
 /* ---- audio files in the library ---- */
@@ -279,7 +301,6 @@ span.num { background: var(--panel2); border: 1px solid var(--line); border-radi
 .cue.recording .now-tag { background: var(--alert); color: #fff; }
 .cue.armed::after { content: ""; position: absolute; inset: 0; border: 1px dashed var(--alert); border-radius: 5px; pointer-events: none; }
 
-.cue-actions { display: flex; flex-direction: column; align-items: center; justify-content: space-between; align-self: stretch; min-height: 40px; }
 .audio-btn { border: 0; background: none; padding: 2px; color: var(--muted); display: inline-grid; place-items: center; border-radius: 4px; line-height: 0; }
 button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .audio-btn.none { color: #5d5450; }
@@ -449,16 +470,13 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
   .tree-row { min-height: 40px; }
   .icon { padding: 4px 10px; }
 
-  /* a cue: name and times on one line, the text across the full width underneath */
-  .cue { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "tag times acts" "main main main"; gap: 6px 10px; padding: 8px 8px 8px 14px; min-height: 0; align-items: center; }
-  .cue > .cue-main { align-self: start; }
-  .cue > .tagcol { grid-area: tag; } .cue > .times { grid-area: times; } .cue > .cue-actions { grid-area: acts; } .cue > .cue-main { grid-area: main; }
-  .cue-actions { flex-direction: row; align-self: start; min-height: 0; gap: 2px; }
-  .cue-menu { width: 32px; height: 32px; font-size: 1.2rem; opacity: 1; }
+  /* a cue: the text, and the three-row gutter at its right (narrower than on the desktop) */
+  .cue { grid-template-columns: minmax(0, 1fr) 108px; gap: 8px; padding: 6px 8px 6px 14px; }
+  .cue .cue-menu { width: 28px; height: 28px; font-size: 1.2rem; }
   .cue-text { font-size: 15.5px; }
-  .type-btn { padding: 6px; } .name { padding: 6px 2px; }
-  .round { width: 34px; height: 34px; }
-  .times .len { padding: 4px 0; }
+  .type-btn { padding: 4px; } .side-mid .name { font-size: 12px; }
+  .round { width: 30px; height: 30px; }
+  .times .len { padding: 3px 0; }
   .gap:not(.always) { display: none; }
 
   /* the navigation bar: position and Follow on top, the controls underneath; a handle folds it away */
@@ -476,10 +494,8 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 }
 
 /* ---- Cue options menu (all screens): a faint ⋯ on the cue, a yolk circle under the pointer ---- */
-.cue-menu { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); line-height: 1; opacity: 0; transition: opacity .12s; }
-.cue:hover .cue-menu, .cue-menu:focus-visible { opacity: 1; }
+.cue-menu { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); line-height: 1; }
 .cue-menu:hover:not(:disabled) { background: var(--primary); color: var(--on-primary); font-weight: 700; border: 0; }
-@media (hover: none) { .cue-menu { opacity: 1; } }
 
 /* ---- the small summary opened by a cue's note icon ---- */
 .note-pop { position: fixed; z-index: 70; width: min(300px, calc(100vw - 16px)); background: var(--panel2); border: 1px solid var(--primary); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.5); padding: 10px 12px; display: grid; gap: 8px; font-size: .85rem; }
@@ -490,19 +506,11 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .np-text.done { text-decoration: line-through; color: var(--faint); }
 .np-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
-/* Phone: one line per cue: type, now / note icons, name, length, audio, menu */
+/* Phone: the same three-row gutter as on the desktop, only narrower, and no balloons */
 @media (max-width: 720px), (max-height: 500px) and (pointer: coarse) {
-  .cue .tagcol { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 4px; min-width: 0; }
-  .cue.editing .tagcol { flex-wrap: wrap; }
-  .cue .tag { display: contents; }
-  .cue .tag .type-btn { order: 1; } .cue .tag .name { order: 2; min-width: 0; flex: 0 1 auto; text-align: left; }
-  .cue .tag-row { order: 3; flex: none; min-height: 0; gap: 4px; }
-  .cue .tag .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .cue .tag .name b { display: block; overflow: hidden; text-overflow: ellipsis; }
-  .cue .edit-actions { order: 4; }
-  .cue .times { flex-direction: row; align-items: center; }
-  .cue .times .start, .cue .times .auto { display: none; }
-  .cue .times.with-audio .start, .cue .times.with-audio .auto { margin-right: 0; }
+  .cue .name { white-space: normal; }
+  .cue .times .start { display: none; }
+}
 }
 
 .note-icons { display: inline-flex; align-items: center; gap: 2px; flex: none; }
@@ -628,3 +636,6 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .head-actions button:hover:not(:disabled) { background: rgba(239, 155, 11, .2); border-color: rgba(239, 155, 11, .55); }
 .head-actions button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 .head-actions svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.center-col[data-faces] .cue.narrator::after { display: none; }
+.center-col[data-faces] .cue.narrator { border-radius: 14px 0 0 14px; overflow: visible; }
+.center-col[data-faces] .cue.narrator .progress { border-radius: 14px 0 0 14px; }
