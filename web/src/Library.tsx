@@ -18,11 +18,13 @@ const MOVE_TYPE = 'application/x-blackbird-asset';
 /** A cue that plays a file, with its place in the story (from `GET /api/assets/:id/cues`). */
 export interface FileCue { cueId: string; sceneId: string; sceneNo: number; segmentId: string; segment: string; chapterId: string; chapter: string; text: string; chosen: boolean }
 
-export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, notes: allNotes, onOpenCue, root, hideRoot, showAlso }: {
+export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, notes: allNotes, onOpenCue, root, hideRoot, title, showAlso }: {
   /** `root`: show only this folder (e.g. a character's) as the top of the tree, instead of the whole library. */
   root?: { path: string; name: string };
   /** With `root`: show what is inside it directly (no row for the folder itself), with Add Folder and Upload buttons below. */
   hideRoot?: boolean;
+  /** With `root`: the library is a container box with this title, and its Add folder and Upload buttons are icons at the right of the header. */
+  title?: string;
   /** With `root`: a folder below it (or '' for the root itself) to open and re-read each time this number changes (the editor bumps it after a picture is added). */
   showAlso?: { n: number; folder: string };
   projectId: string; readOnly: boolean; onError: (m: string) => void; onAssetChanged: () => void;
@@ -253,15 +255,23 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
   };
 
   return (
-    <div className={root ? 'library' : 'panel-body library'}>
+    <div className={(root ? 'library' : 'panel-body library') + (title ? ' card lib-card' : '')}>
+      {title && (
+        <h2 className="card-head">
+          <span>{title}</span>
+          {!readOnly && <span className="head-actions">
+            <button type="button" title="Add folder" aria-label="Add folder" onClick={() => setNewIn(rootFolder)}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.2h7.5A2.5 2.5 0 0 1 21 9.7v7.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z" /><path d="M12 10.8v5M9.5 13.3h5" /></svg>
+            </button>
+            <button type="button" title="Upload files" aria-label="Upload files" onClick={() => { target.current = rootFolder.path; input.current?.click(); }}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9V2.8M9 5.5l3-2.7 3 2.7" /><rect x="3" y="11.5" width="18" height="8.5" rx="2.2" /><path d="M7 15.7h.01M10.5 15.7H17" /></svg>
+            </button>
+          </span>}
+        </h2>)}
       {busy && <p className="muted small">{busy}{progress !== null ? ` · ${Math.round(progress * 100)}%` : ''}</p>}
       {busy && progress !== null && <div className="upload-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}><div style={{ width: `${progress * 100}%` }} /></div>}
       {!busy && info && <p className="muted small">{info}</p>}
       {renderFolder({ ...rootFolder, writable: !readOnly }, hideRoot ? -1 : 0, true, !!hideRoot)}
-      {hideRoot && !readOnly && <div className="row lib-actions">
-        <button type="button" onClick={() => setNewIn(rootFolder)}>Add Folder</button>
-        <button type="button" className="primary" onClick={() => { target.current = rootFolder.path; input.current?.click(); }}>Upload</button>
-      </div>}
       <input ref={phInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadPlaceholder(f); e.target.value = ''; }} />
       <input ref={reInput} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; const t = reTarget.current; if (f && t) void reupload(t.file, t.folder, f); e.target.value = ''; }} />
       <input ref={input} type="file" multiple hidden onChange={(e) => { if (e.target.files) void upload(target.current, e.target.files); e.target.value = ''; }} />

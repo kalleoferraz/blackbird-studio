@@ -556,8 +556,6 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .picture-side { float: left; width: min(192px, 56%); /* text follows the circle at an even distance; the distance is cut off at the float's margin box, so the margin must be as big as the shape margin */ shape-outside: circle(50%) border-box; shape-margin: 16px; margin: 0 16px 16px 0; }
 .char-view-actions { margin-top: 14px; gap: 8px; }
 .char-view-actions button { flex: 1; }
-.lib-actions { margin-top: 10px; gap: 8px; }
-.lib-actions button { flex: 1; }
 
 /* The picture circle with a small × (on hover) that removes the picture */
 .picture-wrap { position: relative; width: 192px; max-width: 100%; }
@@ -621,3 +619,12 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .lib-info-grid .wide { grid-column: 1 / -1; }
 .lib-info-grid dt { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .lib-info-grid dd { margin: 2px 0 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* A container box with actions at the right of its header (the character's Library files) */
+.card > h2.card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.card > h2.card-head:first-child { padding-top: 5px; padding-bottom: 5px; }
+.head-actions { display: flex; gap: 4px; }
+.head-actions button { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; background: transparent; border: 1px solid transparent; color: var(--primary); }
+.head-actions button:hover:not(:disabled) { background: rgba(239, 155, 11, .2); border-color: rgba(239, 155, 11, .55); }
+.head-actions button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.head-actions svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }

@@ -129,7 +129,7 @@ export function CharacterEditor({ projectId, state, characters, readOnly, showBa
           </div>
           {error && <p className="error">{error}</p>}
           {!readOnly && <div className="row char-view-actions">
-            <button type="button" className="primary" onClick={startEdit}>Edit</button>
+            <button type="button" onClick={startEdit}>Edit</button>
           </div>}
         </>
       ) : (
@@ -143,11 +143,10 @@ export function CharacterEditor({ projectId, state, characters, readOnly, showBa
           <div className="row end"><button type="button" onClick={cancelEdit}>Cancel</button><button className="primary" disabled={!name.trim()}>Save</button></div>
         </form>
       )}
-      <h4 className="char-section">Library files</h4>
       {current?.folder
-        ? <LibraryPanel root={{ path: `Characters/${current.folder}`, name: current.folder }} hideRoot showAlso={{ n: libShow, folder: '' }} projectId={projectId} readOnly={readOnly}
+        ? <LibraryPanel root={{ path: `Characters/${current.folder}`, name: current.folder }} hideRoot title="Library files" showAlso={{ n: libShow, folder: '' }} projectId={projectId} readOnly={readOnly}
             onError={onError} onAssetChanged={onAssetChanged} notes={notes} onOpenCue={onOpenCue} />
-        : <p className="muted small">Save the character first, then its library folder is here.</p>}
+        : <div className="card lib-card"><h2 className="card-head">Library files</h2><p className="muted small">Save the character first, then its library folder is here.</p></div>}
       {current && !readOnly && <div className="char-remove">
         <button type="button" className="danger solid" disabled={current.isNarrator} title={current.isNarrator ? 'The Narrator cannot be removed' : undefined}
           onClick={() => onRemove(current)}>Remove Character</button>
