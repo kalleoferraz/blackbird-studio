@@ -10,7 +10,7 @@ export const RESTART_MS = 3000;
 export type Level = 'cue' | 'scene' | 'segment';
 /** The audio a cue plays (its chosen clip). */
 export interface NavClip { assetId: string; light: boolean; offsetMs: number; lengthMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number }
-export interface NavCue { id: string; startMs: number; lengthMs: number; clip?: NavClip | null }
+export interface NavCue { id: string; startMs: number; lengthMs: number; clip?: NavClip | null; muted?: boolean }
 export interface NavScene { id: string; startMs: number; lengthMs: number; cues: NavCue[]; /** The scene's title, when it has one. */ label?: string | null }
 export interface NavSegment { id: string; scenes: NavScene[] }
 /** `ms` is counted from the start of the scene. */
@@ -30,7 +30,7 @@ export function toNav(c: SegmentContent): NavSegment {
     id: c.segment.id,
     scenes: c.scenes.map((s) => ({
       id: s.id, startMs: s.startMs, lengthMs: s.lengthMs, label: s.label,
-      cues: s.cues.map((q) => ({ id: q.id, startMs: q.startMs, lengthMs: q.lengthMs, clip: chosenClip(q) })).sort((a, b) => a.startMs - b.startMs),
+      cues: s.cues.map((q) => ({ id: q.id, startMs: q.startMs, lengthMs: q.lengthMs, clip: chosenClip(q), muted: q.muted })).sort((a, b) => a.startMs - b.startMs),
     })),
   };
 }

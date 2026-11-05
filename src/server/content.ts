@@ -25,6 +25,7 @@ export interface CueRow {
   startMs: number;
   lengthMs: number;
   lengthAuto: boolean;
+  muted: boolean;
   textMd: string;
   clipId: string | null;
 }
@@ -38,6 +39,7 @@ const cueColumns = {
   startMs: cue.startMs,
   lengthMs: cue.lengthMs,
   lengthAuto: cue.lengthAuto,
+  muted: cue.muted,
   textMd: cue.textMd,
   clipId: cue.clipId,
 };
@@ -314,6 +316,7 @@ export interface CuePatch {
   characterId?: string | null;
   lengthMs?: number;
   lengthAuto?: boolean; // true: re-estimate now (speech) and follow the text again
+  muted?: boolean;
 }
 
 export async function updateCue(tx: Tx, cueId: string, patch: CuePatch): Promise<CueRow> {
@@ -361,7 +364,7 @@ export async function updateCue(tx: Tx, cueId: string, patch: CuePatch): Promise
   const delta = lengthMs - current.lengthMs;
   await tx
     .update(cue)
-    .set({ type, characterId, laneId, lengthMs, lengthAuto, textMd: text, updatedAt: new Date() })
+    .set({ type, characterId, laneId, lengthMs, lengthAuto, muted: patch.muted ?? current.muted, textMd: text, updatedAt: new Date() })
     .where(eq(cue.id, cueId));
   if (delta !== 0) await applyRipple(tx, current.sceneId, current.startMs + current.lengthMs, delta, [cueId]);
   if (laneId !== current.laneId) await pruneLanes(tx, seg.segmentId);

@@ -313,6 +313,8 @@ export const cue = mysqlTable(
     lengthMs: ms('length_ms').notNull(), // authoritative: a clip plays inside it
     // True until the length is set by hand or a clip becomes chosen. Speech: follows the text estimate; sfx and music: follows the chosen clip's audio length.
     lengthAuto: boolean('length_auto').notNull().default(true),
+    // A muted cue keeps its audio but does not play it with the script.
+    muted: boolean('muted').notNull().default(false),
     textMd: text('text_md').notNull(), // speech: Markdown spoken text; sfx and music: a one-line description
     createdAt: createdAt(),
     updatedAt: updatedAt(),

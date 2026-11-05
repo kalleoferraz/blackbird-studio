@@ -50,7 +50,7 @@ export class AudioPlayer {
     const upcoming = new Set<string>();
     for (const c of scene.cues) {
       const clip = c.clip;
-      if (!clip || store.recPhase(c.id)) continue; // a cue being recorded must not play its old takes into the microphone
+      if (!clip || c.muted || store.recPhase(c.id)) continue; // a cue being recorded must not play its old takes into the microphone
       const t = now - c.startMs;
       const len = Math.min(c.lengthMs, clip.lengthMs);
       if (t < 0) { if (-t <= WARM_MS) { upcoming.add(c.id); this.preload(c.id, clip); } continue; }

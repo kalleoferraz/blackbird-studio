@@ -29,11 +29,11 @@ function TypeIcon({ type }: { type: CueType }) {
     </svg>
   );
 }
-/** A speaker with sound waves: the cue has audio. */
-function AudioIcon() {
+/** A speaker with sound waves: the cue has audio; with a cross instead of the waves, the audio is muted. */
+function AudioIcon({ muted }: { muted?: boolean }) {
   return (
     <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M2 6v4h2.5L8 13V3L4.500 6H2Z" fill="currentColor" /><path d="M10.500 5.500a3.500 3.500 0 0 1 0 5M12.500 3.500a6 6 0 0 1 0 9" />
+      <path d="M2 6v4h2.5L8 13V3L4.500 6H2Z" fill="currentColor" />{muted ? <path d="M10.500 5.500l4 5M14.500 5.500l-4 5" /> : <path d="M10.500 5.500a3.500 3.500 0 0 1 0 5M12.500 3.500a6 6 0 0 1 0 9" />}
     </svg>
   );
 }
@@ -137,7 +137,7 @@ function SceneBlock({ seg, index, total, segmentId, chapterId, lanes, characters
           if (!here || here.afterCueId !== afterId) return null;
           const prev = seg.cues.find((c) => c.id === afterId);
           const pseudo: Cue = { id: 'draft', laneId: '', type: here.type, characterId: here.characterId, startMs: prev ? prev.startMs + prev.lengthMs : 0,
-            lengthMs: 0, lengthAuto: true, text: '', clipId: null, clips: [] };
+            lengthMs: 0, lengthAuto: true, muted: false, text: '', clipId: null, clips: [] };
           return <CueBlock key={'draft-' + afterId} cue={pseudo} lane={undefined} characters={characters} readOnly={false} call={call} isLast={afterId === (seg.cues[seg.cues.length - 1]?.id ?? null)}
             drafting={{ patch: (b) => setDraft({ ...here, ...b }), save: saveDraft, cancel: () => setDraft(null) }}
             startDraft={() => undefined} setConfirm={setConfirm} setPicking={setPicking} setRemoving={setRemoving} onNewCharacter={onNewCharacter} />;
@@ -282,7 +282,7 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
   const audioMissing = !!chosenClip?.fileMissing;
   const audioClass = 'audio-btn' + (audioMissing ? ' missing' : chosenClip ? ' has' : ' none');
   const audioTitle = cue.clips.length ? 'No take chosen' : 'No audio yet: record a take or choose audio';
-  const audioName = chosenClip ? (audioMissing ? `${chosenClip.name} – file missing: re-upload it in the Library` : chosenClip.name) : audioTitle;
+  const audioName = chosenClip ? (audioMissing ? `${chosenClip.name} – file missing: re-upload it in the Library` : cue.muted ? `${chosenClip.name} (muted)` : chosenClip.name) : audioTitle;
   const placeholder = cue.type === 'speech' ? 'Spoken text (Markdown)…' : cue.type === 'sfx' ? 'Describe the sound effect…' : 'Describe the music…';
   const black = colour.toLowerCase() === '#000000';
   const isNarr = cue.type === 'speech' && !!character?.isNarrator;
@@ -303,7 +303,7 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
         if (characters.some((c) => c.id === id)) void patch({ type: 'speech', characterId: id });
       }}
       style={isNarr ? ({ '--lane': colour } as CSSProperties) : undefined}
-      className={'cue ' + (dropHere ? 'drop-char ' : '') + (cue.type === 'speech' && character && !character.isNarrator ? 'faced ' : '') + cue.type + (isNarr ? ' narrator' : '') + (editing ? ' editing' : '') + (isNow ? ' playhead' : '') + (played ? ' played' : '') + (recording ? ' recording' : '') + (recPhase === 'count' ? ' armed' : '')} data-cue-id={cue.id} onClick={onCueClick}>
+      className={'cue ' + (dropHere ? 'drop-char ' : '') + (cue.type === 'speech' && character && !character.isNarrator ? 'faced ' : '') + cue.type + (isNarr ? ' narrator' : '') + (cue.muted ? ' muted' : '') + (editing ? ' editing' : '') + (isNow ? ' playhead' : '') + (played ? ' played' : '') + (recording ? ' recording' : '') + (recPhase === 'count' ? ' armed' : '')} data-cue-id={cue.id} onClick={onCueClick}>
       {isNow && <span className="progress" style={{ height: `${shown / 10}%` }} />}
       <span className={'strip' + (black ? ' black' : '') + (isNarr ? ' dotted' : '')} style={isNarr ? { borderColor: colour } : { background: colour }} />
       {isNarr && <svg className="ntail" viewBox="0 0 14 22" aria-hidden="true"><path className="fill" d="M14 0 1.5 11 14 22Z" /><path className="edge" d="M14 .5 1.5 11 14 21.5" /></svg>}
@@ -327,7 +327,6 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
           {!editing && (!drafting || isNow) && (
             <div className="tag-row">
               {isNow && <span className="now-tag">now</span>}
-              {!drafting && place && <CueNoteIcons cueId={cue.id} segmentId={place.segmentId} sceneId={place.sceneId} chapterId={place.chapterId} />}
             </div>)}
           {editing && (
             <div className="edit-actions">
@@ -349,6 +348,7 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
             ]}>⋯</MenuButton>}
           </>)}
         </div>
+        <div className="side-center">
         <div className="side-row side-mid">
           {cue.type === 'speech' && !readOnly ?
             <MenuButton className="name" items={charMenu} title="Character"><b style={nameStyle}>{name}</b></MenuButton> :
@@ -357,6 +357,7 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
             <MenuButton className="type-btn" items={typeMenu} title={TYPE_LABEL[cue.type]}><TypeIcon type={cue.type} /></MenuButton>}
         </div>
         <div className="side-row side-bot">
+          {!editing && !drafting && place && <div className="tag-row"><CueNoteIcons cueId={cue.id} segmentId={place.segmentId} sceneId={place.sceneId} chapterId={place.chapterId} /></div>}
           <div className={'times' + (showAudio ? ' with-audio' : '')}>
             <span className="start" title="Start within the scene">{formatClock(cue.startMs)}</span>
             <div className="len-row">
@@ -365,10 +366,11 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
                   onKeyDown={(e) => { if (e.key === 'Enter') commitLen(); if (e.key === 'Escape') setEditLen(null); }} />
               ) : drafting ? <span className="len">–</span> : readOnly ? <span className={'len' + estimated}>{formatTenths(cue.lengthMs)}</span> : (
                 <MenuButton className={'len' + estimated} items={lengthMenu} title={`${formatSeconds(cue.lengthMs)}${cue.lengthAuto ? ' · follows the text (auto)' : ''}`}>{formatTenths(cue.lengthMs)}</MenuButton>)}
-              {showAudio && (readOnly ? <span className={audioClass} title={audioName}><AudioIcon /></span> :
-                <MenuButton className={audioClass} items={audioMenu} title={audioName}><AudioIcon /></MenuButton>)}
+              {showAudio && (readOnly ? <span className={audioClass} title={audioName}><AudioIcon muted={cue.muted} /></span> :
+                <MenuButton className={audioClass} items={audioMenu} title={audioName}><AudioIcon muted={cue.muted} /></MenuButton>)}
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>

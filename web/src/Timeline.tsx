@@ -352,7 +352,7 @@ const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top,
     return () => { live = false; };
   }, [clip?.assetId, clip?.hasPeaks, clip?.status]);
   return (
-    <div className={'tl-cue' + (now ? ' now' : '') + (sel ? ' sel' : '') + (past ? ' past' : '') + (dragging ? ' dragging' : '') + (clip ? '' : ' empty')} data-cue-id={cue.id}
+    <div className={'tl-cue' + (now ? ' now' : '') + (sel ? ' sel' : '') + (past ? ' past' : '') + (dragging ? ' dragging' : '') + (clip ? '' : ' empty') + (cue.muted ? ' muted' : '')} data-cue-id={cue.id}
       style={{ left, width, top: top + 3, height: LANE_H - 6, '--c': colour } as React.CSSProperties}
       onPointerDown={onMove} onContextMenu={onMenu} title={cue.text || cue.type}>
       {clip && peaks && <Wave peaks={peaks} offsetMs={clip.offsetMs} clipMs={clipMs} lengthMs={lengthMs} width={width} colour={colour} />}

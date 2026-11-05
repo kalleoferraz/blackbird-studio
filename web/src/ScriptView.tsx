@@ -107,6 +107,26 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
     return () => io.disconnect();
   }, [content?.segment.id]);
 
+  // The scene at the top of the view, named in the slim header too (a scene without a title adds nothing).
+  const [topScene, setTopScene] = useState<string | null>(null);
+  useEffect(() => {
+    const root = mainRef.current;
+    if (!root || !content) { setTopScene(null); return; }
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const line = root.getBoundingClientRect().top + 31;
+      let id: string | null = null;
+      root.querySelectorAll<HTMLElement>('.scene[data-scene-id]').forEach((s) => { if (s.getBoundingClientRect().top <= line) id = s.dataset.sceneId ?? null; });
+      setTopScene(id);
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(update); };
+    update();
+    root.addEventListener('scroll', onScroll, { passive: true });
+    return () => { root.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf); };
+  }, [content]);
+  const topSceneLabel = content?.scenes.find((s) => s.id === topScene)?.label ?? null;
+
   const readOnly = project?.role === 'viewer';
   // The project's character placeholder (an image called profile_placeholder in the Characters folder).
   const [placeholder, setPlaceholder] = useState<string | null>(null);
@@ -325,6 +345,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
             <>
             <div className="where-wrap"><div className={'where' + (titlesGone ? ' on' : '')} onClick={() => mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} title="Back to the top" data-testid="where">
               <b>{content.segment.chapterTitle}</b><span className="sep">›</span><span>{content.segment.title}</span>
+              {topSceneLabel && <><span className="sep">›</span><span>{topSceneLabel}</span></>}
             </div></div>
             <div className="doc">
               <div ref={titlesRef}>

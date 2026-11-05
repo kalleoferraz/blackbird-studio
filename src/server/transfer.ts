@@ -87,6 +87,7 @@ export async function buildBundle(q: Q, projectId: string): Promise<Json> {
                   startMs: c.startMs,
                   lengthMs: c.lengthMs,
                   lengthAuto: c.lengthAuto,
+                  muted: c.muted,
                   text: c.textMd,
                   clips: clips.filter((k) => k.cueId === c.id).map((k) => ({
                     asset: assetNo.get(k.assetId)!,
@@ -193,7 +194,7 @@ export function cleanFolder(raw: string): string | null {
 }
 
 interface ParsedClip { asset: number; number: number; offsetMs: number; lengthMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number; loops: number; origin: 'human-recorded' | 'generated' | 'voice-converted'; chosen: boolean; createdAt: Date | null }
-interface ParsedCue { lane: number; type: 'speech' | 'sfx' | 'music'; character: number | null; startMs: number; lengthMs: number; lengthAuto: boolean; text: string; clips: ParsedClip[] }
+interface ParsedCue { lane: number; type: 'speech' | 'sfx' | 'music'; character: number | null; startMs: number; lengthMs: number; lengthAuto: boolean; muted: boolean; text: string; clips: ParsedClip[] }
 interface ParsedNote {
   type: 'comment' | 'reference' | 'task'; authorKind: 'user' | 'system' | 'llm'; text: string; refKey: string | null; link: string | null;
   doneAt: Date | null; createdAt: Date; editedAt: Date | null; deletedAt: Date | null;
@@ -307,7 +308,7 @@ export function parseBundle(raw: unknown) {
           return {
             lane: int(qo.lane, `${wq}.lane`, 0, Math.max(0, lanes.length - 1)), type: oneOf(qo.type, `${wq}.type`, ['speech', 'sfx', 'music'] as const),
             character: charRef(qo.character, `${wq}.character`), startMs: int(qo.startMs, `${wq}.startMs`, 0, MAX_SCENE_MS), lengthMs: int(qo.lengthMs, `${wq}.lengthMs`, 100, MAX_SCENE_MS),
-            lengthAuto: bool(qo.lengthAuto, `${wq}.lengthAuto`), text: str(qo.text, `${wq}.text`, 60_000, 0), clips,
+            lengthAuto: bool(qo.lengthAuto, `${wq}.lengthAuto`), muted: qo.muted === undefined ? false : bool(qo.muted, `${wq}.muted`), text: str(qo.text, `${wq}.text`, 60_000, 0), clips,
           };
         });
         cueTotal += cues.length;
@@ -481,7 +482,7 @@ export async function importBundle(userId: string, raw: unknown, folderOverride?
           if (sc.cues.length) {
             await tx.insert(cue).values(sc.cues.map((q, qi) => ({
               id: ids[qi]!, sceneId, laneId: laneIds[q.lane]!, type: q.type, characterId: charId(q.character), clipId: null,
-              startMs: q.startMs, lengthMs: q.lengthMs, lengthAuto: q.lengthAuto, textMd: q.text, createdAt: now, updatedAt: now,
+              startMs: q.startMs, lengthMs: q.lengthMs, lengthAuto: q.lengthAuto, muted: q.muted, textMd: q.text, createdAt: now, updatedAt: now,
             })));
           }
           for (const [qi, q] of sc.cues.entries()) {

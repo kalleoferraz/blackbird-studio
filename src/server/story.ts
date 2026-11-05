@@ -118,6 +118,7 @@ async function segmentContent(tx: Q, segmentId: string) {
         startMs: c.startMs,
         lengthMs: c.lengthMs,
         lengthAuto: c.lengthAuto,
+        muted: c.muted,
         text: c.textMd,
         clipId: c.clipId,
         clips: clips.get(c.id) ?? [],
@@ -149,6 +150,8 @@ function readCuePatch(body: Record<string, unknown>): CuePatch {
   if (length !== undefined) patch.lengthMs = length;
   const auto = optBool(body, 'lengthAuto');
   if (auto !== undefined) patch.lengthAuto = auto;
+  const muted = optBool(body, 'muted');
+  if (muted !== undefined) patch.muted = muted;
   return patch;
 }
 

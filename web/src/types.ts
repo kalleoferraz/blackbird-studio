@@ -37,7 +37,7 @@ export interface Clip {
 }
 export interface Cue {
   id: string; laneId: string; type: CueType; characterId: string | null;
-  startMs: number; lengthMs: number; lengthAuto: boolean; text: string; clipId: string | null; clips: Clip[];
+  startMs: number; lengthMs: number; lengthAuto: boolean; muted: boolean; text: string; clipId: string | null; clips: Clip[];
 }
 export interface Scene { id: string; position: number; label: string | null; startMs: number; lengthMs: number; cues: Cue[] }
 export interface Lane { id: string; title: string; colour: string; characterId: string | null; position: number; auto: boolean }

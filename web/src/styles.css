@@ -639,3 +639,10 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .center-col[data-faces] .cue.narrator::after { display: none; }
 .center-col[data-faces] .cue.narrator { border-radius: 14px 0 0 14px; overflow: visible; }
 .center-col[data-faces] .cue.narrator .progress { border-radius: 14px 0 0 14px; }
+/* Muted audio: the cue is fainter unless it is the selected one (the script's current cue, the timeline's selection) */
+.cue.muted:not(.playhead):not(.editing):not(.recording) .cue-main, .cue.muted:not(.playhead):not(.editing):not(.recording) .cue-icon { opacity: .55; }
+.tl-cue.muted:not(.sel):not(.now):not(.dragging) { opacity: .45; }
+/* The gutter: the character/type and the tags/length/audio rows are centered on the cue; "now" and the menu stay at its top */
+.cue-side { position: relative; justify-content: center; min-height: 80px; }
+.cue-side > .side-top { position: absolute; top: 0; right: 0; left: 0; z-index: 1; }
+.side-center { display: flex; flex-direction: column; gap: 2px; padding-top: 12px; min-width: 0; }
