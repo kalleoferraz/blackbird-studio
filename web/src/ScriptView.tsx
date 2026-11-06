@@ -12,8 +12,9 @@ import { ago, cueCountOrder, inOrder } from './format.ts';
 import { BlackbirdIcon } from './Brand.tsx';
 import { MenuButton, errorText, useIsMobile, useLocalState, type MenuItem } from './ui.tsx';
 import { NavBar } from './NavBar.tsx';
+import { accountItems } from './AccountMenu.tsx';
 import { NavContext, PlaybackStore } from './playback.ts';
-import { toNav } from './nav.ts';
+import { toNav, type Pos } from './nav.ts';
 import { recordTake } from './recording.ts';
 import { TrimDialog, type TrimRequest } from './TrimDialog.tsx';
 import { Timeline } from './Timeline.tsx';
@@ -21,7 +22,7 @@ import { AudioPlayer } from './audio-playback.ts';
 import { LibPlayContext, LibraryPlayer, type LibTrack } from './libplayer.ts';
 import { FileInfoPanel } from './Library.tsx';
 
-export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: string; segmentId?: string }) {
+export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { me: Me; projectId: string; segmentId?: string; onAccount: () => void; onLogout: () => void }) {
   const [project, setProject] = useState<ProjectCard | null>(null);
   const [story, setStory] = useState<Story | null>(null);
   const [content, setContent] = useState<SegmentContent | null>(null);
@@ -81,9 +82,17 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   useEffect(() => { void loadNotes(); }, [loadNotes]);
   useEffect(() => { void loadProject(); void loadCharacters(); void loadStory().catch((e) => setError(errorText(e))); }, [loadProject, loadCharacters, loadStory]);
 
-  // Without a segment in the address, open the first one.
+  // Where the script stopped last time (the playhead's place), kept in the browser per project: opening the project returns there.
+  const resumeKey = `rs.resume.${projectId}`;
+  const resume = useRef<Pos | null>((() => { try { const r = JSON.parse(localStorage.getItem(resumeKey) ?? 'null'); return r && typeof r.segmentId === 'string' && Number.isFinite(r.scene) && Number.isFinite(r.ms) ? (r as Pos) : null; } catch { return null; } })());
+  const resumeScroll = useRef(false);
+  // Without a segment in the address, open the one the script stopped in, or the first one.
   useEffect(() => {
-    if (!segmentId && story) { const first = story.chapters.flatMap((c) => c.segments)[0]; if (first) location.replace(`#/p/${projectId}/s/${first.id}`); }
+    if (!segmentId && story) {
+      const all = story.chapters.flatMap((c) => c.segments);
+      const target = all.find((s) => s.id === resume.current?.segmentId) ?? all[0];
+      if (target) location.replace(`#/p/${projectId}/s/${target.id}`);
+    }
   }, [segmentId, story, projectId]);
   useEffect(() => {
     if (!segmentId) { setContent(null); return; }
@@ -254,6 +263,8 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
   const expectedNav = useRef<string | null>(null);
   useEffect(() => {
     if (!segmentId) return;
+    if (resume.current && resume.current.segmentId === segmentId) { const r = resume.current; resume.current = null; resumeScroll.current = true; playback.seek(r); return; }
+    resume.current = null;
     if (expectedNav.current === segmentId) { expectedNav.current = null; return; }
     if (playback.wantedSegment() !== segmentId) playback.jump(segmentId, 'start', false);
   }, [segmentId, playback]);
@@ -271,6 +282,16 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
     api<SegmentContent>('GET', `/api/segments/${wanted}`).then((c) => live && playback.setData(toNav(c))).catch(() => undefined);
     return () => { live = false; };
   }, [wanted, content, follow, editing, playback]);
+  // Remember the playhead's place; on opening, scroll to it once.
+  useEffect(() => {
+    const p = playback.pos;
+    if (p) { try { localStorage.setItem(resumeKey, JSON.stringify({ segmentId: p.segmentId, scene: p.scene, ms: p.ms })); } catch { /* ignore */ } }
+  }, [wanted, curCue, curScene, playback, resumeKey]);
+  useEffect(() => {
+    if (!resumeScroll.current) return;
+    const el = (curCue && document.querySelector(`[data-cue-id="${curCue}"]`)) || (curScene && document.querySelector(`[data-scene-id="${curScene}"]`));
+    if (el) { resumeScroll.current = false; (el as HTMLElement).scrollIntoView({ block: 'center' }); }
+  }, [curCue, curScene, content]);
   // Follow: scroll to the cue (or empty scene) under the playhead when it changes, and when Follow is switched on.
   const scrolled = useRef('');
   useEffect(() => {
@@ -318,7 +339,7 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
             {(mview !== 'script' || readOnly) && <span>{mview === 'script' ? 'view only' : project.title + (readOnly ? ' · view only' : '')}</span>}</div>
           <MenuButton className="m-menu" title="Menu" items={mobileMenu(mview, (v) => (v === 'characters' && mview === 'characters' && dialog ? closeEditor(!!dialog.then) : showView(v)), {
             readOnly: !!readOnly, saving, status: project.dirtySince ? 'unsaved' : ago(project.lastSnapshotAt), onSnapshot: () => void saveSnapshot(),
-            onProject: () => go(`/p/${projectId}`), onProjects: () => go('/') })}>
+            onProject: () => go(`/p/${projectId}`), onProjects: () => go('/'), onAccount, onLogout })}>
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
           </MenuButton>
         </header>
@@ -329,9 +350,15 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
         {project.subtitle && <span className="topbar-sub" title={project.subtitle}>{project.subtitle}</span>}<span className="grow" />
         {error && <span className="error inline-error" onClick={() => setError('')}>{error}</span>}
         {saved && <span className="muted">{saved}</span>}
-        <span className="muted small">{project.dirtySince ? 'Unsaved changes' : `Snapshot ${ago(project.lastSnapshotAt)}`}</span>
-        {!readOnly && <button onClick={() => void saveSnapshot()} disabled={saving}>{saving ? 'Saving…' : 'Save snapshot'}</button>}
-        <span className="muted small">{me.user.displayName}{readOnly && ' · view only'}</span>
+        <span className="muted small">{project.dirtySince ? 'Unsaved changes' : `Snapshot ${ago(project.lastSnapshotAt)}`}{readOnly && ' · view only'}</span>
+        <MenuButton className="m-menu" title="Menu" items={[
+          ...(readOnly ? [] : [{ label: saving ? 'Saving…' : 'Save snapshot', hint: project.dirtySince ? 'unsaved' : ago(project.lastSnapshotAt), disabled: saving, onClick: () => void saveSnapshot() } as MenuItem]),
+          { label: 'Project properties', onClick: () => go(`/p/${projectId}`) },
+          { label: 'All projects', onClick: () => go('/') },
+          'sep', ...accountItems(onAccount, onLogout),
+        ]}>
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+        </MenuButton>
       </header>)}
       {isMobile && (error || saved) && <div className={'m-banner ' + (error ? 'error' : 'muted')} onClick={() => { setError(''); setSaved(''); }}>{error || saved}</div>}
       <div className="script-body" data-mview={isMobile ? mview : undefined} style={{ '--lw': `${leftW}px`, '--rw': `${rightW}px` } as CSSProperties}>
@@ -353,7 +380,8 @@ export function ScriptView({ me, projectId, segmentId }: { me: Me; projectId: st
               <TitleEdit className="segment-title" value={content.segment.title} disabled={!!readOnly} onSave={(v) => renameTitle('segment', content.segment.id, v)} />
               </div>
               <Writing content={content} characters={characters} readOnly={!!readOnly} onContent={onContent} onError={setError}
-                onNewCharacter={(then) => { if (isMobile) showView('characters'); openEditor({ then }); }} />
+                onNewCharacter={(then) => { if (isMobile) showView('characters'); openEditor({ then }); }}
+                onOpenCharacter={readOnly ? undefined : (c) => { if (isMobile) showView('characters'); openEditor({ character: c }); }} />
             </div>
             </>
           ) : <p className="muted">Select or add a segment.</p>}
@@ -390,14 +418,16 @@ const MOBILE_VIEWS: { id: MobileView; label: string }[] = [
 
 /** The phone's menu: which panel fills the screen, then the actions the desktop top bar has. */
 function mobileMenu(current: MobileView, show: (v: MobileView) => void, o: {
-  readOnly: boolean; saving: boolean; status: string; onSnapshot: () => void; onProject: () => void; onProjects: () => void;
+  readOnly: boolean; saving: boolean; status: string; onSnapshot: () => void; onProject: () => void; onProjects: () => void; onAccount: () => void; onLogout: () => void;
 }): MenuItem[] {
   return [
     ...MOBILE_VIEWS.map((v): MenuItem => ({ label: v.label, checked: v.id === current, onClick: () => show(v.id) })),
     'sep',
     ...(o.readOnly ? [] : [{ label: o.saving ? 'Saving…' : 'Save snapshot', hint: o.status, disabled: o.saving, onClick: o.onSnapshot } as MenuItem]),
-    { label: 'Project details', onClick: o.onProject },
+    { label: 'Project properties', onClick: o.onProject },
     { label: 'All projects', onClick: o.onProjects },
+    'sep',
+    ...accountItems(o.onAccount, o.onLogout),
   ];
 }
 

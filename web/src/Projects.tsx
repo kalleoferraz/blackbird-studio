@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, api, assetUrl } from './api.ts';
 import { go } from './App.tsx';
-import { ChangePassword } from './Login.tsx';
+import { AccountMenu } from './AccountMenu.tsx';
 import type { Language, Me, ProjectCard } from './types.ts';
 import { ago, formatBytes } from './format.ts';
 import { Brand } from './Brand.tsx';
@@ -15,10 +15,9 @@ export const TYPES = [
   { id: 'series', label: 'Series' }, { id: 'podcast', label: 'Podcast' },
 ];
 
-export function Projects({ me, onLogout, onMe }: { me: Me; onLogout: () => void; onMe: (m: Me) => void }) {
+export function Projects({ me, onLogout, onAccount }: { me: Me; onLogout: () => void; onAccount: () => void }) {
   const [list, setList] = useState<ProjectCard[] | null>(null);
   const [creating, setCreating] = useState(false);
-  const [password, setPassword] = useState(false);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [clash, setClash] = useState<{ file: unknown; folder: string; suggestion: string; existing?: { id: string; title: string } } | null>(null);
@@ -37,7 +36,7 @@ export function Projects({ me, onLogout, onMe }: { me: Me; onLogout: () => void;
       const r = await api<{ id: string }>('POST', '/api/projects/import', repoFolder === undefined ? { file } : { file, repoFolder });
       setClash(null);
       if (zip.current) setRestoring({ projectId: r.id, title: 'Importing files' }); // the project exists now; its files follow
-      else go(`/p/${r.id}`);
+      else go(`/p/${r.id}/s`);
     } catch (e) {
       if (e instanceof ApiError && e.code === 'folder_taken') setClash({ file, folder: e.body.folder, suggestion: e.body.suggestion, existing: e.body.existing });
       else { setClash(null); setMessage(errorText(e)); }
@@ -61,13 +60,11 @@ export function Projects({ me, onLogout, onMe }: { me: Me; onLogout: () => void;
     if (data.version !== 1) { setMessage(`"${f.name}" was made by a different version of the app (file version ${String(data.version)}).`); return; }
     await send(data);
   };
-  if (password) return <ChangePassword onDone={(m) => { onMe(m); setPassword(false); }} onCancel={() => setPassword(false)} />;
   return (
     <div className="page">
       <header className="topbar"><Brand /><span className="grow" />
-        <span className="muted">{me.user.displayName}</span>
         <InstallButton />
-        <button onClick={() => setPassword(true)}>Password</button><button onClick={onLogout}>Sign out</button></header>
+        <AccountMenu me={me} onAccount={onAccount} onLogout={onLogout} /></header>
       <div className="row"><h1 className="grow">Projects</h1><button disabled={busy} onClick={() => picker.current?.click()}>Import</button>
         <button className="primary" onClick={() => setCreating(true)}>New project</button>
         <input ref={picker} type="file" hidden accept=".zip,.json,application/zip,application/json" onChange={(e) => { const f = e.target.files?.[0]; if (f) void pick(f); e.target.value = ''; }} /></div>
@@ -75,7 +72,7 @@ export function Projects({ me, onLogout, onMe }: { me: Me; onLogout: () => void;
       {list === null ? <p className="muted">Loading…</p> : list.length === 0 ? <p className="muted">No projects yet. Create the first one.</p> : (
         <div className="grid">
           {list.map((p) => (
-            <a key={p.id} className="project-card" href={`#/p/${p.id}`}>
+            <a key={p.id} className="project-card" href={`#/p/${p.id}/s`}>
               {p.coverAssetId && <div className="pc-cover"><img src={assetUrl(p.coverAssetId, true)} alt="" loading="lazy" /></div>}
               <div className="pc-type">{TYPES.find((t) => t.id === p.type)?.label ?? p.type} · {p.language}{p.role === 'viewer' && ' · view only'}</div>
               <div className="pc-title">{p.title}</div>
@@ -86,8 +83,8 @@ export function Projects({ me, onLogout, onMe }: { me: Me; onLogout: () => void;
         </div>)}
       {clash && <FolderClash folder={clash.folder} suggestion={clash.suggestion} busy={busy} existing={zip.current ? clash.existing : undefined} onCancel={() => setClash(null)} onImport={(f) => void send(clash.file, f)}
         onAddFiles={(e) => { setClash(null); setRestoring({ projectId: e.id, title: `Adding files to ${e.title}` }); }} />}
-      {restoring && zip.current && <RestoreLibrary projectId={restoring.projectId} zip={zip.current} title={restoring.title} onClose={() => { const id = restoring.projectId; setRestoring(null); go(`/p/${id}`); }} />}
-      {creating && <NewProject onClose={() => setCreating(false)} onCreated={(id) => go(`/p/${id}`)} />}
+      {restoring && zip.current && <RestoreLibrary projectId={restoring.projectId} zip={zip.current} title={restoring.title} onClose={() => { const id = restoring.projectId; setRestoring(null); go(`/p/${id}/s`); }} />}
+      {creating && <NewProject onClose={() => setCreating(false)} onCreated={(id) => go(`/p/${id}/s`)} />}
     </div>
   );
 }

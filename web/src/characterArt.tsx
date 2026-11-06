@@ -28,12 +28,13 @@ export function Initials({ name, colour }: { name: string; colour: string }) {
  * and a small tail from the cue pointing at it, like a speech bubble. Whether they show and how large the circle is
  * (--face) is decided by the script column (data-faces) and styles.css.
  */
-export function CueFace({ character, colour }: { character: Character; colour: string }) {
+export function CueFace({ character, colour, onOpen }: { character: Character; colour: string; onOpen?: () => void }) {
   const placeholder = usePlaceholder();
   return (
     <>
-      <span className="cue-tail" style={{ background: colour }} aria-hidden />
-      <span className="cue-face avatar" style={{ borderColor: colour }} title={character.name} aria-hidden>
+      <span className={'cue-tail' + (onOpen ? ' open' : '')} style={{ background: colour }} aria-hidden onClick={onOpen && ((e) => { e.stopPropagation(); onOpen(); })} />
+      <span className={'cue-face avatar' + (onOpen ? ' open' : '')} style={{ borderColor: colour }} title={onOpen ? `Open ${character.name}` : character.name} aria-hidden={onOpen ? undefined : true}
+        role={onOpen ? 'button' : undefined} onClick={onOpen && ((e) => { e.stopPropagation(); onOpen(); })}>
         {character.pictureAssetId
           ? <img src={assetUrl(character.pictureAssetId, true)} alt="" />
           : <>{placeholder && <img className="placeholder-img" src={placeholder} alt="" />}<Initials name={character.name} colour={colour} /></>}

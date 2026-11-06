@@ -646,3 +646,18 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .cue-side { position: relative; justify-content: center; min-height: 80px; }
 .cue-side > .side-top { position: absolute; top: 0; right: 0; left: 0; z-index: 1; }
 .side-center { display: flex; flex-direction: column; gap: 2px; padding-top: 12px; min-width: 0; }
+/* Markdown in a cue's text (not while editing) */
+.cue-text p { margin: 0; } .cue-text p + p, .cue-text ul, .cue-text ol, .cue-text blockquote, .cue-text .md-h { margin-top: .45em; }
+.cue-text ul, .cue-text ol { margin-bottom: 0; padding-left: 1.3em; }
+.cue-text blockquote { margin-bottom: 0; margin-left: 0; padding-left: .8em; border-left: 2px solid var(--line); color: var(--muted); }
+.cue-text .md-h { margin-bottom: 0; font-size: 1.05em; font-weight: 700; }
+.cue-text code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; padding: 0 .25em; border-radius: 3px; background: var(--line); }
+.cue-text a { color: var(--primary); text-decoration: underline; }
+/* The balloon opens its character */
+.center-col[data-faces] .cue.faced .cue-face.open, .center-col[data-faces] .cue.faced .cue-tail.open { pointer-events: auto; cursor: pointer; }
+.cue-face.open:hover { filter: brightness(1.25); }
+.script .topbar .m-menu { display: grid; place-items: center; padding: 4px 8px; flex: none; }
+.acct-btn { white-space: nowrap; }
+/* Dragging a cue: a line shows where it lands */
+.drop-before { box-shadow: 0 -2px 0 var(--primary); } .drop-after { box-shadow: 0 2px 0 var(--primary); }
+.scene-head.drop-start { box-shadow: 0 2px 0 var(--primary); }

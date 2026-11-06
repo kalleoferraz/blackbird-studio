@@ -10,6 +10,7 @@ import { loadPeaks, type Peaks } from './peaks.ts';
 import { Menu, errorText, useLocalState } from './ui.tsx';
 import { AudioPicker } from './AudioPicker.tsx';
 import { audioMenuItems } from './audioMenu.ts';
+import { plainMd } from './md.tsx';
 import { RemoveAudioDialog } from './RemoveAudio.tsx';
 
 const LANE_H = 54;
@@ -356,7 +357,7 @@ const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top,
       style={{ left, width, top: top + 3, height: LANE_H - 6, '--c': colour } as React.CSSProperties}
       onPointerDown={onMove} onContextMenu={onMenu} title={cue.text || cue.type}>
       {clip && peaks && <Wave peaks={peaks} offsetMs={clip.offsetMs} clipMs={clipMs} lengthMs={lengthMs} width={width} colour={colour} />}
-      <span className="tl-text">{cue.text || (cue.type === 'speech' ? '' : cue.type)}</span>
+      <span className="tl-text">{plainMd(cue.text) || (cue.type === 'speech' ? '' : cue.type)}</span>
       {!readOnly && <div className="tl-grip" onPointerDown={onResize} />}
     </div>
   );

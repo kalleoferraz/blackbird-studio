@@ -9,6 +9,7 @@ import { audioMenuItems } from './audioMenu.ts';
 import { RemoveAudioDialog } from './RemoveAudio.tsx';
 import { CueNoteIcons, useNotes } from './notesContext.tsx';
 import { CueFace } from './characterArt.tsx';
+import { renderMd } from './md.tsx';
 
 interface Props {
   content: SegmentContent;
@@ -17,6 +18,8 @@ interface Props {
   onContent: (c: SegmentContent) => void;
   onError: (message: string) => void;
   onNewCharacter: (then: (c: Character) => void) => void;
+  /** A click on a cue's balloon opens that character. */
+  onOpenCharacter?: (c: Character) => void;
 }
 
 /** Simple monochrome type icons: a mouth for speech, a waveform for sfx, a note for music. */
@@ -38,9 +41,13 @@ function AudioIcon({ muted }: { muted?: boolean }) {
   );
 }
 
+/** The cue being dragged to another place in the segment (a drag's data cannot be read while it is over a target). */
+const CUE_DRAG = 'application/x-blackbird-cue';
+const dragCue: { id: string | null } = { id: null };
+
 const TYPE_LABEL: Record<CueType, string> = { speech: 'Speech', sfx: 'Sound effect', music: 'Music' };
 
-export function Writing({ content, characters, readOnly, onContent, onError, onNewCharacter }: Props) {
+export function Writing({ content, characters, readOnly, onContent, onError, onNewCharacter, onOpenCharacter }: Props) {
   const [confirm, setConfirm] = useState<null | { title: string; message: string; label: string; run: () => Promise<void> }>(null);
   const [picking, setPicking] = useState<null | { cue: Cue; colour: string }>(null);
   const [removing, setRemoving] = useState<Cue | null>(null);
@@ -75,7 +82,7 @@ export function Writing({ content, characters, readOnly, onContent, onError, onN
       {content.scenes.map((seg, i) => (
         <SceneBlock key={seg.id} seg={seg} index={i} total={total} segmentId={content.segment.id} chapterId={content.segment.chapterId} lanes={lanes} characters={characters} readOnly={readOnly}
           draft={draft} setDraft={setDraft} startDraft={startDraft} saveDraft={saveDraft}
-          call={call} setConfirm={setConfirm} setPicking={setPicking} setRemoving={setRemoving} onNewCharacter={onNewCharacter} />
+          call={call} setConfirm={setConfirm} setPicking={setPicking} setRemoving={setRemoving} onNewCharacter={onNewCharacter} onOpenCharacter={onOpenCharacter} />
       ))}
       {!readOnly && <button className="add-scene" onClick={() => void call('POST', `/api/segments/${content.segment.id}/scenes`, {})}>+ Add scene</button>}
       {picking && <AudioPicker cue={picking.cue} content={content} colour={picking.colour} onContent={onContent} onError={onError} onClose={() => setPicking(null)} />}
@@ -92,9 +99,9 @@ interface DraftApi {
   startDraft: (sceneId: string, afterCueId: string | null) => void; saveDraft: (text: string, more: boolean) => Promise<boolean>;
 }
 
-function SceneBlock({ seg, index, total, segmentId, chapterId, lanes, characters, readOnly, draft, setDraft, startDraft, saveDraft, call, setConfirm, setPicking, setRemoving, onNewCharacter }: DraftApi & {
+function SceneBlock({ seg, index, total, segmentId, chapterId, lanes, characters, readOnly, draft, setDraft, startDraft, saveDraft, call, setConfirm, setPicking, setRemoving, onNewCharacter, onOpenCharacter }: DraftApi & {
   seg: Scene; index: number; total: number; segmentId: string; chapterId: string; lanes: Map<string, Lane>; characters: Character[]; readOnly: boolean; call: Call;
-  setConfirm: (c: any) => void; setPicking: (p: { cue: Cue; colour: string } | null) => void; setRemoving: (c: Cue | null) => void; onNewCharacter: Props['onNewCharacter'];
+  setConfirm: (c: any) => void; setPicking: (p: { cue: Cue; colour: string } | null) => void; setRemoving: (c: Cue | null) => void; onNewCharacter: Props['onNewCharacter']; onOpenCharacter: Props['onOpenCharacter'];
 }) {
   // The scene's title is stored in `label`; it is edited from the scene's "⋯" menu.
   const [label, setLabel] = useState(seg.label ?? '');
@@ -112,12 +119,28 @@ function SceneBlock({ seg, index, total, segmentId, chapterId, lanes, characters
     { label: 'Merge with previous', disabled: index === 0, onClick: () => void call('POST', `/api/scenes/${seg.id}/merge-previous`) },
     { label: 'Delete scene', danger: true, disabled: total === 1, onClick: () => setConfirm({
       title: 'Delete scene', label: 'Delete',
-      message: seg.cues.length ? `Delete this scene and its ${seg.cues.length} cue${seg.cues.length === 1 ? '' : 's'}?` : 'Delete this empty scene?',
+      message: seg.cues.length ? `This scene has ${seg.cues.length} cue${seg.cues.length === 1 ? '' : 's'}. Are you sure you want to remove ${seg.cues.length === 1 ? 'it' : 'them'} permanently?` : 'Delete this empty scene?',
       run: async () => { await call('DELETE', `/api/scenes/${seg.id}`); } }) },
   ];
+  // Dragging a cue onto another: it goes before or after that one (the half the pointer is in), in this or another scene.
+  const [dropAt, setDropAt] = useState<string | null>(null);
+  const dropCue = (afterId: string | null) => {
+    const id = dragCue.id;
+    dragCue.id = null; setDropAt(null);
+    if (!id || id === afterId) return;
+    const at = seg.cues.findIndex((c) => c.id === id);
+    if (at >= 0 && (afterId === null ? at === 0 : seg.cues[at - 1]?.id === afterId)) return; // already there
+    void call('POST', `/api/cues/${id}/move`, { sceneId: seg.id, afterCueId: afterId });
+  };
+  const dragOn = (e: RDragEvent) => !readOnly && dragCue.id !== null && e.dataTransfer.types.includes(CUE_DRAG);
   return (
-    <section className="scene" data-scene-id={seg.id}>
-      <div className="scene-head">
+    <section className="scene" data-scene-id={seg.id}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(null); }}
+      onDragOver={(e) => { if (seg.cues.length === 0 && dragOn(e)) { e.preventDefault(); setDropAt('start'); } }}
+      onDrop={(e) => { if (seg.cues.length === 0 && dragOn(e)) { e.preventDefault(); dropCue(null); } }}>
+      <div className={'scene-head' + (dropAt === 'start' ? ' drop-start' : '')}
+        onDragOver={(e) => { if (dragOn(e)) { e.preventDefault(); e.stopPropagation(); setDropAt('start'); } }}
+        onDrop={(e) => { if (dragOn(e)) { e.preventDefault(); e.stopPropagation(); dropCue(null); } }}>
         {editingTitle ? (
           <input className="seg-label" autoFocus placeholder="Scene title" maxLength={100} value={label} onChange={(e) => setLabel(e.target.value)}
             onBlur={saveTitle}
@@ -147,12 +170,14 @@ function SceneBlock({ seg, index, total, segmentId, chapterId, lanes, characters
           {seg.cues.length === 0 && draftAfter(null)}
           {seg.cues.length === 0 && !readOnly && <Gap seg={seg} afterId={null} canSplit={false} call={call} onAdd={add} last always />}
           {seg.cues.map((c, i) => (
-            <div key={c.id}>
+            <div key={c.id} className={dropAt === c.id + ':b' ? 'drop-before' : dropAt === c.id + ':a' ? 'drop-after' : undefined}
+              onDragOver={(e) => { if (!dragOn(e)) return; e.preventDefault(); e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setDropAt(c.id + (e.clientY > r.top + r.height / 2 ? ':a' : ':b')); }}
+              onDrop={(e) => { if (!dragOn(e)) return; e.preventDefault(); e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); dropCue(e.clientY > r.top + r.height / 2 ? c.id : i === 0 ? null : seg.cues[i - 1]!.id); }}>
               {i === 0 && draftAfter(null)}
               {i === 0 && !readOnly && <Gap seg={seg} afterId={null} canSplit={false} call={call} onAdd={add} before />}
               <CueBlock cue={c} lane={lanes.get(c.laneId)} characters={characters} readOnly={readOnly} call={call} isLast={i === seg.cues.length - 1}
                 around={{ above: () => add(i === 0 ? null : seg.cues[i - 1]!.id), split: i > 0 ? () => void call('POST', `/api/scenes/${seg.id}/split`, { beforeCueId: c.id }) : undefined }}
-                startDraft={() => startDraft(seg.id, c.id)} setConfirm={setConfirm} setPicking={setPicking} setRemoving={setRemoving} onNewCharacter={onNewCharacter}
+                startDraft={() => startDraft(seg.id, c.id)} setConfirm={setConfirm} setPicking={setPicking} setRemoving={setRemoving} onNewCharacter={onNewCharacter} onOpenCharacter={onOpenCharacter}
                 onSeek={() => nav?.store.seek({ segmentId, scene: index, ms: c.startMs })} place={{ segmentId, sceneId: seg.id, chapterId }} />
               {draftAfter(c.id)}
               {!readOnly && <Gap seg={seg} afterId={c.id} canSplit={i < seg.cues.length - 1} nextId={seg.cues[i + 1]?.id} call={call} onAdd={add} last={i === seg.cues.length - 1} />}
@@ -180,13 +205,13 @@ function Gap({ seg, afterId, canSplit, nextId, call, onAdd, last, before, always
   );
 }
 
-function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, around, drafting, setConfirm, setPicking, setRemoving, onNewCharacter, onSeek, place }: {
+function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, around, drafting, setConfirm, setPicking, setRemoving, onNewCharacter, onOpenCharacter, onSeek, place }: {
   cue: Cue; lane?: Lane; characters: Character[]; readOnly: boolean; call: Call; isLast: boolean; startDraft: () => void;
   /** Adding above and splitting the scene here: the gaps between cues have these buttons on a mouse; on a phone the cue's own menu does. */
   around?: { above: () => void; split?: () => void };
   /** Present for a cue that only exists in the browser so far. */
   drafting?: { patch: (b: Partial<Draft>) => void; save: (text: string, more: boolean) => Promise<boolean>; cancel: () => void };
-  setConfirm: (c: any) => void; setPicking: (p: { cue: Cue; colour: string } | null) => void; setRemoving: (c: Cue | null) => void; onNewCharacter: Props['onNewCharacter'];
+  setConfirm: (c: any) => void; setPicking: (p: { cue: Cue; colour: string } | null) => void; setRemoving: (c: Cue | null) => void; onNewCharacter: Props['onNewCharacter']; onOpenCharacter?: Props['onOpenCharacter'];
   /** A click on the cue puts the playhead at its start. */
   onSeek?: () => void;
   /** The cue's segment, scene and chapter (for its notes icon); absent for a draft. */
@@ -293,7 +318,10 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
   const [dropHere, setDropHere] = useState(false);
   const canDrop = (e: RDragEvent) => !readOnly && e.dataTransfer.types.includes(CHARACTER_DRAG);
   return (
-    <div onDragOver={(e) => { if (canDrop(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDropHere(true); } }}
+    <div draggable={!readOnly && !editing && !drafting}
+      onDragStart={(e) => { if ((e.target as HTMLElement).closest('textarea, input')) return; dragCue.id = cue.id; e.dataTransfer.setData(CUE_DRAG, cue.id); e.dataTransfer.effectAllowed = 'move'; }}
+      onDragEnd={() => { dragCue.id = null; }}
+      onDragOver={(e) => { if (canDrop(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDropHere(true); } }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropHere(false); }}
       onDrop={(e) => {
         setDropHere(false);
@@ -308,19 +336,19 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
       <span className={'strip' + (black ? ' black' : '') + (isNarr ? ' dotted' : '')} style={isNarr ? { borderColor: colour } : { background: colour }} />
       {isNarr && <svg className="ntail" viewBox="0 0 14 22" aria-hidden="true"><path className="fill" d="M14 0 1.5 11 14 22Z" /><path className="edge" d="M14 .5 1.5 11 14 21.5" /></svg>}
       {cue.type !== 'speech' && <span className="cue-icon" style={{ color: black ? '#8a7d76' : colour }} aria-hidden="true"><TypeIcon type={cue.type} /></span>}
-      {cue.type === 'speech' && character && !character.isNarrator && <CueFace character={character} colour={black ? '#8a7d76' : colour} />}
+      {cue.type === 'speech' && character && !character.isNarrator && <CueFace character={character} colour={black ? '#8a7d76' : colour} onOpen={onOpenCharacter ? () => onOpenCharacter(character) : undefined} />}
       <div className="cue-main">
         {editing ? (
           <textarea ref={area} rows={1} className="cue-text" value={text} placeholder={placeholder} onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;
               if (e.key === 'Escape') { e.preventDefault(); cancel(); }
-              // Enter saves; Shift+Enter breaks the line. Enter on an empty draft just drops it.
-              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (drafting && !text.trim()) cancel(); else void save(true); }
+              // Enter breaks the line; Ctrl/Cmd+Enter saves (on an empty draft it just drops it).
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (drafting && !text.trim()) cancel(); else void save(true); }
             }} />
         ) : (
           <div className={'cue-text' + (cue.text ? '' : ' empty')} onDoubleClick={() => { clearTimeout(seekTimer.current); if (!readOnly) setEditing(true); }}>
-            {cue.text ? (cue.type === 'speech' && !character?.isNarrator ? '— ' : '') + cue.text : placeholder}</div>)}
+            {cue.text ? renderMd(cue.text, cue.type === 'speech' && !character?.isNarrator ? '— ' : '') : placeholder}</div>)}
       </div>
       <div className="cue-side">
         <div className="side-row side-top">
@@ -332,7 +360,7 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
             <div className="edit-actions">
               <button className="round cancel" title="Cancel (Esc)" onMouseDown={(e) => e.preventDefault()} onClick={cancel}>
                 <svg viewBox="0 0 12 12" width="12" height="12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></button>
-              <button className="round confirm" title="Save (Enter)" onMouseDown={(e) => e.preventDefault()} onClick={() => void save(false)}>
+              <button className="round confirm" title="Save (Ctrl+Enter)" onMouseDown={(e) => e.preventDefault()} onClick={() => void save(false)}>
                 <svg viewBox="0 0 12 12" width="12" height="12"><path d="M2 6.5l2.8 2.8L10 3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
             </div>)}
           {readOnly || drafting ? null : (<>

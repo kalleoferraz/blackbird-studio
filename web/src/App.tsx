@@ -23,6 +23,7 @@ export const go = (path: string) => { location.hash = path; };
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [route, setRoute] = useState<Route>(() => parse(location.hash));
+  const [account, setAccount] = useState(false);
 
   const load = useCallback(async () => {
     try { setMe(await api<Me>('GET', '/api/me')); } catch { setMe(null); }
@@ -37,10 +38,11 @@ export function App() {
   if (me === undefined) return <div className="center muted">Loading…</div>;
   if (me === null) return <Login onLogin={setMe} />;
   if (me.user.mustChangePassword) return <ChangePassword forced onDone={setMe} />;
-  const logout = async () => { await api('POST', '/api/logout', {}); setMe(null); go('/'); };
+  const logout = async () => { await api('POST', '/api/logout', {}); setMe(null); setAccount(false); go('/'); };
+  if (account) return <ChangePassword onDone={(m) => { setMe(m); setAccount(false); }} onCancel={() => setAccount(false)} />;
 
   if (me.user.isAdmin) return <Admin me={me} onLogout={logout} />;
-  if (route.name === 'script' && route.projectId) return <ScriptView me={me} projectId={route.projectId} segmentId={route.segmentId} />;
-  if (route.name === 'project' && route.projectId) return <ProjectView me={me} projectId={route.projectId} onLogout={logout} />;
-  return <Projects me={me} onLogout={logout} onMe={setMe} />;
+  if (route.name === 'script' && route.projectId) return <ScriptView me={me} projectId={route.projectId} segmentId={route.segmentId} onAccount={() => setAccount(true)} onLogout={logout} />;
+  if (route.name === 'project' && route.projectId) return <ProjectView me={me} projectId={route.projectId} onLogout={logout} onAccount={() => setAccount(true)} />;
+  return <Projects me={me} onLogout={logout} onAccount={() => setAccount(true)} />;
 }

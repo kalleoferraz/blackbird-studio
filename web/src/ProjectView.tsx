@@ -5,10 +5,11 @@ import { TYPES } from './Projects.tsx';
 import type { Language, Me, Member, ProjectCard } from './types.ts';
 import { ago, formatBytes } from './format.ts';
 import { BlackbirdIcon } from './Brand.tsx';
+import { AccountMenu } from './AccountMenu.tsx';
 import { Confirm, Dialog, errorText } from './ui.tsx';
 import { RestoreLibrary } from './RestoreLibrary.tsx';
 
-export function ProjectView({ me, projectId, onLogout }: { me: Me; projectId: string; onLogout: () => void }) {
+export function ProjectView({ me, projectId, onLogout, onAccount }: { me: Me; projectId: string; onLogout: () => void; onAccount: () => void }) {
   const [p, setP] = useState<ProjectCard | null>(null);
   const [langs, setLangs] = useState<Language[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -36,8 +37,8 @@ export function ProjectView({ me, projectId, onLogout }: { me: Me; projectId: st
 
   return (
     <div className="page">
-      <header className="topbar"><a href="#/" className="brand" title="Projects"><BlackbirdIcon /></a><a href="#/">← Projects</a><span className="grow" />
-        <span className="muted">{me.user.displayName}</span><button onClick={onLogout}>Sign out</button></header>
+      <header className="topbar"><a href="#/" className="brand" title="Projects"><BlackbirdIcon /></a><a href="#/">← Projects</a><a href={`#/p/${p.id}/s`}>Script</a><span className="grow" />
+        <AccountMenu me={me} onAccount={onAccount} onLogout={onLogout} /></header>
       {error && <p className="error">{error}</p>}
       <section className="card details-card">
         <Cover p={p} author={author} onChange={(card) => setP(card)} setError={setError} reload={load} />
