@@ -10,6 +10,7 @@ import { closeGap, openGap, PARKED } from '../db/positions.js';
 import { asset, assetPeaks, chapter, character, clip, cue, lane, project, segment, scene } from '../db/schema.js';
 import { MIN_CUE_MS, estimateSpeechMs, msPerUnit, speechUnits, type LearnedSpeech } from '../shared/estimate.js';
 import { ripple, type RippleCue } from '../shared/ripple.js';
+import type { VolumePoint } from '../shared/audio-settings.js';
 import { HttpError, badRequest, notFound } from './http.js';
 
 export type CueType = 'speech' | 'sfx' | 'music';
@@ -588,6 +589,9 @@ export interface ClipView {
   fadeInMs: number;
   fadeOutMs: number;
   loops: number;
+  speed: number;
+  pitchCents: number;
+  volumePoints: VolumePoint[] | null;
   origin: ClipOrigin;
   assetDurationMs: number | null;
   status: 'pending' | 'processing' | 'ready' | 'failed';
@@ -620,6 +624,9 @@ export async function clipsOfCues(q: Q, cueIds: string[]): Promise<Map<string, C
       fadeInMs: clip.fadeInMs,
       fadeOutMs: clip.fadeOutMs,
       loops: clip.loops,
+      speed: clip.speed,
+      pitchCents: clip.pitchCents,
+      volumePoints: clip.volumePoints,
       origin: clip.origin,
       peaks: assetPeaks.assetId,
     })
@@ -642,6 +649,9 @@ export async function clipsOfCues(q: Q, cueIds: string[]): Promise<Map<string, C
       fadeInMs: r.fadeInMs,
       fadeOutMs: r.fadeOutMs,
       loops: r.loops,
+      speed: Number(r.speed),
+      pitchCents: r.pitchCents,
+      volumePoints: pointsOf(r.volumePoints),
       origin: r.origin,
       assetDurationMs: typeof dur === 'number' ? dur : null,
       status: r.status,
@@ -664,9 +674,17 @@ async function audioDuration(tx: Tx, projectId: string, assetId: string): Promis
   return dur;
 }
 
-function checkPiece(offsetMs: number, lengthMs: number, durationMs: number): void {
+/** The stored envelope as a list (some drivers hand a JSON column back as text); null when there is none or it is unusable. */
+function pointsOf(v: unknown): VolumePoint[] | null {
+  let x = v;
+  if (typeof x === 'string') { try { x = JSON.parse(x); } catch { return null; } }
+  return Array.isArray(x) && x.length > 0 ? (x as VolumePoint[]) : null;
+}
+
+function checkPiece(offsetMs: number, lengthMs: number, durationMs: number, speed = 1): void {
   if (lengthMs < MIN_CLIP_MS) throw badRequest('invalid_lengthMs');
-  if (offsetMs + lengthMs > durationMs) throw new HttpError(400, 'beyond_audio', 'The piece goes past the end of the audio file.');
+  // lengthMs is the playing time; at another speed the piece of the file is longer or shorter (2 ms of slack for the rounding)
+  if (speed === 1 ? offsetMs + lengthMs > durationMs : offsetMs + Math.round(lengthMs * speed) > durationMs + 2) throw new HttpError(400, 'beyond_audio', 'The piece goes past the end of the audio file.');
   checkSpan(0, lengthMs);
 }
 
@@ -736,6 +754,9 @@ export interface ClipPatch {
   fadeInMs?: number;
   fadeOutMs?: number;
   loops?: number;
+  speed?: number; // keeps the piece of the file and changes the playing time (and with it the cue's length, like a trim)
+  pitchCents?: number;
+  volumePoints?: VolumePoint[] | null;
 }
 
 export async function updateClip(tx: Tx, clipId: string, patch: ClipPatch): Promise<void> {
@@ -744,8 +765,10 @@ export async function updateClip(tx: Tx, clipId: string, patch: ClipPatch): Prom
   const { current, projectId } = await cueProject(tx, row.cueId);
   const duration = await audioDuration(tx, projectId, row.assetId);
   const offsetMs = patch.offsetMs ?? row.offsetMs;
-  const lengthMs = patch.lengthMs ?? row.lengthMs;
-  checkPiece(offsetMs, lengthMs, duration);
+  const speed = patch.speed ?? Number(row.speed);
+  let lengthMs = patch.lengthMs ?? row.lengthMs;
+  if (patch.speed !== undefined && patch.lengthMs === undefined) lengthMs = Math.max(MIN_CLIP_MS, Math.round((row.lengthMs * Number(row.speed)) / speed));
+  checkPiece(offsetMs, lengthMs, duration, speed);
   let fadeInMs = patch.fadeInMs ?? row.fadeInMs;
   let fadeOutMs = patch.fadeOutMs ?? row.fadeOutMs;
   if (patch.fadeInMs !== undefined || patch.fadeOutMs !== undefined) {
@@ -764,6 +787,11 @@ export async function updateClip(tx: Tx, clipId: string, patch: ClipPatch): Prom
       fadeOutMs,
       ...(patch.gainDb !== undefined ? { gainDb: patch.gainDb.toFixed(2) } : {}),
       ...(patch.loops !== undefined ? { loops: patch.loops } : {}),
+      ...(patch.speed !== undefined ? { speed: patch.speed.toFixed(2) } : {}),
+      ...(patch.pitchCents !== undefined ? { pitchCents: patch.pitchCents } : {}),
+      // A new speed moves the envelope with the sound: its times are playing times, so they scale with the length.
+      ...(patch.volumePoints !== undefined ? { volumePoints: patch.volumePoints }
+        : patch.speed !== undefined && pointsOf(row.volumePoints) ? { volumePoints: pointsOf(row.volumePoints)!.map(([ms, db]): VolumePoint => [Math.round((ms * Number(row.speed)) / speed), db]) } : {}),
     })
     .where(eq(clip.id, clipId));
   if (current.clipId === clipId && lengthMs !== current.lengthMs) await followClip(tx, current, lengthMs);

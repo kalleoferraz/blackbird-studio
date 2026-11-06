@@ -344,6 +344,10 @@ export const clip = mysqlTable(
     fadeOutMs: ms('fade_out_ms').notNull().default(100),
     // `loop` is a reserved word in MySQL. 0 plays once, N plays N + 1 times, -1 repeats until the cue ends.
     loops: smallint('loops').notNull().default(0),
+    // Audio settings of the take. length_ms is the time the piece plays for on the timeline; the piece of the file it takes is length_ms * speed.
+    speed: decimal('speed', { precision: 4, scale: 2 }).notNull().default('1.00'), // 0.5 to 2: faster or slower, the pitch kept
+    pitchCents: smallint('pitch_cents').notNull().default(0), // -1200 to 1200: higher or lower, the speed kept
+    volumePoints: json('volume_points'), // null, or [[ms from the start of the piece, dB], ...] sorted by time: the volume envelope, linear between points
     origin: mysqlEnum('origin', ['human-recorded', 'generated', 'voice-converted']).notNull(),
     createdAt: createdAt(),
   },

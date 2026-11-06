@@ -10,6 +10,7 @@ import { RemoveAudioDialog } from './RemoveAudio.tsx';
 import { CueNoteIcons, useNotes } from './notesContext.tsx';
 import { CueFace } from './characterArt.tsx';
 import { renderMd } from './md.tsx';
+import { editCueAudio } from './AudioSettings.tsx';
 
 interface Props {
   content: SegmentContent;
@@ -300,6 +301,8 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
     nav, run: (m, u, b) => void patch2(m, u, b),
     chooseAudio: () => setPicking({ cue, colour: colour.toLowerCase() === '#000000' ? '#EDE4DC' : colour }),
     removeAudio: () => setRemoving(cue),
+    edit: isMobile ? undefined : () => editCueAudio(cue.id),
+    panel: isMobile ? () => editCueAudio(cue.id) : undefined, // no timeline on a phone: the panel above the player bar
   });
   // A length that is only an estimate (no audio, not set by hand) is shown in gray.
   const estimated = !chosenClip && cue.lengthAuto ? ' est' : '';

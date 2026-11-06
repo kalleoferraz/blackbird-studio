@@ -11,6 +11,8 @@ import { Menu, errorText, useLocalState } from './ui.tsx';
 import { AudioPicker } from './AudioPicker.tsx';
 import { audioMenuItems } from './audioMenu.ts';
 import { plainMd } from './md.tsx';
+import { MAX_VOLUME_POINTS, VOLUME_MAX_DB, VOLUME_MIN_DB } from '../../src/shared/audio-settings.ts';
+import { AudioSliders } from './AudioSettings.tsx';
 import { RemoveAudioDialog } from './RemoveAudio.tsx';
 
 const LANE_H = 54;
@@ -20,14 +22,16 @@ const MAX_MS = 99 * 60 * 1000;
 const DRAG_PX = 3;
 
 const clock = (ms: number) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
-const laneColour = (c: string) => (c.toLowerCase() === '#000000' ? '#EDE4DC' : c);
+export const laneColour = (c: string) => (c.toLowerCase() === '#000000' ? '#EDE4DC' : c);
 
 interface Drag { cueId: string; kind: 'move' | 'resize'; startMs: number; lengthMs: number; shift: number; /** Cues of the lane pushed ahead of a cue moved to the right: id to new start. */ pushed?: Map<string, number> }
 /** A resized speech cue waiting for the answer to "shift the later cues too?". */
 interface Ask { drag: Drag; later: number; x: number; y: number; clamped: boolean }
 
-export function Timeline({ content, readOnly, onContent, onError }: {
+export function Timeline({ content, readOnly, onContent, onError, audioEdit, onAudioEdit }: {
   content: SegmentContent; readOnly: boolean; onContent: (c: SegmentContent) => void; onError: (m: string) => void;
+  /** The cue open for audio editing (taller, with its volume envelope and a panel of settings), and the way to open or close it. */
+  audioEdit: string | null; onAudioEdit: (cueId: string | null) => void;
 }) {
   const nav = useNav();
   const store = nav?.store;
@@ -111,6 +115,33 @@ export function Timeline({ content, readOnly, onContent, onError }: {
     const used = new Set(scene.cues.map((c) => c.laneId));
     return content.lanes.filter((l) => used.has(l.id)).sort((a, b) => a.position - b.position);
   }, [content.lanes, scene.cues]);
+
+  // The lane of the cue open for audio editing is half as tall again, so the volume envelope has room; the others move down with a transition.
+  const editCue = audioEdit ? scene.cues.find((c) => c.id === audioEdit) : undefined;
+  const laneH = lanes.map((l) => (editCue && l.id === editCue.laneId ? Math.round(LANE_H * 1.5) : LANE_H));
+  const laneTop = laneH.map((_, i) => RULER_H + laneH.slice(0, i).reduce((a, b) => a + b, 0));
+  const totalH = RULER_H + laneH.reduce((a, b) => a + b, 0);
+  // Opened from the script's menu for a cue of another scene: the playhead goes there, which shows that scene.
+  useEffect(() => {
+    if (!audioEdit || editCue) return;
+    const si = content.scenes.findIndex((s) => s.cues.some((c) => c.id === audioEdit));
+    if (si >= 0) store?.seek({ segmentId: content.segment.id, scene: si, ms: content.scenes[si]!.cues.find((c) => c.id === audioEdit)!.startMs });
+  }, [audioEdit]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A press outside the edited cue, its panel and the menus ends the editing; the lane shrinks back.
+  useEffect(() => {
+    if (!audioEdit) return;
+    const down = (e: PointerEvent) => {
+      if (!(e.target as HTMLElement).closest('.tl-cue.audio-edit, .tl-audio-panel, .menu, .backdrop')) onAudioEdit(null);
+    };
+    document.addEventListener('pointerdown', down, true);
+    return () => document.removeEventListener('pointerdown', down, true);
+  }, [audioEdit, onAudioEdit]);
+  useEffect(() => {
+    if (!audioEdit) return;
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement).closest('input, textarea')) onAudioEdit(null); };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, [audioEdit, onAudioEdit]);
 
   const seek = (ms: number) => store?.seek({ segmentId: content.segment.id, scene: sceneIndex, ms: Math.max(0, Math.round(ms)) });
   const seekAt = (clientX: number) => {
@@ -283,32 +314,47 @@ export function Timeline({ content, readOnly, onContent, onError }: {
         <div className="tl-inner" style={{ width: labelW + width }}>
           <div className="tl-labels" style={{ width: labelW }}>
             <div className="tl-corner" style={{ height: RULER_H }} />
-            {lanes.map((l) => <div key={l.id} className="tl-label" style={{ height: LANE_H }} title={l.title}>
+            {lanes.map((l, i) => <div key={l.id} className="tl-label" style={{ height: laneH[i] }} title={l.title}>
               <i style={{ background: laneColour(l.colour) }} />{l.title}
             </div>)}
             <div className="tl-label-grip" onPointerDown={startLabelResize} onDoubleClick={() => setLabelPref(0)} title="Drag to resize (double-click: fit the longest name)" />
           </div>
-          <div className="tl-canvas" ref={canvasRef} style={{ width, height: RULER_H + Math.max(1, lanes.length) * LANE_H }}
+          <div className="tl-canvas" ref={canvasRef} style={{ width, height: Math.max(totalH, RULER_H + LANE_H) }}
             onPointerDown={onCanvasDown}>
             <div className="tl-ruler" style={{ height: RULER_H }}>
               {ticks.map((t) => <span key={t} style={{ left: x(t) }}>{clock(t)}</span>)}
             </div>
             <div className="tl-grid" style={{ top: RULER_H, '--s': `${pps}px`, '--t': `${pps * 10}px`, '--sec': pps >= 6 ? 1 : 0 } as React.CSSProperties} />
-            {lanes.map((l, i) => <div key={l.id} className="tl-lane" style={{ top: RULER_H + i * LANE_H, height: LANE_H }} />)}
+            {lanes.map((l, i) => <div key={l.id} className="tl-lane" style={{ top: laneTop[i], height: laneH[i] }} />)}
             {scene.cues.map((c) => {
               const li = lanes.findIndex((l) => l.id === c.laneId);
               if (li < 0) return null;
               const s = shown(c);
               return <CueBlock key={c.id} cue={c} lane={lanes[li]!} left={x(s.start)} width={Math.max(3, x(s.len))} lengthMs={s.len}
-                top={RULER_H + li * LANE_H} now={c.id === curCue} sel={c.id === target?.id} dragging={view?.cueId === c.id} readOnly={readOnly}
+                top={laneTop[li]!} h={laneH[li]! - 6} now={c.id === curCue} sel={c.id === target?.id} dragging={view?.cueId === c.id} readOnly={readOnly}
+                editing={c.id === audioEdit} onEditAudio={() => onAudioEdit(c.id)}
+                onSeekIn={(ms) => seek(c.startMs + ms)}
+                onEnvelope={(points) => void runOnCue('PATCH', `/api/clips/${c.clipId}`, { volumePoints: points })}
                 onMove={begin(c, 'move')} onResize={begin(c, 'resize')} onMenu={openMenu(c, lanes[li]!)} />;
             })}
+            {editCue && (() => {
+              const li = lanes.findIndex((l) => l.id === editCue.laneId), s = shown(editCue), k = editCue.clips.find((q) => q.id === editCue.clipId);
+              if (li < 0 || !k) return null;
+              const PANEL_W = 290, right = x(s.start) + Math.max(3, x(s.len)) + 8;
+              const left = right + PANEL_W > width ? Math.max(4, x(s.start) - PANEL_W - 8) : right;
+              return (
+                <div className="tl-audio-panel" style={{ left, top: laneTop[li]! + 3 }} onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+                  <div className="tl-ap-head"><b>Audio settings</b><button className="tl-ap-done" onClick={() => onAudioEdit(null)}>Done</button></div>
+                  <AudioSliders clip={k} run={(m, u, b) => void runOnCue(m, u, b)} />
+                  <p className="muted small">Double-click the cue to add a volume point, drag a point to move it, double-click a point to remove it. A click moves the playhead.</p>
+                </div>);
+            })()}
             <Playhead sceneId={scene.id} x={x} />
           </div>
         </div>
       </div>
       {menu && <Menu anchor={{ x: menu.x, y: menu.y }} onClose={() => setMenu(null)}
-        items={audioMenuItems(menu.cue, { nav, run: (m, u, b) => void runOnCue(m, u, b), chooseAudio: () => setPicking({ cue: menu.cue, colour: menu.colour }), removeAudio: () => setRemoving(menu.cue) })} />}
+        items={audioMenuItems(menu.cue, { nav, run: (m, u, b) => void runOnCue(m, u, b), chooseAudio: () => setPicking({ cue: menu.cue, colour: menu.colour }), removeAudio: () => setRemoving(menu.cue), edit: () => onAudioEdit(menu.cue.id) })} />}
       {picking && <AudioPicker cue={picking.cue} content={content} colour={picking.colour} onContent={onContent} onError={onError} onClose={() => setPicking(null)} />}
       {removing && <RemoveAudioDialog cue={removing} onContent={onContent} onError={onError} onClose={() => setRemoving(null)} />}
       {ask && (
@@ -333,8 +379,9 @@ const Playhead = memo(function Playhead({ sceneId, x }: { sceneId: string; x: (m
   return <div className="tl-playhead" style={{ left: x(ms) }} />;
 });
 
-const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top, now, sel, dragging, readOnly, onMove, onResize, onMenu }: {
-  cue: Cue; lane: Lane; left: number; width: number; lengthMs: number; top: number; now: boolean; sel: boolean; dragging: boolean; readOnly: boolean;
+const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top, h, now, sel, dragging, readOnly, editing, onEditAudio, onEnvelope, onSeekIn, onMove, onResize, onMenu }: {
+  cue: Cue; lane: Lane; left: number; width: number; lengthMs: number; top: number; h: number; now: boolean; sel: boolean; dragging: boolean; readOnly: boolean;
+  editing: boolean; onEditAudio: () => void; onEnvelope: (points: [number, number][] | null) => void; onSeekIn: (ms: number) => void;
   onMove: (e: RPointerEvent) => void; onResize: (e: RPointerEvent) => void; onMenu: (e: React.MouseEvent) => void;
 }) {
   const nav = useNav();
@@ -343,7 +390,7 @@ const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top,
   const colour = laneColour(lane.colour);
   // While the cue is stretched, its audio piece is shown fitting the new length (from the same start, up to the end of the file); the server does the same on release.
   const stretching = dragging && lengthMs !== cue.lengthMs;
-  const clipMs = clip && stretching && clip.loops === 0 && clip.assetDurationMs !== null ? Math.max(0, Math.min(lengthMs, clip.assetDurationMs - clip.offsetMs)) : clip?.lengthMs ?? 0;
+  const clipMs = clip && stretching && clip.loops === 0 && clip.assetDurationMs !== null ? Math.max(0, Math.min(lengthMs, (clip.assetDurationMs - clip.offsetMs) / clip.speed)) : clip?.lengthMs ?? 0;
   const [peaks, setPeaks] = useState<Peaks | null>(null);
   useEffect(() => {
     setPeaks(null);
@@ -353,19 +400,77 @@ const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top,
     return () => { live = false; };
   }, [clip?.assetId, clip?.hasPeaks, clip?.status]);
   return (
-    <div className={'tl-cue' + (now ? ' now' : '') + (sel ? ' sel' : '') + (past ? ' past' : '') + (dragging ? ' dragging' : '') + (clip ? '' : ' empty') + (cue.muted ? ' muted' : '')} data-cue-id={cue.id}
-      style={{ left, width, top: top + 3, height: LANE_H - 6, '--c': colour } as React.CSSProperties}
-      onPointerDown={onMove} onContextMenu={onMenu} title={cue.text || cue.type}>
-      {clip && peaks && <Wave peaks={peaks} offsetMs={clip.offsetMs} clipMs={clipMs} lengthMs={lengthMs} width={width} colour={colour} />}
+    <div className={'tl-cue' + (now ? ' now' : '') + (sel ? ' sel' : '') + (past ? ' past' : '') + (dragging ? ' dragging' : '') + (clip ? '' : ' empty') + (cue.muted ? ' muted' : '') + (editing ? ' audio-edit' : '')} data-cue-id={cue.id}
+      style={{ left, width, top: top + 3, height: h, '--c': colour } as React.CSSProperties}
+      onPointerDown={editing ? undefined : onMove} onContextMenu={onMenu} title={cue.text || cue.type}
+      onDoubleClick={() => { if (clip && !readOnly && !editing) onEditAudio(); }}>
+      {clip && peaks && <Wave peaks={peaks} offsetMs={clip.offsetMs} clipMs={clipMs} lengthMs={lengthMs} width={width} colour={colour} speed={clip.speed} height={h} />}
+      {clip && editing && !readOnly ? <EnvelopeEditor points={clip.volumePoints} lengthMs={lengthMs} width={width} height={h} onChange={onEnvelope} onSeek={(ms) => onSeekIn(ms)} />
+        : clip && Array.isArray(clip.volumePoints) && clip.volumePoints.length > 0 && <EnvelopeLine points={clip.volumePoints} lengthMs={lengthMs} width={width} height={h} />}
       <span className="tl-text">{plainMd(cue.text) || (cue.type === 'speech' ? '' : cue.type)}</span>
       {!readOnly && <div className="tl-grip" onPointerDown={onResize} />}
     </div>
   );
 });
 
-function Wave({ peaks, offsetMs, clipMs, lengthMs, width, colour }: { peaks: Peaks; offsetMs: number; clipMs: number; lengthMs: number; width: number; colour: string }) {
+/** The volume envelope being edited on the cue: click to add a point, drag to move it, double-click a point to remove it. */
+export function EnvelopeEditor({ points, lengthMs, width, height, onChange, onSeek }: { points: [number, number][] | null; lengthMs: number; width: number; height: number; onChange: (p: [number, number][] | null) => void; /** A single click: the playing time (ms from the start of the take) to move the playhead to. */ onSeek: (ms: number) => void }) {
+  const [pts, setPts] = useState<[number, number][]>(Array.isArray(points) ? points : []);
+  const dragging = useRef<number | null>(null);
+  const moved = useRef(false);
+  const lastTap = useRef<{ i: number | null; t: number; x: number; y: number } | null>(null);
+  useEffect(() => { if (dragging.current === null) setPts(Array.isArray(points) ? points : []); }, [points]);
+  const y = (db: number) => 3 + ((VOLUME_MAX_DB - db) / (VOLUME_MAX_DB - VOLUME_MIN_DB)) * (height - 6);
+  const px = (ms: number) => Math.max(0, Math.min(width, (ms / Math.max(1, lengthMs)) * width));
+  const at = (e: React.PointerEvent): [number, number] => {
+    const r = e.currentTarget.closest('svg')!.getBoundingClientRect();
+    const ms = Math.max(0, Math.min(lengthMs, ((e.clientX - r.left) / Math.max(1, r.width)) * lengthMs));
+    const db = VOLUME_MAX_DB - ((e.clientY - r.top - 3) / Math.max(1, r.height - 6)) * (VOLUME_MAX_DB - VOLUME_MIN_DB);
+    return [Math.round(ms), Math.round(Math.max(VOLUME_MIN_DB, Math.min(VOLUME_MAX_DB, db)) * 2) / 2];
+  };
+  const commit = (list: [number, number][]) => onChange(list.length ? [...list].sort((a, b) => a[0] - b[0]) : null);
+  const start = (i: number | null) => (e: React.PointerEvent) => {
+    e.stopPropagation();
+    // A second press within a moment is a double click / double tap: on a point it removes the point, on the empty line it adds one.
+    const now = Date.now(), last = lastTap.current;
+    const dbl = !!last && last.i === i && now - last.t < 400 && (i !== null || (Math.abs(last.x - e.clientX) < 12 && Math.abs(last.y - e.clientY) < 12));
+    lastTap.current = dbl ? null : { i, t: now, x: e.clientX, y: e.clientY };
+    const svg = e.currentTarget.closest('svg') as Element;
+    if (i !== null) {
+      if (dbl) { const next = pts.filter((_, k) => k !== i); setPts(next); commit(next); return; }
+      moved.current = false; dragging.current = i; svg.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (!dbl) { onSeek(at(e)[0]); return; } // a single click puts the playhead there
+    if (pts.length >= MAX_VOLUME_POINTS) return;
+    const next = [...pts, at(e)];
+    setPts(next); moved.current = true; dragging.current = next.length - 1; svg.setPointerCapture(e.pointerId);
+  };
+  const move = (e: React.PointerEvent) => { const i = dragging.current; if (i === null) return; moved.current = true; const v = at(e); setPts((p) => p.map((q, k) => (k === i ? v : q))); };
+  const end = () => { if (dragging.current === null) return; dragging.current = null; if (moved.current) commit(pts); };
+  const sorted = [...pts].sort((a, b) => a[0] - b[0]);
+  const d = sorted.length ? `M0,${y(sorted[0]![1])} ${sorted.map(([ms, db]) => `L${px(ms)},${y(db)}`).join(' ')} L${width},${y(sorted[sorted.length - 1]![1])}` : `M0,${y(0)} L${width},${y(0)}`;
+  return (
+    <svg className="tl-envelope edit" width={width} height={height} onPointerDown={start(null)} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
+      <line x1={0} x2={width} y1={y(0)} y2={y(0)} className="zero" />
+      <path d={d} className={sorted.length ? '' : 'flat'} />
+      {pts.map(([ms, db], i) => <g key={i} onPointerDown={start(i)}><circle className="hit" cx={px(ms)} cy={y(db)} r={16} /><circle className="dot" cx={px(ms)} cy={y(db)} r={5} /><title>{`${(ms / 1000).toFixed(2)} s · ${db.toFixed(1)} dB`}</title></g>)}
+    </svg>
+  );
+}
+
+/** The volume envelope over the cue's waveform: a thin line, high for loud and low for soft. */
+function EnvelopeLine({ points, lengthMs, width, height }: { points: [number, number][]; lengthMs: number; width: number; height: number }) {
+  const x = (ms: number) => Math.max(0, Math.min(width, (ms / Math.max(1, lengthMs)) * width));
+  const y = (db: number) => 3 + ((VOLUME_MAX_DB - db) / (VOLUME_MAX_DB - VOLUME_MIN_DB)) * (height - 6);
+  const first = points[0]!, last = points[points.length - 1]!;
+  const d = `M0,${y(first[1])} ${points.map(([ms, db]) => `L${x(ms)},${y(db)}`).join(' ')} L${x(lengthMs)},${y(last[1])}`;
+  return <svg className="tl-envelope" width={width} height={height} aria-hidden="true"><path d={d} /></svg>;
+}
+
+export function Wave({ peaks, offsetMs, clipMs, lengthMs, width, colour, speed, height }: { peaks: Peaks; offsetMs: number; clipMs: number; lengthMs: number; width: number; colour: string; speed: number; height: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const h = LANE_H - 6;
+  const h = height;
   const w = Math.min(4000, Math.max(1, Math.round(width)));
   useEffect(() => {
     const cv = ref.current!;
@@ -379,8 +484,8 @@ function Wave({ peaks, offsetMs, clipMs, lengthMs, width, colour }: { peaks: Pea
     const span = Math.max(1, Math.round((played / Math.max(1, lengthMs)) * w));
     const cols = Math.max(1, Math.floor(span / (BAR + GAP)));
     for (let k = 0; k < cols; k++) {
-      const a = Math.floor((offsetMs + (k / cols) * played) / peaks.step);
-      const b = Math.max(a + 1, Math.floor((offsetMs + ((k + 1) / cols) * played) / peaks.step));
+      const a = Math.floor((offsetMs + (k / cols) * played * speed) / peaks.step);
+      const b = Math.max(a + 1, Math.floor((offsetMs + ((k + 1) / cols) * played * speed) / peaks.step));
       let m = 0;
       for (let i = a; i < b && i < peaks.data.length; i++) m = Math.max(m, peaks.data[i]!);
       const bar = m === 0 ? BAR : Math.max(BAR + 1, (m / 255) * (h - 8));
@@ -388,6 +493,6 @@ function Wave({ peaks, offsetMs, clipMs, lengthMs, width, colour }: { peaks: Pea
       g.roundRect(k * (BAR + GAP), (h - bar) / 2, BAR, bar, BAR / 2);
       g.fill();
     }
-  }, [peaks, offsetMs, clipMs, lengthMs, w, h, colour]);
+  }, [peaks, offsetMs, clipMs, lengthMs, w, h, colour, speed]);
   return <canvas ref={ref} className="tl-wave" />;
 }

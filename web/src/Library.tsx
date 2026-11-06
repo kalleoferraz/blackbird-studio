@@ -69,10 +69,13 @@ export function LibraryPanel({ projectId, readOnly, onError, onAssetChanged, not
     }
   }, [projectId, onError]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const reloadOpen = useCallback(async (paths: string[] = [...expanded]) => {
+  // reloadOpen is memoised, so its default must read the folders open *now*, not the ones open when it was created.
+  const expandedRef = useRef<string[]>([]);
+  expandedRef.current = [...expanded];
+  const reloadOpen = useCallback(async (paths: string[] = expandedRef.current) => {
     setLists({});
     await Promise.all(paths.map((p) => fetchList(p)));
-  }, [fetchList]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchList]);
 
   const reloadRef = useRef(reloadOpen);
   reloadRef.current = reloadOpen;

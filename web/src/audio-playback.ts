@@ -1,6 +1,9 @@
 // Plays the audio of the cues while the script plays: each cue's chosen clip starts with the cue and stops with it.
 // The clock (PlaybackStore) is the master; this only follows it, correcting the audio when the playhead jumps.
+import { SoundTouchNode } from '@soundtouchjs/audio-worklet';
+import processorUrl from '@soundtouchjs/audio-worklet/processor?url';
 import { assetUrl } from './api.ts';
+import { envelopeGain } from '../../src/shared/audio-settings.ts';
 import { posKey, type NavClip } from './nav.ts';
 import type { PlaybackStore } from './playback.ts';
 
@@ -10,8 +13,14 @@ const WARM_MS = 3000; // cues starting within this time are loaded in advance
 
 const urlOf = (c: NavClip) => assetUrl(c.assetId, c.light);
 
+/** An element routed through the pitch shifter: the element plays at the speed (its own pitch correction off), the shifter sets the pitch. */
+interface Routed { src: MediaElementAudioSourceNode; node: SoundTouchNode; gain: GainNode }
+type Live = { el: HTMLAudioElement; url: string; routed?: Routed };
+
 export class AudioPlayer {
-  private live = new Map<string, { el: HTMLAudioElement; url: string }>();
+  private live = new Map<string, Live>();
+  private ctx: AudioContext | null = null;
+  private shifter: 'none' | 'loading' | 'ready' | 'failed' = 'none';
   private warm = new Map<string, { el: HTMLAudioElement; url: string }>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private stamp = { key: -1, ms: 0, at: 0, scene: -1 };
@@ -35,8 +44,32 @@ export class AudioPlayer {
   }
 
   private silence() {
-    for (const { el } of this.live.values()) el.pause();
+    for (const l of this.live.values()) this.release(l);
     this.live.clear();
+  }
+
+  private release(l: Live) {
+    l.el.pause();
+    if (l.routed) { l.routed.src.disconnect(); l.routed.node.disconnect(); l.routed.gain.disconnect(); }
+  }
+
+  /** The pitch shifter's processor is loaded once, the first time a take has a pitch; until it is ready the take plays at its own pitch. */
+  private prepareShifter() {
+    if (this.shifter !== 'none') return;
+    this.shifter = 'loading';
+    try {
+      this.ctx = new AudioContext();
+      void SoundTouchNode.register(this.ctx, processorUrl).then(() => { this.shifter = 'ready'; }, () => { this.shifter = 'failed'; });
+    } catch { this.shifter = 'failed'; }
+  }
+
+  private route(l: Live) {
+    const ctx = this.ctx!;
+    if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined);
+    const src = ctx.createMediaElementSource(l.el), node = new SoundTouchNode({ context: ctx }), gain = ctx.createGain();
+    src.connect(node); node.connect(gain); gain.connect(ctx.destination);
+    l.el.preservesPitch = false;
+    l.routed = { src, node, gain };
   }
 
   private step() {
@@ -56,9 +89,9 @@ export class AudioPlayer {
       if (t < 0) { if (-t <= WARM_MS) { upcoming.add(c.id); this.preload(c.id, clip); } continue; }
       if (t >= len) continue;
       active.add(c.id);
-      const want = (clip.offsetMs + t) / 1000;
+      const want = (clip.offsetMs + t * clip.speed) / 1000; // a faster take uses more of the file in the same time
       let l = this.live.get(c.id);
-      if (l && l.url !== urlOf(clip)) { l.el.pause(); this.live.delete(c.id); l = undefined; }
+      if (l && l.url !== urlOf(clip)) { this.release(l); this.live.delete(c.id); l = undefined; }
       if (!l) {
         const warmed = this.warm.get(c.id);
         this.warm.delete(c.id);
@@ -70,12 +103,21 @@ export class AudioPlayer {
         if (Math.abs(l.el.currentTime - want) > DRIFT_S) l.el.currentTime = want;
         if (l.el.paused && !l.el.ended) void l.el.play().catch(() => undefined);
       }
-      const gain = 10 ** (clip.gainDb / 20);
+      // Speed (the pitch kept by the browser), pitch (through the shifter) and the volume: the level, the fades and the envelope.
+      if (clip.pitchCents !== 0) this.prepareShifter();
+      if (!l.routed && clip.pitchCents !== 0 && this.shifter === 'ready') this.route(l);
+      if (l.el.playbackRate !== clip.speed) l.el.playbackRate = clip.speed;
+      if (!l.routed) l.el.preservesPitch = true;
       const fadeIn = clip.fadeInMs > 0 ? Math.min(1, t / clip.fadeInMs) : 1;
       const fadeOut = clip.fadeOutMs > 0 ? Math.min(1, (len - t) / clip.fadeOutMs) : 1;
-      l.el.volume = Math.max(0, Math.min(1, gain * fadeIn * fadeOut));
+      const volume = Math.max(0, 10 ** (clip.gainDb / 20) * fadeIn * fadeOut * envelopeGain(clip.volumePoints, t));
+      if (l.routed) {
+        l.routed.node.playbackRate.value = clip.speed;
+        l.routed.node.pitch.value = 2 ** (clip.pitchCents / 1200);
+        l.routed.gain.gain.value = volume;
+      } else l.el.volume = Math.min(1, volume);
     }
-    for (const [id, l] of this.live) if (!active.has(id)) { l.el.pause(); this.live.delete(id); }
+    for (const [id, l] of this.live) if (!active.has(id)) { this.release(l); this.live.delete(id); }
     for (const id of this.warm.keys()) if (!upcoming.has(id)) this.warm.delete(id);
   }
 
@@ -93,5 +135,6 @@ export class AudioPlayer {
     this.timer = null;
     this.silence();
     this.warm.clear();
+    void this.ctx?.close().catch(() => undefined);
   }
 }

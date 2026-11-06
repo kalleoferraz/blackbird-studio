@@ -39,6 +39,7 @@ import {
   type CuePatch,
   type CueType,
 } from './content.js';
+import { PITCH_MAX_CENTS, SPEED_MAX, SPEED_MIN, cleanVolumePoints } from '../shared/audio-settings.js';
 import { HttpError, asBody, badRequest, optBool, optInt, optString, reqString } from './http.js';
 
 const MAX_NUMBERED = 99;
@@ -473,6 +474,17 @@ export function registerStoryRoutes(app: FastifyInstance): void {
     if ('gainDb' in body) {
       if (typeof body.gainDb !== 'number' || !Number.isFinite(body.gainDb) || body.gainDb < -60 || body.gainDb > 24) throw badRequest('invalid_gainDb');
       patch.gainDb = body.gainDb;
+    }
+    if ('speed' in body) {
+      if (typeof body.speed !== 'number' || !Number.isFinite(body.speed) || body.speed < SPEED_MIN || body.speed > SPEED_MAX) throw badRequest('invalid_speed');
+      patch.speed = Math.round(body.speed * 100) / 100;
+    }
+    const pitchCents = optInt(body, 'pitchCents', -PITCH_MAX_CENTS, PITCH_MAX_CENTS);
+    if (pitchCents !== undefined) patch.pitchCents = pitchCents;
+    if ('volumePoints' in body) {
+      const points = cleanVolumePoints(body.volumePoints, MAX_SCENE_MS);
+      if (points === undefined) throw badRequest('invalid_volumePoints');
+      patch.volumePoints = points;
     }
     const cueId = await cueOfClip(id);
     return segmentWrite(request, 'cue', cueId, async (tx) => {

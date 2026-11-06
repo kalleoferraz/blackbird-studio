@@ -661,3 +661,31 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 /* Dragging a cue: a line shows where it lands */
 .drop-before { box-shadow: 0 -2px 0 var(--primary); } .drop-after { box-shadow: 0 2px 0 var(--primary); }
 .scene-head.drop-start { box-shadow: 0 2px 0 var(--primary); }
+.tl-envelope { position: absolute; left: 0; top: 0; pointer-events: none; } .tl-envelope path { fill: none; stroke: var(--text); stroke-width: 1.5; opacity: .85; }
+/* A submenu (the audio sliders) opens beside its item */
+.menu-subhost { position: relative; }
+.menu.menu-sub { position: absolute; left: 100%; top: -5px; margin-left: 2px; min-width: 250px; padding: 8px 10px; z-index: 61; } .menu.menu-sub.left { left: auto; right: 100%; margin: 0 2px 0 0; }
+.as-sliders { display: grid; gap: 6px; min-width: 230px; }
+.as-row { display: grid; grid-template-columns: 44px 1fr 64px 22px; align-items: center; gap: 8px; font-size: .78rem; }
+.as-name { color: var(--muted); } .as-row output { text-align: right; font-variant-numeric: tabular-nums; }
+.as-reset { padding: 0; width: 22px; height: 22px; line-height: 1; border-radius: 50%; font-size: .85rem; }
+.as-row input[type=range] { width: 100%; min-width: 0; margin: 0; }
+/* A cue open for audio editing: taller (the lane grows with a transition), the volume envelope editable, a settings panel beside it */
+.tl-lane, .tl-label { transition: top .25s ease, height .25s ease; } .tl-cue { transition: top .25s ease, height .25s ease; } .tl-canvas { transition: height .25s ease; }
+.tl-cue.audio-edit { cursor: default; z-index: 4; box-shadow: 0 0 0 2px var(--primary); }
+.tl-envelope.edit { pointer-events: auto; cursor: crosshair; touch-action: none; } .tl-envelope.edit .zero { stroke: var(--faint); stroke-dasharray: 4 3; } .tl-envelope.edit path.flat { stroke-dasharray: 5 4; opacity: .6; }
+.tl-envelope.edit circle { fill: var(--primary); stroke: var(--bg, #0E0B10); stroke-width: 2; cursor: grab; }
+.tl-audio-panel { position: absolute; z-index: 8; width: 290px; box-sizing: border-box; padding: 8px 10px; background: var(--panel2); border: 1px solid #4a3c3e; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.5); cursor: default; }
+.tl-ap-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; } .tl-ap-done { padding: 2px 10px; font-size: .78rem; }
+.tl-audio-panel p { margin: 6px 0 0; }
+
+/* Phone: the audio settings of a cue, a panel above the player bar */
+.m-audio-panel { flex: none; background: var(--panel2); border-top: 1px solid var(--line); padding: 8px 12px 6px; max-height: 60vh; overflow-y: auto; }
+.m-audio-panel .ma-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.m-audio-panel .ma-done { padding: 3px 12px; }
+.m-audio-panel .as-sliders { min-width: 0; }
+.m-audio-panel .ma-label { margin: 10px 0 4px; font-size: .78rem; color: var(--muted); }
+.m-audio-panel .ma-env { position: relative; width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--bg, #0E0B10); overflow: hidden; }
+.m-audio-panel p { margin: 6px 0 0; }
+.m-audio-panel .ma-playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--primary); pointer-events: none; }
+.tl-envelope.edit circle.hit { fill: transparent; stroke: none; cursor: grab; } .tl-envelope.edit circle.dot { pointer-events: none; }

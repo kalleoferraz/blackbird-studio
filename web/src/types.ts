@@ -32,6 +32,8 @@ export type CueType = 'speech' | 'sfx' | 'music';
 export interface Clip {
   id: string; cueId: string; number: number; assetId: string; name: string;
   offsetMs: number; lengthMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number; loops: number;
+  /** Audio settings: speed (pitch kept), pitch in cents (speed kept) and the volume envelope [ms, dB]. lengthMs is the playing time; the piece of the file is lengthMs * speed. */
+  speed: number; pitchCents: number; volumePoints: [number, number][] | null;
   origin: 'human-recorded' | 'generated' | 'voice-converted';
   assetDurationMs: number | null; status: 'pending' | 'processing' | 'ready' | 'failed'; hasPeaks: boolean; light: boolean; fileMissing: boolean;
 }

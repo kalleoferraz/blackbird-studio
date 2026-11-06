@@ -4,7 +4,25 @@ import { PALETTE } from '../../src/shared/palette.ts';
 
 export type MenuItem =
   | { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; checked?: boolean; hint?: string; color?: string }
+  /** A submenu: its own content (controls such as sliders) opens beside the item, on hover or click, and the menu stays open while it is used. */
+  | { label: string; sub: ReactNode | ((close: () => void) => ReactNode); disabled?: boolean }
   | 'sep';
+
+function SubItem({ label, sub, disabled, onClose }: { label: string; sub: ReactNode | ((close: () => void) => ReactNode); disabled?: boolean; onClose: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [left, setLeft] = useState(false);
+  const host = useRef<HTMLDivElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (open && host.current && pop.current) setLeft(host.current.getBoundingClientRect().right + pop.current.offsetWidth > window.innerWidth - 8);
+  }, [open]);
+  return (
+    <div ref={host} className="menu-subhost" onMouseEnter={() => !disabled && setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button className="menu-item" disabled={disabled} onClick={() => setOpen(true)}><span className="menu-check" />{label}<span className="menu-hint">▸</span></button>
+      {open && <div ref={pop} className={'menu menu-sub' + (left ? ' left' : '')}>{typeof sub === 'function' ? sub(onClose) : sub}</div>}
+    </div>
+  );
+}
 
 /** A popover menu anchored to an element, or to a point (a right click); closes on outside click or Escape. */
 export function Menu({ anchor, items, onClose }: { anchor: HTMLElement | { x: number; y: number }; items: MenuItem[]; onClose: () => void }) {
@@ -28,7 +46,7 @@ export function Menu({ anchor, items, onClose }: { anchor: HTMLElement | { x: nu
   return createPortal(
     <div ref={ref} className="menu" style={{ left: pos?.left ?? -999, top: pos?.top ?? -999 }}>
       {items.map((it, i) =>
-        it === 'sep' ? <div key={i} className="menu-sep" /> : (
+        it === 'sep' ? <div key={i} className="menu-sep" /> : 'sub' in it ? <SubItem key={i} label={it.label} sub={it.sub} disabled={it.disabled} onClose={onClose} /> : (
           <button key={i} className={'menu-item' + (it.danger ? ' danger' : '')} disabled={it.disabled}
             onClick={() => { onClose(); it.onClick(); }}>
             <span className="menu-check">{it.checked ? '✓' : ''}</span>{it.color ? <span style={{ color: it.color }}>{it.label}</span> : it.label}

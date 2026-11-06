@@ -12,7 +12,9 @@ import { ago, cueCountOrder, inOrder } from './format.ts';
 import { BlackbirdIcon } from './Brand.tsx';
 import { MenuButton, errorText, useIsMobile, useLocalState, type MenuItem } from './ui.tsx';
 import { NavBar } from './NavBar.tsx';
+import { MobileAudioPanel } from './MobileAudio.tsx';
 import { accountItems } from './AccountMenu.tsx';
+import { onEditCueAudio } from './AudioSettings.tsx';
 import { NavContext, PlaybackStore } from './playback.ts';
 import { toNav, type Pos } from './nav.ts';
 import { recordTake } from './recording.ts';
@@ -106,6 +108,13 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
   const titlesRef = useRef<HTMLDivElement>(null);
   const [titlesGone, setTitlesGone] = useState(false);
   const [tlOpen, setTlOpen] = useLocalState('rs.timelineOpen', true);
+  // A cue open for audio editing in the timeline (the menu's "Edit volume envelope", a double click on the cue there).
+  const [audioEdit, setAudioEdit] = useState<string | null>(null);
+  useEffect(() => onEditCueAudio((id) => {
+    if (!isMobileRef.current && !tlOpen) setTlOpen(true);
+    setAudioEdit(id);
+  }), [tlOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setAudioEdit(null), [segmentId]);
   useEffect(() => { mainRef.current?.scrollTo({ top: 0 }); }, [segmentId]);
   // Once the chapter and segment titles have scrolled out of sight, a slim header says where we are.
   useEffect(() => {
@@ -394,9 +403,10 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
           notes={notes} story={story} noteFocus={noteFocus} noteRequest={noteRequest} onNotesChanged={() => { void loadNotes(); void loadProject(); }} onAssetChanged={refreshAfterEdit} onOpenCue={showCue}
           mobileTab={isMobile && (mview === 'characters' || mview === 'library' || mview === 'notes') ? mview : undefined} />
       </div>
-      {content && project.type !== 'textbook' && tlOpen && !isMobile && <Timeline content={content} readOnly={!!readOnly} onContent={onContent} onError={setError} />}
+      {content && project.type !== 'textbook' && tlOpen && !isMobile && <Timeline content={content} readOnly={!!readOnly} onContent={onContent} onError={setError} audioEdit={audioEdit} onAudioEdit={setAudioEdit} />}
       {libTrack && libInfo && <FileInfoPanel file={libTrack} notes={notes} onClose={() => setLibInfo(false)} onError={setError}
         onOpenCue={(c) => { lib.close(); showCue(c); }} onShowNote={() => notesInfo.show({ assetId: libTrack.id })} />}
+      {content && isMobile && audioEdit && <MobileAudioPanel content={content} cueId={audioEdit} onContent={onContent} onError={setError} onClose={() => setAudioEdit(null)} />}
       <NavBar store={playback} lib={lib} libInfo={{ open: libInfo, onToggle: () => setLibInfo((v) => !v) }} story={story} follow={follow} onFollow={setFollow} editing={editing} mobile={isMobile}
         timeline={project.type !== 'textbook' && !isMobile ? { open: tlOpen, onToggle: () => setTlOpen(!tlOpen) } : undefined} />
       {addNote && <AddNoteDialog projectId={projectId} target={addNote.target} label={addNote.label} onClose={() => setAddNote(null)}
