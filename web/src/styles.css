@@ -689,3 +689,27 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .m-audio-panel p { margin: 6px 0 0; }
 .m-audio-panel .ma-playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--primary); pointer-events: none; }
 .tl-envelope.edit circle.hit { fill: transparent; stroke: none; cursor: grab; } .tl-envelope.edit circle.dot { pointer-events: none; }
+
+/* Audio picker: the library's folders that hold audio */
+.pk-tree { max-height: 190px; overflow-y: auto; margin: 8px 0; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); }
+.pk-tree .tree-row.sel { background: rgba(239,155,11,.22); } .pk-tree .tree-row.sel .lib-name { font-weight: 600; }
+.pk-file-name { color: var(--text); font-weight: 500; word-break: break-all; }
+/* Audio picker: compact, so the whole dialog fits a laptop or a phone screen without scrolling */
+.dialog.wide .pk-sub { margin: 0 0 6px; } .dialog.wide .pk-line { margin: 6px 0; gap: 8px; }
+.dialog.wide .wvlabel { margin: 6px 0 3px; } .dialog.wide .pk-btns { margin-top: 8px; }
+.pk-tree { max-height: 128px; margin: 6px 0; } .pk-tree .tree-row { min-height: 26px; }
+@media (max-width: 720px), (max-height: 500px) and (pointer: coarse) { .pk-tree { max-height: 104px; } .dialog.wide .pk-line { gap: 4px 10px; } }
+@media (max-width: 720px), (max-height: 500px) and (pointer: coarse) {
+  .dialog.wide .pk-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dialog.wide .wvlabel { display: none; }
+  .dialog.wide .pk-line:has(.rb) { flex-wrap: nowrap; gap: 10px; } .dialog.wide .rb { font-size: 12px; min-height: 0; padding: 0; } .dialog.wide .rb input { margin: 0; }
+  .pk-tree .tree-row { min-height: 28px; } .pk-tree .tree-main { min-height: 0; padding: 2px 4px; }
+  .dialog.wide .pk-line .num { min-height: 0; padding: 4px 8px; font-size: 12px; }
+  .dialog.wide .pk-line { font-size: 12px; }
+  .dialog.wide .pk-btns button { min-height: 0; padding: 7px 12px; }
+}
+/* The audio picker takes nearly the whole height; the folder tree gets what the rest leaves */
+.dialog.wide:has(.pk-tree) { display: flex; flex-direction: column; height: min(90vh, 900px); overflow: hidden; }
+.dialog.wide:has(.pk-tree) > * { flex: none; }
+.dialog.wide:has(.pk-tree) > .pk-tree { flex: 1 1 0; min-height: 90px; max-height: none; }
+@media (max-width: 720px), (max-height: 500px) and (pointer: coarse) { .dialog.wide:has(.pk-tree) { height: 92dvh; } }

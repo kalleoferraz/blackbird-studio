@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, assetUrl } from './api.ts';
 import type { Cue, LibFile, SegmentContent } from './types.ts';
-import { Dialog, errorText } from './ui.tsx';
+import { Dialog, errorText, useLocalState } from './ui.tsx';
 import { formatMs, formatTenths, parseLength } from './format.ts';
 
 const MIN_MS = 100;
@@ -101,6 +101,65 @@ function Axis({ from, to }: { from: number; to: number }) {
       {ticks.map((t) => <span key={t} style={{ left: ((t * 1000 - from) / (to - from)) * w }}>{formatMs(t * 1000).replace(/\.0$/, '')}</span>)}
     </div>
   );
+}
+
+interface TreeNode { name: string; path: string; folders: TreeNode[]; files: LibFile[] }
+
+/** The folders of the library that hold audio (and only those), from the flat list of audio files. */
+function audioTree(files: LibFile[]): TreeNode {
+  const root: TreeNode = { name: '', path: '', folders: [], files: [] };
+  for (const f of files) {
+    const parts = f.path.split('/');
+    parts.pop();
+    let node = root;
+    for (const part of parts) {
+      const path = node.path ? `${node.path}/${part}` : part;
+      let next = node.folders.find((c) => c.path === path);
+      if (!next) { next = { name: part, path, folders: [], files: [] }; node.folders.push(next); }
+      node = next;
+    }
+    node.files.push(f);
+  }
+  const sort = (n: TreeNode) => { n.folders.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })); n.files.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })); n.folders.forEach(sort); };
+  sort(root);
+  return root;
+}
+
+/** A small version of the library panel: only the folders with audio, which open and close here independently of the panel's own. */
+function AudioTree({ projectId, files, selected, onSelect }: { projectId: string; files: LibFile[]; selected: string | null; onSelect: (f: LibFile) => void }) {
+  const [open, setOpen] = useLocalState<string[]>(`rs.audioPickOpen.${projectId}`, []);
+  const root = useMemo(() => audioTree(files), [files]);
+  const sel = files.find((f) => f.id === selected);
+  const keep = new Set(open);
+  if (sel) { const parts = sel.path.split('/'); parts.pop(); parts.forEach((_, i) => keep.add(parts.slice(0, i + 1).join('/'))); } // the chosen file is always visible
+  const toggle = (path: string) => setOpen(keep.has(path) ? open.filter((o) => o !== path && !o.startsWith(path + '/')) : [...open, path]);
+  const folderIcon = (isOpen: boolean) => isOpen
+    ? <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H7.2a2 2 0 0 0-1.9 1.4L3 17z" fill="#C9830A" /><path d="M5.3 11.4A2 2 0 0 1 7.2 10H21l-2.3 7.6a2 2 0 0 1-1.9 1.4H3z" fill="#EF9B0B" /></svg>
+    : <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="#EF9B0B" /></svg>;
+  const render = (n: TreeNode, depth: number): React.ReactNode => (
+    <>
+      {n.folders.map((f) => {
+        const isOpen = keep.has(f.path);
+        return (
+          <div key={f.path}>
+            <div className="tree-row" style={{ paddingLeft: depth * 14 }}>
+              <button className="tree-main" onClick={() => toggle(f.path)}><span className="tree-icon folder">{folderIcon(isOpen)}</span><span className="grow lib-name">{f.name}</span></button>
+            </div>
+            {isOpen && render(f, depth + 1)}
+          </div>
+        );
+      })}
+      {n.files.map((f) => (
+        <div key={f.id} className={'tree-row pk-file' + (f.id === selected ? ' sel' : '')} style={{ paddingLeft: depth * 14 }}>
+          <button className="tree-main" onClick={() => onSelect(f)}>
+            <span className="tree-icon">♪</span>
+            <span className="grow"><span className="lib-name">{f.name}</span>{f.durationMs ? <span className="muted small lib-meta"> · {formatMs(f.durationMs).replace(/\.0$/, '')}</span> : null}</span>
+          </button>
+        </div>
+      ))}
+    </>
+  );
+  return <div className="pk-tree">{render(root, 0)}</div>;
 }
 
 export function AudioPicker({ cue, content, colour, onContent, onClose, onError }: {
@@ -219,22 +278,16 @@ export function AudioPicker({ cue, content, colour, onContent, onClose, onError 
         <p className="muted">There is no audio in the library yet. Upload a WAV or MP3 in the Library, then choose it here.</p>
       ) : (
         <>
-          <div className="pk-line">
-            <span>File</span>
-            <select value={assetId ?? ''} onChange={(e) => { stop(); setAssetId(e.target.value); setStart(0); }}>
-              {(files ?? []).map((f) => <option key={f.id} value={f.id}>{f.path}</option>)}
-            </select>
-            {dur > 0 && <span className="muted">· {formatMs(dur).replace(/\.0$/, '')} long</span>}
-          </div>
+          <AudioTree projectId={content.segment.projectId} files={files ?? []} selected={assetId} onSelect={(f) => { stop(); setAssetId(f.id); setStart(0); }} />
           <div className="pk-line">
             <label className="rb"><input type="radio" checked={keep} onChange={() => setKeep(true)} /> Keep the cue length</label>
             <label className="rb"><input type="radio" checked={!keep} onChange={() => setKeep(false)} /> Cue length follows the piece</label>
           </div>
           <div className="wvlabel">Whole file: drag the frame to choose where the piece starts</div>
-          <WaveBox peaks={peaks} from={0} to={dur || 1} start={start} len={len} locked={keep} colour={colour} height={84} playMs={playMs} onChange={place} onDrag={setDragging} />
+          <WaveBox peaks={peaks} from={0} to={dur || 1} start={start} len={len} locked={keep} colour={colour} height={48} playMs={playMs} onChange={place} onDrag={setDragging} />
           <Axis from={0} to={dur || 1} />
           <div className="wvlabel">Zoomed on the piece: fine tuning</div>
-          <WaveBox peaks={peaks} from={view[0]} to={view[1]} start={start} len={len} locked={keep} colour={colour} height={120} playMs={playMs} hilite onChange={place} onDrag={setDragging} />
+          <WaveBox peaks={peaks} from={view[0]} to={view[1]} start={start} len={len} locked={keep} colour={colour} height={64} playMs={playMs} hilite onChange={place} onDrag={setDragging} />
           <Axis from={view[0]} to={view[1]} />
           <div className="pk-line">
             <span>From</span>
@@ -244,14 +297,13 @@ export function AudioPicker({ cue, content, colour, onContent, onClose, onError 
             <span>length</span>
             {edit?.k === 'len' ? <input className="num" autoFocus value={edit.v} onChange={(e) => setEdit({ k: 'len', v: e.target.value })} onBlur={commitEdit} onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEdit(null); }} />
               : <button className="num" disabled={keep} onClick={() => setEdit({ k: 'len', v: formatMs(len) })}>{formatTenths(len)}</button>}
-            <span className="grow" />
-            <button onClick={playMs === null ? preview : stop}>{playMs === null ? '▶ Preview the piece' : '■ Stop'}</button>
           </div>
           {shorter && <p className="muted small">The file is shorter than the cue, so the cue will shrink to {formatTenths(dur)}.</p>}
         </>
       )}
       <div className="row end pk-btns">
-        <span className="muted small grow">The file is not changed. The cue only remembers which piece of it to play.</span>
+        <button disabled={!file || !peaks} onClick={playMs === null ? preview : stop}>{playMs === null ? '▶ Preview the piece' : '■ Stop'}</button>
+        <span className="grow" />
         <button onClick={() => { stop(); onClose(); }}>Cancel</button>
         <button className="primary" disabled={busy || !file || !peaks} onClick={() => void use()}>Use this piece</button>
       </div>
