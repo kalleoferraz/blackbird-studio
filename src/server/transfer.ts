@@ -582,6 +582,11 @@ export function registerTransferRoutes(app: FastifyInstance): void {
   app.get('/api/projects/:id/export', auth, async (request, reply) => {
     const id = checkId((request.params as { id: string }).id);
     const { bundle, files, name } = await prepareExport(request.account!.id, id);
+    // The browser sends its own local time ("DD.MM.YY HH:mm") for the file name; without it the server's clock is used.
+    const sent = (request.query as { stamp?: string }).stamp;
+    const d = new Date(), p2 = (n: number) => String(n).padStart(2, '0');
+    const stamp = sent && /^\d{2}\.\d{2}\.\d{2} \d{2}:\d{2}$/.test(sent) ? sent
+      : `${p2(d.getDate())}.${p2(d.getMonth() + 1)}.${p2(d.getFullYear() % 100)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
     const store = blobStore();
     const archive = new ZipArchive({ zlib: { level: 3 } });
     archive.on('warning', (e) => request.log.warn(e));
@@ -598,7 +603,7 @@ export function registerTransferRoutes(app: FastifyInstance): void {
     void archive.finalize();
     return reply
       .header('content-type', 'application/zip')
-      .header('content-disposition', attachment(`${name}.zip`))
+      .header('content-disposition', attachment(`${name} - ${stamp}.zip`))
       .header('cache-control', 'no-store')
       .send(archive);
   });

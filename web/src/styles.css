@@ -159,7 +159,7 @@ textarea.cue-text { resize: none; overflow: hidden; padding: 0; background: tran
 a.button { display: inline-block; border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; color: var(--text); }
 .avatar { width: 28px; height: 28px; flex: none; border-radius: 50%; border: 2px solid; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; }
 .avatar img { width: 100%; height: 100%; object-fit: cover; } .avatar.big { width: 72px; height: 72px; font-size: .75rem; } .picture-row { align-items: center; gap: 10px; }
-.pc-cover { margin: -16px -16px 12px; height: 150px; overflow: hidden; border-radius: var(--radius) var(--radius) 0 0; background: rgba(0,0,0,.25); } .pc-cover img { width: 100%; height: 100%; object-fit: cover; }
+.pc-cover { margin: -16px -16px 12px; height: 230px; overflow: hidden; border-radius: var(--radius) var(--radius) 0 0; background: rgba(0,0,0,.25); } .pc-cover img { width: 100%; height: 100%; object-fit: cover; }
 .head { align-items: flex-start; gap: 18px; }
 .cover { position: relative; width: 300px; flex: none; aspect-ratio: 2 / 3; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,.05); display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); }
 .cover img { width: 100%; height: 100%; object-fit: cover; }

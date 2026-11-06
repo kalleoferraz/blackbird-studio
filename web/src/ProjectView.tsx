@@ -9,6 +9,12 @@ import { AccountMenu } from './AccountMenu.tsx';
 import { Confirm, Dialog, errorText } from './ui.tsx';
 import { RestoreLibrary } from './RestoreLibrary.tsx';
 
+/** The local time for the exported file's name: DD.MM.YY HH:mm. */
+function stamp(): string {
+  const d = new Date(), p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${p(d.getFullYear() % 100)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export function ProjectView({ me, projectId, onLogout, onAccount }: { me: Me; projectId: string; onLogout: () => void; onAccount: () => void }) {
   const [p, setP] = useState<ProjectCard | null>(null);
   const [langs, setLangs] = useState<Language[]>([]);
@@ -29,7 +35,7 @@ export function ProjectView({ me, projectId, onLogout, onAccount }: { me: Me; pr
   const patch = async (body: object) => { try { setP(await api<ProjectCard>('PATCH', `/api/projects/${projectId}`, body)); setError(''); } catch (e) { setError(errorText(e)); } };
   const exportProject = async () => {
     setExporting(true);
-    try { await api('GET', `/api/projects/${projectId}/export/check`); startDownload(`/api/projects/${projectId}/export`); setError(''); } catch (e) { setError(errorText(e)); } finally { setExporting(false); }
+    try { await api('GET', `/api/projects/${projectId}/export/check`); startDownload(`/api/projects/${projectId}/export?stamp=${encodeURIComponent(stamp())}`); setError(''); } catch (e) { setError(errorText(e)); } finally { setExporting(false); }
   };
   if (error && !p) return <div className="page"><a href="#/">← Projects</a><p className="error">{error}</p></div>;
   if (!p) return <div className="center muted">Loading…</div>;
