@@ -20,7 +20,7 @@ const RULER_H = 22;
 const MIN_CUE_MS = 100;
 const MAX_MS = 99 * 60 * 1000;
 const DRAG_PX = 3;
-const DEFAULT_PPS = 60; // a new scene opens zoomed in enough to show the grid of seconds
+const DEFAULT_PPS = 34; // a new scene opens zoomed in enough to show the grid of seconds
 const SNAP_MS = 1000; // a dragged cue is pulled to an edge of another cue when it is this near
 
 const clock = (ms: number) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };

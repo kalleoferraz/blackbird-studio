@@ -58,8 +58,9 @@ export function formatMinutes(ms: number): string {
   const m = Math.floor(total / 60), sec = total % 60;
   return m > 0 ? `${m} min ${sec} s` : `${sec} s`;
 }
-/** Cue duration with one decimal of a second ("4.3 s"). */
+/** Cue duration with one decimal of a second ("4.3 s"); from one minute up, minutes and whole seconds ("2min 32s"). */
 export function formatTenths(ms: number): string {
+  if (ms >= 60000) { const t = Math.round(ms / 1000); return `${Math.floor(t / 60)}min ${t % 60}s`; }
   return `${(Math.round(ms / 100) / 10).toFixed(1)} s`;
 }
 
