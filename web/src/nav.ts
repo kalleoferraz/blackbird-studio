@@ -9,7 +9,7 @@ export const RESTART_MS = 3000;
 
 export type Level = 'cue' | 'scene' | 'segment';
 /** The audio a cue plays (its chosen clip). */
-export interface NavClip { assetId: string; light: boolean; offsetMs: number; lengthMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number; speed: number; pitchCents: number; volumePoints: [number, number][] | null }
+export interface NavClip { assetId: string; light: boolean; offsetMs: number; lengthMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number; speed: number; pitchCents: number; volumePoints: [number, number][] | null; speedPoints: [number, number][] | null; pitchPoints: [number, number][] | null }
 export interface NavCue { id: string; startMs: number; lengthMs: number; clip?: NavClip | null; muted?: boolean }
 export interface NavScene { id: string; startMs: number; lengthMs: number; cues: NavCue[]; /** The scene's title, when it has one. */ label?: string | null }
 export interface NavSegment { id: string; scenes: NavScene[] }
@@ -22,7 +22,7 @@ export type Step = { pos: Pos } | { move: Move } | { end: Pos };
 
 function chosenClip(q: SegmentContent['scenes'][number]['cues'][number]): NavClip | null {
   const k = q.clips.find((x) => x.id === q.clipId);
-  return k ? { assetId: k.assetId, light: k.light, offsetMs: k.offsetMs, lengthMs: k.lengthMs, gainDb: k.gainDb, fadeInMs: k.fadeInMs, fadeOutMs: k.fadeOutMs, speed: k.speed, pitchCents: k.pitchCents, volumePoints: k.volumePoints } : null;
+  return k ? { assetId: k.assetId, light: k.light, offsetMs: k.offsetMs, lengthMs: k.lengthMs, gainDb: k.gainDb, fadeInMs: k.fadeInMs, fadeOutMs: k.fadeOutMs, speed: k.speed, pitchCents: k.pitchCents, volumePoints: k.volumePoints, speedPoints: k.speedPoints, pitchPoints: k.pitchPoints } : null;
 }
 
 export function toNav(c: SegmentContent): NavSegment {

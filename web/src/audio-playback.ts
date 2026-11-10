@@ -3,7 +3,7 @@
 import { SoundTouchNode } from '@soundtouchjs/audio-worklet';
 import processorUrl from '@soundtouchjs/audio-worklet/processor?url';
 import { assetUrl } from './api.ts';
-import { envelopeGain } from '../../src/shared/audio-settings.ts';
+import { envelopeGain, envelopeValue, sourceAt } from '../../src/shared/audio-settings.ts';
 import { posKey, type NavClip } from './nav.ts';
 import type { PlaybackStore } from './playback.ts';
 
@@ -11,10 +11,13 @@ const STEP_MS = 30;
 const DRIFT_S = 0.4; // the audio is moved only when it is this far from where the clock says it should be
 const WARM_MS = 3000; // cues starting within this time are loaded in advance
 
+/** The highest the volume envelope goes (dB), 0 without one. */
+const peakDb = (c: NavClip) => (c.volumePoints?.length ? Math.max(0, ...c.volumePoints.map((p) => p[1])) : 0);
+
 const urlOf = (c: NavClip) => assetUrl(c.assetId, c.light);
 
-/** An element routed through the pitch shifter: the element plays at the speed (its own pitch correction off), the shifter sets the pitch. */
-interface Routed { src: MediaElementAudioSourceNode; node: SoundTouchNode; gain: GainNode }
+/** An element routed through Web Audio: for a gain above 1 (an element's own volume stops at 1) and, with `node`, for a pitch: the element plays at the speed (its own pitch correction off), the shifter sets the pitch. */
+interface Routed { src: MediaElementAudioSourceNode; node?: SoundTouchNode; gain: GainNode }
 type Live = { el: HTMLAudioElement; url: string; routed?: Routed };
 
 export class AudioPlayer {
@@ -50,26 +53,38 @@ export class AudioPlayer {
 
   private release(l: Live) {
     l.el.pause();
-    if (l.routed) { l.routed.src.disconnect(); l.routed.node.disconnect(); l.routed.gain.disconnect(); }
+    if (l.routed) { l.routed.src.disconnect(); l.routed.node?.disconnect(); l.routed.gain.disconnect(); }
+  }
+
+  private ensureCtx(): AudioContext | null {
+    if (!this.ctx) { try { this.ctx = new AudioContext(); } catch { return null; } }
+    return this.ctx;
   }
 
   /** The pitch shifter's processor is loaded once, the first time a take has a pitch; until it is ready the take plays at its own pitch. */
   private prepareShifter() {
     if (this.shifter !== 'none') return;
+    const ctx = this.ensureCtx();
+    if (!ctx) { this.shifter = 'failed'; return; }
     this.shifter = 'loading';
-    try {
-      this.ctx = new AudioContext();
-      void SoundTouchNode.register(this.ctx, processorUrl).then(() => { this.shifter = 'ready'; }, () => { this.shifter = 'failed'; });
-    } catch { this.shifter = 'failed'; }
+    SoundTouchNode.register(ctx, processorUrl).then(() => { this.shifter = 'ready'; }, () => { this.shifter = 'failed'; });
   }
 
   private route(l: Live) {
-    const ctx = this.ctx!;
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
     if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined);
-    const src = ctx.createMediaElementSource(l.el), node = new SoundTouchNode({ context: ctx }), gain = ctx.createGain();
-    src.connect(node); node.connect(gain); gain.connect(ctx.destination);
-    l.el.preservesPitch = false;
-    l.routed = { src, node, gain };
+    const src = ctx.createMediaElementSource(l.el), gain = ctx.createGain();
+    src.connect(gain); gain.connect(ctx.destination);
+    l.routed = { src, gain };
+  }
+
+  /** Puts the pitch shifter between the source and the gain of a routed element. */
+  private shift(l: Live) {
+    const r = l.routed!, ctx = this.ctx!;
+    const node = new SoundTouchNode({ context: ctx });
+    r.src.disconnect(); r.src.connect(node); node.connect(r.gain);
+    r.node = node;
   }
 
   private step() {
@@ -89,7 +104,7 @@ export class AudioPlayer {
       if (t < 0) { if (-t <= WARM_MS) { upcoming.add(c.id); this.preload(c.id, clip); } continue; }
       if (t >= len) continue;
       active.add(c.id);
-      const want = (clip.offsetMs + t * clip.speed) / 1000; // a faster take uses more of the file in the same time
+      const want = (clip.offsetMs + sourceAt(clip.speed, clip.speedPoints, t)) / 1000; // a faster take uses more of the file in the same time
       let l = this.live.get(c.id);
       if (l && l.url !== urlOf(clip)) { this.release(l); this.live.delete(c.id); l = undefined; }
       if (!l) {
@@ -104,16 +119,20 @@ export class AudioPlayer {
         if (l.el.paused && !l.el.ended) void l.el.play().catch(() => undefined);
       }
       // Speed (the pitch kept by the browser), pitch (through the shifter) and the volume: the level, the fades and the envelope.
-      if (clip.pitchCents !== 0) this.prepareShifter();
-      if (!l.routed && clip.pitchCents !== 0 && this.shifter === 'ready') this.route(l);
-      if (l.el.playbackRate !== clip.speed) l.el.playbackRate = clip.speed;
-      if (!l.routed) l.el.preservesPitch = true;
+      const rate = clip.speed * envelopeValue(clip.speedPoints, t, 'speed');
+      const cents = clip.pitchCents + envelopeValue(clip.pitchPoints, t, 'pitch');
+      const pitched = clip.pitchCents !== 0 || !!clip.pitchPoints?.length;
+      const boosted = clip.gainDb + peakDb(clip) > 0;
+      if (pitched) this.prepareShifter();
+      if (!l.routed && boosted) this.route(l);
+      if (pitched && this.shifter === 'ready') { if (!l.routed) this.route(l); if (l.routed && !l.routed.node) this.shift(l); }
+      if (Math.abs(l.el.playbackRate - rate) > 0.001) l.el.playbackRate = rate;
+      l.el.preservesPitch = !l.routed?.node;
       const fadeIn = clip.fadeInMs > 0 ? Math.min(1, t / clip.fadeInMs) : 1;
       const fadeOut = clip.fadeOutMs > 0 ? Math.min(1, (len - t) / clip.fadeOutMs) : 1;
       const volume = Math.max(0, 10 ** (clip.gainDb / 20) * fadeIn * fadeOut * envelopeGain(clip.volumePoints, t));
       if (l.routed) {
-        l.routed.node.playbackRate.value = clip.speed;
-        l.routed.node.pitch.value = 2 ** (clip.pitchCents / 1200);
+        if (l.routed.node) { l.routed.node.playbackRate.value = rate; l.routed.node.pitch.value = 2 ** (cents / 1200); }
         l.routed.gain.gain.value = volume;
       } else l.el.volume = Math.min(1, volume);
     }

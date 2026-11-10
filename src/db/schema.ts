@@ -347,6 +347,8 @@ export const clip = mysqlTable(
     // Audio settings of the take. length_ms is the time the piece plays for on the timeline; the piece of the file it takes is length_ms * speed.
     speed: decimal('speed', { precision: 4, scale: 2 }).notNull().default('1.00'), // 0.5 to 2: faster or slower, the pitch kept
     pitchCents: smallint('pitch_cents').notNull().default(0), // -1200 to 1200: higher or lower, the speed kept
+    speedPoints: json('speed_points'), // the same for the speed: factors, relative to the Speed setting
+    pitchPoints: json('pitch_points'), // and for the pitch: cents added to the Pitch setting
     volumePoints: json('volume_points'), // null, or [[ms from the start of the piece, dB], ...] sorted by time: the volume envelope, linear between points
     origin: mysqlEnum('origin', ['human-recorded', 'generated', 'voice-converted']).notNull(),
     createdAt: createdAt(),

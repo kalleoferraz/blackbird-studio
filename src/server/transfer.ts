@@ -5,7 +5,7 @@ import { inTransaction, withDb, type Q } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { touchProject } from '../db/touch.js';
 import { asset, assetPeaks, chapter, character, clip, cue, lane, membership, note, project, scene, segment } from '../db/schema.js';
-import { PITCH_MAX_CENTS, SPEED_MAX, SPEED_MIN, cleanVolumePoints, type VolumePoint } from '../shared/audio-settings.js';
+import { PITCH_MAX_CENTS, SPEED_MAX, SPEED_MIN, cleanPoints, type VolumePoint } from '../shared/audio-settings.js';
 import { COLOUR_PATTERN } from '../shared/palette.js';
 import { languageProfile } from '../shared/languages.js';
 import { parseWav, wavSamples } from '../audio/wav.js';
@@ -102,6 +102,8 @@ export async function buildBundle(q: Q, projectId: string): Promise<Json> {
                     speed: Number(k.speed),
                     pitchCents: k.pitchCents,
                     volumePoints: k.volumePoints,
+                    speedPoints: k.speedPoints,
+                    pitchPoints: k.pitchPoints,
                     origin: k.origin,
                     chosen: c.clipId === k.id,
                     createdAt: iso(k.createdAt),
@@ -197,7 +199,7 @@ export function cleanFolder(raw: string): string | null {
   return clean || null;
 }
 
-interface ParsedClip { asset: number; number: number; offsetMs: number; lengthMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number; loops: number; speed: number; pitchCents: number; volumePoints: VolumePoint[] | null; origin: 'human-recorded' | 'generated' | 'voice-converted'; chosen: boolean; createdAt: Date | null }
+interface ParsedClip { asset: number; number: number; offsetMs: number; lengthMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number; loops: number; speed: number; pitchCents: number; volumePoints: VolumePoint[] | null; speedPoints: VolumePoint[] | null; pitchPoints: VolumePoint[] | null; origin: 'human-recorded' | 'generated' | 'voice-converted'; chosen: boolean; createdAt: Date | null }
 interface ParsedCue { lane: number; type: 'speech' | 'sfx' | 'music'; character: number | null; startMs: number; lengthMs: number; lengthAuto: boolean; muted: boolean; text: string; clips: ParsedClip[] }
 interface ParsedNote {
   type: 'comment' | 'reference' | 'task'; authorKind: 'user' | 'system' | 'llm'; text: string; refKey: string | null; link: string | null;
@@ -300,10 +302,14 @@ export function parseBundle(raw: unknown) {
             const ko = obj(k, wk);
             const gain = typeof ko.gainDb === 'number' && ko.gainDb >= -100 && ko.gainDb <= 100 ? Math.round(ko.gainDb * 100) / 100 : fail(`${wk}.gainDb`, 'expected -100 to 100');
             const speed = ko.speed === undefined ? 1 : typeof ko.speed === 'number' && ko.speed >= SPEED_MIN && ko.speed <= SPEED_MAX ? Math.round(ko.speed * 100) / 100 : fail(`${wk}.speed`, `expected ${SPEED_MIN} to ${SPEED_MAX}`);
-            const points = cleanVolumePoints(ko.volumePoints ?? null, MAX_SCENE_MS);
+            const points = cleanPoints(ko.volumePoints ?? null, MAX_SCENE_MS, 'level');
             if (points === undefined) fail(`${wk}.volumePoints`, 'expected a list of [ms, dB]');
+            const speedPoints = cleanPoints(ko.speedPoints ?? null, MAX_SCENE_MS, 'speed');
+            if (speedPoints === undefined) fail(`${wk}.speedPoints`, 'expected a list of [ms, factor]');
+            const pitchPoints = cleanPoints(ko.pitchPoints ?? null, MAX_SCENE_MS, 'pitch');
+            if (pitchPoints === undefined) fail(`${wk}.pitchPoints`, 'expected a list of [ms, cents]');
             return {
-              speed, pitchCents: ko.pitchCents === undefined ? 0 : int(ko.pitchCents, `${wk}.pitchCents`, -PITCH_MAX_CENTS, PITCH_MAX_CENTS), volumePoints: points ?? null,
+              speed, pitchCents: ko.pitchCents === undefined ? 0 : int(ko.pitchCents, `${wk}.pitchCents`, -PITCH_MAX_CENTS, PITCH_MAX_CENTS), volumePoints: points ?? null, speedPoints: speedPoints ?? null, pitchPoints: pitchPoints ?? null,
               asset: assetRef(ko.asset, `${wk}.asset`) ?? fail(`${wk}.asset`, 'a clip needs a file'),
               number: int(ko.number, `${wk}.number`, 1, 65_535), offsetMs: int(ko.offsetMs, `${wk}.offsetMs`, 0, MAX_SCENE_MS), lengthMs: int(ko.lengthMs, `${wk}.lengthMs`, 100, MAX_SCENE_MS),
               gainDb: gain, fadeInMs: int(ko.fadeInMs, `${wk}.fadeInMs`, 0, MAX_SCENE_MS), fadeOutMs: int(ko.fadeOutMs, `${wk}.fadeOutMs`, 0, MAX_SCENE_MS),
@@ -497,7 +503,7 @@ export async function importBundle(userId: string, raw: unknown, folderOverride?
             for (const k of q.clips) {
               const clipId = newUlid();
               clipRows.push({
-                id: clipId, cueId: ids[qi]!, assetId: assetIds[k.asset]!, number: k.number, offsetMs: k.offsetMs, lengthMs: k.lengthMs, gainDb: k.gainDb.toFixed(2), speed: k.speed.toFixed(2), pitchCents: k.pitchCents, volumePoints: k.volumePoints,
+                id: clipId, cueId: ids[qi]!, assetId: assetIds[k.asset]!, number: k.number, offsetMs: k.offsetMs, lengthMs: k.lengthMs, gainDb: k.gainDb.toFixed(2), speed: k.speed.toFixed(2), pitchCents: k.pitchCents, volumePoints: k.volumePoints, speedPoints: k.speedPoints, pitchPoints: k.pitchPoints,
                 fadeInMs: k.fadeInMs, fadeOutMs: k.fadeOutMs, loops: k.loops, origin: k.origin, createdAt: k.createdAt ?? now,
               });
               if (k.chosen) chosen.push({ cueId: ids[qi]!, clipId });

@@ -39,7 +39,7 @@ import {
   type CuePatch,
   type CueType,
 } from './content.js';
-import { PITCH_MAX_CENTS, SPEED_MAX, SPEED_MIN, cleanVolumePoints } from '../shared/audio-settings.js';
+import { LEVEL_MAX_DB, PITCH_MAX_CENTS, SPEED_MAX, SPEED_MIN, cleanPoints } from '../shared/audio-settings.js';
 import { HttpError, asBody, badRequest, optBool, optInt, optString, reqString } from './http.js';
 
 const MAX_NUMBERED = 99;
@@ -472,7 +472,7 @@ export function registerStoryRoutes(app: FastifyInstance): void {
     const loops = optInt(body, 'loops', -1, 99);
     if (loops !== undefined) patch.loops = loops;
     if ('gainDb' in body) {
-      if (typeof body.gainDb !== 'number' || !Number.isFinite(body.gainDb) || body.gainDb < -60 || body.gainDb > 24) throw badRequest('invalid_gainDb');
+      if (typeof body.gainDb !== 'number' || !Number.isFinite(body.gainDb) || body.gainDb < -60 || body.gainDb > LEVEL_MAX_DB) throw badRequest('invalid_gainDb');
       patch.gainDb = body.gainDb;
     }
     if ('speed' in body) {
@@ -481,10 +481,11 @@ export function registerStoryRoutes(app: FastifyInstance): void {
     }
     const pitchCents = optInt(body, 'pitchCents', -PITCH_MAX_CENTS, PITCH_MAX_CENTS);
     if (pitchCents !== undefined) patch.pitchCents = pitchCents;
-    if ('volumePoints' in body) {
-      const points = cleanVolumePoints(body.volumePoints, MAX_SCENE_MS);
-      if (points === undefined) throw badRequest('invalid_volumePoints');
-      patch.volumePoints = points;
+    for (const [key, kind] of [['volumePoints', 'level'], ['speedPoints', 'speed'], ['pitchPoints', 'pitch']] as const) {
+      if (!(key in body)) continue;
+      const points = cleanPoints(body[key], MAX_SCENE_MS, kind);
+      if (points === undefined) throw badRequest(`invalid_${key}`);
+      patch[key] = points;
     }
     const cueId = await cueOfClip(id);
     return segmentWrite(request, 'cue', cueId, async (tx) => {

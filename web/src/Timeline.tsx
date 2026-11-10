@@ -11,8 +11,8 @@ import { Menu, errorText, useLocalState } from './ui.tsx';
 import { AudioPicker } from './AudioPicker.tsx';
 import { audioMenuItems } from './audioMenu.ts';
 import { plainMd } from './md.tsx';
-import { MAX_VOLUME_POINTS, VOLUME_MAX_DB, VOLUME_MIN_DB } from '../../src/shared/audio-settings.ts';
-import { AudioSliders } from './AudioSettings.tsx';
+import { ENVELOPE_RANGE, MAX_VOLUME_POINTS, VOLUME_MAX_DB, VOLUME_MIN_DB, sourceAt, type EnvelopeKind } from '../../src/shared/audio-settings.ts';
+import { AudioSliders, ENVELOPE_NAME, type AudioEdit } from './AudioSettings.tsx';
 import { RemoveAudioDialog } from './RemoveAudio.tsx';
 
 const LANE_H = 54;
@@ -31,7 +31,7 @@ interface Ask { drag: Drag; later: number; x: number; y: number; clamped: boolea
 export function Timeline({ content, readOnly, onContent, onError, audioEdit, onAudioEdit }: {
   content: SegmentContent; readOnly: boolean; onContent: (c: SegmentContent) => void; onError: (m: string) => void;
   /** The cue open for audio editing (taller, with its volume envelope and a panel of settings), and the way to open or close it. */
-  audioEdit: string | null; onAudioEdit: (cueId: string | null) => void;
+  audioEdit: AudioEdit | null; onAudioEdit: (e: AudioEdit | null) => void;
 }) {
   const nav = useNav();
   const store = nav?.store;
@@ -117,31 +117,32 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
   }, [content.lanes, scene.cues]);
 
   // The lane of the cue open for audio editing is half as tall again, so the volume envelope has room; the others move down with a transition.
-  const editCue = audioEdit ? scene.cues.find((c) => c.id === audioEdit) : undefined;
+  const editId = audioEdit?.cueId ?? null;
+  const editCue = editId ? scene.cues.find((c) => c.id === editId) : undefined;
   const laneH = lanes.map((l) => (editCue && l.id === editCue.laneId ? Math.round(LANE_H * 1.5) : LANE_H));
   const laneTop = laneH.map((_, i) => RULER_H + laneH.slice(0, i).reduce((a, b) => a + b, 0));
   const totalH = RULER_H + laneH.reduce((a, b) => a + b, 0);
   // Opened from the script's menu for a cue of another scene: the playhead goes there, which shows that scene.
   useEffect(() => {
-    if (!audioEdit || editCue) return;
-    const si = content.scenes.findIndex((s) => s.cues.some((c) => c.id === audioEdit));
-    if (si >= 0) store?.seek({ segmentId: content.segment.id, scene: si, ms: content.scenes[si]!.cues.find((c) => c.id === audioEdit)!.startMs });
-  }, [audioEdit]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!editId || editCue) return;
+    const si = content.scenes.findIndex((s) => s.cues.some((c) => c.id === editId));
+    if (si >= 0) store?.seek({ segmentId: content.segment.id, scene: si, ms: content.scenes[si]!.cues.find((c) => c.id === editId)!.startMs });
+  }, [editId]); // eslint-disable-line react-hooks/exhaustive-deps
   // A press outside the edited cue, its panel and the menus ends the editing; the lane shrinks back.
   useEffect(() => {
-    if (!audioEdit) return;
+    if (!editId) return;
     const down = (e: PointerEvent) => {
       if (!(e.target as HTMLElement).closest('.tl-cue.audio-edit, .tl-audio-panel, .menu, .backdrop')) onAudioEdit(null);
     };
     document.addEventListener('pointerdown', down, true);
     return () => document.removeEventListener('pointerdown', down, true);
-  }, [audioEdit, onAudioEdit]);
+  }, [editId, onAudioEdit]);
   useEffect(() => {
-    if (!audioEdit) return;
+    if (!editId) return;
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement).closest('input, textarea')) onAudioEdit(null); };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, [audioEdit, onAudioEdit]);
+  }, [editId, onAudioEdit]);
 
   const seek = (ms: number) => store?.seek({ segmentId: content.segment.id, scene: sceneIndex, ms: Math.max(0, Math.round(ms)) });
   const seekAt = (clientX: number) => {
@@ -268,11 +269,23 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
     document.body.classList.add('resizing');
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
+  // The panel is never taller than its lanes need: the ruler, the lanes and room for the last lane to grow while its audio is edited.
+  const sectionRef = useRef<HTMLElement>(null);
+  const fitHeight = () => {
+    const chrome = sectionRef.current && scroller.current ? sectionRef.current.offsetHeight - scroller.current.offsetHeight : 44;
+    return Math.round(chrome + RULER_H + lanes.length * LANE_H + LANE_H * 0.5 + 28); // 28: a margin and the horizontal scroll bar
+  };
+  // A scene with fewer lanes shortens the panel; with more, the panel keeps its height and scrolls.
+  useEffect(() => {
+    const fit = fitHeight();
+    if (height > fit) setHeight(fit);
+  }, [lanes.length, scene.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const startResize = (e: RPointerEvent) => {
     e.preventDefault();
     const y0 = e.clientY, h0 = height;
+    const max = Math.min(600, Math.max(fitHeight(), 100)), min = Math.min(120, max);
     let latest = h0;
-    const move = (m: PointerEvent) => { latest = Math.max(120, Math.min(600, h0 + (y0 - m.clientY))); setHeight(latest); };
+    const move = (m: PointerEvent) => { latest = Math.max(min, Math.min(max, h0 + (y0 - m.clientY))); setHeight(latest); };
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); document.body.classList.remove('resizing'); };
     document.body.classList.add('resizing');
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
@@ -297,7 +310,7 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
   };
 
   return (
-    <section className="timeline" style={{ height }} data-testid="timeline">
+    <section className="timeline" ref={sectionRef} style={{ height }} data-testid="timeline">
       <div className="tl-divider" onPointerDown={startResize} title="Drag to resize" />
       <div className="tl-head">
         <b>Timeline</b>
@@ -332,9 +345,9 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
               const s = shown(c);
               return <CueBlock key={c.id} cue={c} lane={lanes[li]!} left={x(s.start)} width={Math.max(3, x(s.len))} lengthMs={s.len}
                 top={laneTop[li]!} h={laneH[li]! - 6} now={c.id === curCue} sel={c.id === target?.id} dragging={view?.cueId === c.id} readOnly={readOnly}
-                editing={c.id === audioEdit} onEditAudio={() => onAudioEdit(c.id)}
+                editing={c.id === editId ? audioEdit!.kind : null} onEditAudio={() => onAudioEdit({ cueId: c.id, kind: 'level' })}
                 onSeekIn={(ms) => seek(c.startMs + ms)}
-                onEnvelope={(points) => void runOnCue('PATCH', `/api/clips/${c.clipId}`, { volumePoints: points })}
+                onEnvelope={(points) => void runOnCue('PATCH', `/api/clips/${c.clipId}`, { [ENVELOPE_KEY[audioEdit!.kind]]: points })}
                 onMove={begin(c, 'move')} onResize={begin(c, 'resize')} onMenu={openMenu(c, lanes[li]!)} />;
             })}
             {editCue && (() => {
@@ -345,8 +358,8 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
               return (
                 <div className="tl-audio-panel" style={{ left, top: laneTop[li]! + 3 }} onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
                   <div className="tl-ap-head"><b>Audio settings</b><button className="tl-ap-done" onClick={() => onAudioEdit(null)}>Done</button></div>
-                  <AudioSliders clip={k} run={(m, u, b) => void runOnCue(m, u, b)} />
-                  <p className="muted small">Double-click the cue to add a volume point, drag a point to move it, double-click a point to remove it. A click moves the playhead.</p>
+                  <AudioSliders clip={k} run={(m, u, b) => void runOnCue(m, u, b)} env={audioEdit!.kind} onEnv={(kind) => onAudioEdit({ cueId: editCue.id, kind })} />
+                  <p className="muted small">Showing the {ENVELOPE_NAME[audioEdit!.kind].toLowerCase()} envelope. Double-click the cue to add a point, drag a point to move it, double-click a point to remove it. A click moves the playhead.</p>
                 </div>);
             })()}
             <Playhead sceneId={scene.id} x={x} />
@@ -354,7 +367,7 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
         </div>
       </div>
       {menu && <Menu anchor={{ x: menu.x, y: menu.y }} onClose={() => setMenu(null)}
-        items={audioMenuItems(menu.cue, { nav, run: (m, u, b) => void runOnCue(m, u, b), chooseAudio: () => setPicking({ cue: menu.cue, colour: menu.colour }), removeAudio: () => setRemoving(menu.cue), edit: () => onAudioEdit(menu.cue.id) })} />}
+        items={audioMenuItems(menu.cue, { nav, run: (m, u, b) => void runOnCue(m, u, b), chooseAudio: () => setPicking({ cue: menu.cue, colour: menu.colour }), removeAudio: () => setRemoving(menu.cue), edit: (kind) => onAudioEdit({ cueId: menu.cue.id, kind }) })} />}
       {picking && <AudioPicker cue={picking.cue} content={content} colour={picking.colour} onContent={onContent} onError={onError} onClose={() => setPicking(null)} />}
       {removing && <RemoveAudioDialog cue={removing} onContent={onContent} onError={onError} onClose={() => setRemoving(null)} />}
       {ask && (
@@ -381,7 +394,7 @@ const Playhead = memo(function Playhead({ sceneId, x }: { sceneId: string; x: (m
 
 const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top, h, now, sel, dragging, readOnly, editing, onEditAudio, onEnvelope, onSeekIn, onMove, onResize, onMenu }: {
   cue: Cue; lane: Lane; left: number; width: number; lengthMs: number; top: number; h: number; now: boolean; sel: boolean; dragging: boolean; readOnly: boolean;
-  editing: boolean; onEditAudio: () => void; onEnvelope: (points: [number, number][] | null) => void; onSeekIn: (ms: number) => void;
+  editing: EnvelopeKind | null; onEditAudio: () => void; onEnvelope: (points: [number, number][] | null) => void; onSeekIn: (ms: number) => void;
   onMove: (e: RPointerEvent) => void; onResize: (e: RPointerEvent) => void; onMenu: (e: React.MouseEvent) => void;
 }) {
   const nav = useNav();
@@ -404,8 +417,8 @@ const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top,
       style={{ left, width, top: top + 3, height: h, '--c': colour } as React.CSSProperties}
       onPointerDown={editing ? undefined : onMove} onContextMenu={onMenu} title={cue.text || cue.type}
       onDoubleClick={() => { if (clip && !readOnly && !editing) onEditAudio(); }}>
-      {clip && peaks && <Wave peaks={peaks} offsetMs={clip.offsetMs} clipMs={clipMs} lengthMs={lengthMs} width={width} colour={colour} speed={clip.speed} height={h} />}
-      {clip && editing && !readOnly ? <EnvelopeEditor points={clip.volumePoints} lengthMs={lengthMs} width={width} height={h} onChange={onEnvelope} onSeek={(ms) => onSeekIn(ms)} />
+      {clip && peaks && <Wave peaks={peaks} offsetMs={clip.offsetMs} clipMs={clipMs} lengthMs={lengthMs} width={width} colour={colour} speed={clip.speed} speedPoints={clip.speedPoints} height={h} />}
+      {clip && editing && !readOnly ? <EnvelopeEditor key={editing} kind={editing} points={clip[ENVELOPE_KEY[editing]]} lengthMs={lengthMs} width={width} height={h} onChange={onEnvelope} onSeek={(ms) => onSeekIn(ms)} />
         : clip && Array.isArray(clip.volumePoints) && clip.volumePoints.length > 0 && <EnvelopeLine points={clip.volumePoints} lengthMs={lengthMs} width={width} height={h} />}
       <span className="tl-text">{plainMd(cue.text) || (cue.type === 'speech' ? '' : cue.type)}</span>
       {!readOnly && <div className="tl-grip" onPointerDown={onResize} />}
@@ -413,20 +426,38 @@ const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top,
   );
 });
 
-/** The volume envelope being edited on the cue: click to add a point, drag to move it, double-click a point to remove it. */
-export function EnvelopeEditor({ points, lengthMs, width, height, onChange, onSeek }: { points: [number, number][] | null; lengthMs: number; width: number; height: number; onChange: (p: [number, number][] | null) => void; /** A single click: the playing time (ms from the start of the take) to move the playhead to. */ onSeek: (ms: number) => void }) {
+/** The vertical scale of an envelope: the top is the highest value, and a speed is spread by octaves so that 1 sits in the middle. */
+function envScale(kind: EnvelopeKind, height: number) {
+  const { min, max, neutral } = ENVELOPE_RANGE[kind];
+  const f = kind === 'speed' ? Math.log2 : (v: number) => v, g = kind === 'speed' ? (v: number) => 2 ** v : (v: number) => v;
+  const span = Math.max(1, height - 6);
+  const y = (v: number) => 3 + ((f(max) - f(v)) / (f(max) - f(min))) * span;
+  const value = (py: number): number => {
+    if (Math.abs(py - y(neutral)) < 5) return neutral; // sticks to "no change"
+    const raw = g(f(max) - ((py - 3) / span) * (f(max) - f(min)));
+    const clamped = Math.max(min, Math.min(max, raw));
+    return kind === 'level' ? Math.round(clamped * 2) / 2 : kind === 'pitch' ? Math.round(clamped / 10) * 10 : Math.round(clamped * 100) / 100;
+  };
+  return { y, value };
+}
+const envText = (kind: EnvelopeKind, v: number) => (kind === 'level' ? `${v > 0 ? '+' : ''}${v.toFixed(1)} dB` : kind === 'pitch' ? `${v > 0 ? '+' : ''}${(v / 100).toFixed(1)} st` : `${v.toFixed(2)}×`);
+
+/** The clip field that holds the envelope of each setting. */
+export const ENVELOPE_KEY = { level: 'volumePoints', pitch: 'pitchPoints', speed: 'speedPoints' } as const;
+
+/** The envelope being edited on the cue: click to add a point, drag to move it, double-click a point to remove it. */
+export function EnvelopeEditor({ kind, points, lengthMs, width, height, onChange, onSeek }: { kind: EnvelopeKind; points: [number, number][] | null; lengthMs: number; width: number; height: number; onChange: (p: [number, number][] | null) => void; /** A single click: the playing time (ms from the start of the take) to move the playhead to. */ onSeek: (ms: number) => void }) {
   const [pts, setPts] = useState<[number, number][]>(Array.isArray(points) ? points : []);
   const dragging = useRef<number | null>(null);
   const moved = useRef(false);
   const lastTap = useRef<{ i: number | null; t: number; x: number; y: number } | null>(null);
   useEffect(() => { if (dragging.current === null) setPts(Array.isArray(points) ? points : []); }, [points]);
-  const y = (db: number) => 3 + ((VOLUME_MAX_DB - db) / (VOLUME_MAX_DB - VOLUME_MIN_DB)) * (height - 6);
+  const { y, value } = envScale(kind, height);
   const px = (ms: number) => Math.max(0, Math.min(width, (ms / Math.max(1, lengthMs)) * width));
   const at = (e: React.PointerEvent): [number, number] => {
     const r = e.currentTarget.closest('svg')!.getBoundingClientRect();
     const ms = Math.max(0, Math.min(lengthMs, ((e.clientX - r.left) / Math.max(1, r.width)) * lengthMs));
-    const db = VOLUME_MAX_DB - ((e.clientY - r.top - 3) / Math.max(1, r.height - 6)) * (VOLUME_MAX_DB - VOLUME_MIN_DB);
-    return [Math.round(ms), Math.round(Math.max(VOLUME_MIN_DB, Math.min(VOLUME_MAX_DB, db)) * 2) / 2];
+    return [Math.round(ms), value(e.clientY - r.top)];
   };
   const commit = (list: [number, number][]) => onChange(list.length ? [...list].sort((a, b) => a[0] - b[0]) : null);
   const start = (i: number | null) => (e: React.PointerEvent) => {
@@ -449,12 +480,12 @@ export function EnvelopeEditor({ points, lengthMs, width, height, onChange, onSe
   const move = (e: React.PointerEvent) => { const i = dragging.current; if (i === null) return; moved.current = true; const v = at(e); setPts((p) => p.map((q, k) => (k === i ? v : q))); };
   const end = () => { if (dragging.current === null) return; dragging.current = null; if (moved.current) commit(pts); };
   const sorted = [...pts].sort((a, b) => a[0] - b[0]);
-  const d = sorted.length ? `M0,${y(sorted[0]![1])} ${sorted.map(([ms, db]) => `L${px(ms)},${y(db)}`).join(' ')} L${width},${y(sorted[sorted.length - 1]![1])}` : `M0,${y(0)} L${width},${y(0)}`;
+  const d = sorted.length ? `M0,${y(sorted[0]![1])} ${sorted.map(([ms, db]) => `L${px(ms)},${y(db)}`).join(' ')} L${width},${y(sorted[sorted.length - 1]![1])}` : `M0,${y(ENVELOPE_RANGE[kind].neutral)} L${width},${y(ENVELOPE_RANGE[kind].neutral)}`;
   return (
-    <svg className="tl-envelope edit" width={width} height={height} onPointerDown={start(null)} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
-      <line x1={0} x2={width} y1={y(0)} y2={y(0)} className="zero" />
+    <svg className={'tl-envelope edit k-' + kind} width={width} height={height} onPointerDown={start(null)} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
+      <line x1={0} x2={width} y1={y(ENVELOPE_RANGE[kind].neutral)} y2={y(ENVELOPE_RANGE[kind].neutral)} className="zero" />
       <path d={d} className={sorted.length ? '' : 'flat'} />
-      {pts.map(([ms, db], i) => <g key={i} onPointerDown={start(i)}><circle className="hit" cx={px(ms)} cy={y(db)} r={16} /><circle className="dot" cx={px(ms)} cy={y(db)} r={5} /><title>{`${(ms / 1000).toFixed(2)} s · ${db.toFixed(1)} dB`}</title></g>)}
+      {pts.map(([ms, db], i) => <g key={i} onPointerDown={start(i)}><circle className="hit" cx={px(ms)} cy={y(db)} r={16} /><circle className="dot" cx={px(ms)} cy={y(db)} r={5} /><title>{`${(ms / 1000).toFixed(2)} s · ${envText(kind, db)}`}</title></g>)}
     </svg>
   );
 }
@@ -468,7 +499,7 @@ function EnvelopeLine({ points, lengthMs, width, height }: { points: [number, nu
   return <svg className="tl-envelope" width={width} height={height} aria-hidden="true"><path d={d} /></svg>;
 }
 
-export function Wave({ peaks, offsetMs, clipMs, lengthMs, width, colour, speed, height }: { peaks: Peaks; offsetMs: number; clipMs: number; lengthMs: number; width: number; colour: string; speed: number; height: number }) {
+export function Wave({ peaks, offsetMs, clipMs, lengthMs, width, colour, speed, speedPoints, height }: { peaks: Peaks; offsetMs: number; clipMs: number; lengthMs: number; width: number; colour: string; speed: number; speedPoints?: [number, number][] | null; height: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const h = height;
   const w = Math.min(4000, Math.max(1, Math.round(width)));
@@ -484,8 +515,8 @@ export function Wave({ peaks, offsetMs, clipMs, lengthMs, width, colour, speed, 
     const span = Math.max(1, Math.round((played / Math.max(1, lengthMs)) * w));
     const cols = Math.max(1, Math.floor(span / (BAR + GAP)));
     for (let k = 0; k < cols; k++) {
-      const a = Math.floor((offsetMs + (k / cols) * played * speed) / peaks.step);
-      const b = Math.max(a + 1, Math.floor((offsetMs + ((k + 1) / cols) * played * speed) / peaks.step));
+      const a = Math.floor((offsetMs + sourceAt(speed, speedPoints, (k / cols) * played)) / peaks.step);
+      const b = Math.max(a + 1, Math.floor((offsetMs + sourceAt(speed, speedPoints, ((k + 1) / cols) * played)) / peaks.step));
       let m = 0;
       for (let i = a; i < b && i < peaks.data.length; i++) m = Math.max(m, peaks.data[i]!);
       const bar = m === 0 ? BAR : Math.max(BAR + 1, (m / 255) * (h - 8));
@@ -493,6 +524,6 @@ export function Wave({ peaks, offsetMs, clipMs, lengthMs, width, colour, speed, 
       g.roundRect(k * (BAR + GAP), (h - bar) / 2, BAR, bar, BAR / 2);
       g.fill();
     }
-  }, [peaks, offsetMs, clipMs, lengthMs, w, h, colour, speed]);
+  }, [peaks, offsetMs, clipMs, lengthMs, w, h, colour, speed, speedPoints]);
   return <canvas ref={ref} className="tl-wave" />;
 }

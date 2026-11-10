@@ -10,7 +10,7 @@ import { closeGap, openGap, PARKED } from '../db/positions.js';
 import { asset, assetPeaks, chapter, character, clip, cue, lane, project, segment, scene } from '../db/schema.js';
 import { MIN_CUE_MS, estimateSpeechMs, msPerUnit, speechUnits, type LearnedSpeech } from '../shared/estimate.js';
 import { ripple, type RippleCue } from '../shared/ripple.js';
-import type { VolumePoint } from '../shared/audio-settings.js';
+import { sourceAt, type VolumePoint } from '../shared/audio-settings.js';
 import { HttpError, badRequest, notFound } from './http.js';
 
 export type CueType = 'speech' | 'sfx' | 'music';
@@ -592,6 +592,8 @@ export interface ClipView {
   speed: number;
   pitchCents: number;
   volumePoints: VolumePoint[] | null;
+  speedPoints: VolumePoint[] | null;
+  pitchPoints: VolumePoint[] | null;
   origin: ClipOrigin;
   assetDurationMs: number | null;
   status: 'pending' | 'processing' | 'ready' | 'failed';
@@ -627,6 +629,8 @@ export async function clipsOfCues(q: Q, cueIds: string[]): Promise<Map<string, C
       speed: clip.speed,
       pitchCents: clip.pitchCents,
       volumePoints: clip.volumePoints,
+      speedPoints: clip.speedPoints,
+      pitchPoints: clip.pitchPoints,
       origin: clip.origin,
       peaks: assetPeaks.assetId,
     })
@@ -652,6 +656,8 @@ export async function clipsOfCues(q: Q, cueIds: string[]): Promise<Map<string, C
       speed: Number(r.speed),
       pitchCents: r.pitchCents,
       volumePoints: pointsOf(r.volumePoints),
+      speedPoints: pointsOf(r.speedPoints),
+      pitchPoints: pointsOf(r.pitchPoints),
       origin: r.origin,
       assetDurationMs: typeof dur === 'number' ? dur : null,
       status: r.status,
@@ -681,10 +687,11 @@ function pointsOf(v: unknown): VolumePoint[] | null {
   return Array.isArray(x) && x.length > 0 ? (x as VolumePoint[]) : null;
 }
 
-function checkPiece(offsetMs: number, lengthMs: number, durationMs: number, speed = 1): void {
+function checkPiece(offsetMs: number, lengthMs: number, durationMs: number, speed = 1, speedPoints: VolumePoint[] | null = null): void {
   if (lengthMs < MIN_CLIP_MS) throw badRequest('invalid_lengthMs');
   // lengthMs is the playing time; at another speed the piece of the file is longer or shorter (2 ms of slack for the rounding)
-  if (speed === 1 ? offsetMs + lengthMs > durationMs : offsetMs + Math.round(lengthMs * speed) > durationMs + 2) throw new HttpError(400, 'beyond_audio', 'The piece goes past the end of the audio file.');
+  const used = speedPoints ? Math.round(sourceAt(speed, speedPoints, lengthMs)) : Math.round(lengthMs * speed); // a speed envelope changes how much of the file is read
+  if (speed === 1 && !speedPoints ? offsetMs + lengthMs > durationMs : offsetMs + used > durationMs + 2) throw new HttpError(400, 'beyond_audio', 'The piece goes past the end of the audio file.');
   checkSpan(0, lengthMs);
 }
 
@@ -757,6 +764,16 @@ export interface ClipPatch {
   speed?: number; // keeps the piece of the file and changes the playing time (and with it the cue's length, like a trim)
   pitchCents?: number;
   volumePoints?: VolumePoint[] | null;
+  speedPoints?: VolumePoint[] | null; // relative to the speed: a factor
+  pitchPoints?: VolumePoint[] | null; // relative to the pitch: cents
+}
+
+/** The column update for one envelope: the new list if one was sent, otherwise the stored one with its times scaled when the speed changed. */
+function envelopeUpdate<K extends 'volumePoints' | 'speedPoints' | 'pitchPoints'>(key: K, sent: VolumePoint[] | null | undefined, stored: unknown, oldSpeed: unknown, newSpeed: number | undefined): Partial<Record<K, VolumePoint[] | null>> {
+  if (sent !== undefined) return { [key]: sent } as Partial<Record<K, VolumePoint[] | null>>;
+  const list = pointsOf(stored);
+  if (newSpeed === undefined || !list) return {};
+  return { [key]: list.map(([ms, v]): VolumePoint => [Math.round((ms * Number(oldSpeed)) / newSpeed), v]) } as Partial<Record<K, VolumePoint[] | null>>;
 }
 
 export async function updateClip(tx: Tx, clipId: string, patch: ClipPatch): Promise<void> {
@@ -768,7 +785,8 @@ export async function updateClip(tx: Tx, clipId: string, patch: ClipPatch): Prom
   const speed = patch.speed ?? Number(row.speed);
   let lengthMs = patch.lengthMs ?? row.lengthMs;
   if (patch.speed !== undefined && patch.lengthMs === undefined) lengthMs = Math.max(MIN_CLIP_MS, Math.round((row.lengthMs * Number(row.speed)) / speed));
-  checkPiece(offsetMs, lengthMs, duration, speed);
+  const speedPoints = patch.speedPoints !== undefined ? patch.speedPoints : pointsOf(row.speedPoints);
+  checkPiece(offsetMs, lengthMs, duration, speed, speedPoints);
   let fadeInMs = patch.fadeInMs ?? row.fadeInMs;
   let fadeOutMs = patch.fadeOutMs ?? row.fadeOutMs;
   if (patch.fadeInMs !== undefined || patch.fadeOutMs !== undefined) {
@@ -789,9 +807,10 @@ export async function updateClip(tx: Tx, clipId: string, patch: ClipPatch): Prom
       ...(patch.loops !== undefined ? { loops: patch.loops } : {}),
       ...(patch.speed !== undefined ? { speed: patch.speed.toFixed(2) } : {}),
       ...(patch.pitchCents !== undefined ? { pitchCents: patch.pitchCents } : {}),
-      // A new speed moves the envelope with the sound: its times are playing times, so they scale with the length.
-      ...(patch.volumePoints !== undefined ? { volumePoints: patch.volumePoints }
-        : patch.speed !== undefined && pointsOf(row.volumePoints) ? { volumePoints: pointsOf(row.volumePoints)!.map(([ms, db]): VolumePoint => [Math.round((ms * Number(row.speed)) / speed), db]) } : {}),
+      // A new speed moves the envelopes with the sound: their times are playing times, so they scale with the length.
+      ...envelopeUpdate('volumePoints', patch.volumePoints, row.volumePoints, row.speed, patch.speed),
+      ...envelopeUpdate('speedPoints', patch.speedPoints, row.speedPoints, row.speed, patch.speed),
+      ...envelopeUpdate('pitchPoints', patch.pitchPoints, row.pitchPoints, row.speed, patch.speed),
     })
     .where(eq(clip.id, clipId));
   if (current.clipId === clipId && lengthMs !== current.lengthMs) await followClip(tx, current, lengthMs);
