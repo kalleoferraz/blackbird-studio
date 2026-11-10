@@ -218,6 +218,7 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
     lib.play(t, startFrac);
   }, [playback, lib]);
   const [follow, setFollow] = useLocalState('rs.follow', true);
+  useEffect(() => { playback.holdScene = !follow; }, [playback, follow]);
   const [editingN, setEditingN] = useState(0);
   const editing = editingN > 0;
   const setEditing = useCallback((on: boolean) => setEditingN((n) => Math.max(0, n + (on ? 1 : -1))), []);
@@ -403,7 +404,7 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
           notes={notes} story={story} noteFocus={noteFocus} noteRequest={noteRequest} onNotesChanged={() => { void loadNotes(); void loadProject(); }} onAssetChanged={refreshAfterEdit} onOpenCue={showCue}
           mobileTab={isMobile && (mview === 'characters' || mview === 'library' || mview === 'notes') ? mview : undefined} />
       </div>
-      {content && project.type !== 'textbook' && tlOpen && !isMobile && <Timeline content={content} readOnly={!!readOnly} onContent={onContent} onError={setError} audioEdit={audioEdit} onAudioEdit={setAudioEdit} />}
+      {content && project.type !== 'textbook' && tlOpen && !isMobile && <Timeline follow={follow} content={content} readOnly={!!readOnly} onContent={onContent} onError={setError} audioEdit={audioEdit} onAudioEdit={setAudioEdit} />}
       {libTrack && libInfo && <FileInfoPanel file={libTrack} notes={notes} onClose={() => setLibInfo(false)} onError={setError}
         onOpenCue={(c) => { lib.close(); showCue(c); }} onShowNote={() => notesInfo.show({ assetId: libTrack.id })} />}
       {content && isMobile && audioEdit && <MobileAudioPanel content={content} edit={audioEdit} onEdit={setAudioEdit} onContent={onContent} onError={setError} onClose={() => setAudioEdit(null)} />}

@@ -20,15 +20,19 @@ const RULER_H = 22;
 const MIN_CUE_MS = 100;
 const MAX_MS = 99 * 60 * 1000;
 const DRAG_PX = 3;
+const DEFAULT_PPS = 60; // a new scene opens zoomed in enough to show the grid of seconds
+const SNAP_MS = 1000; // a dragged cue is pulled to an edge of another cue when it is this near
 
 const clock = (ms: number) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 export const laneColour = (c: string) => (c.toLowerCase() === '#000000' ? '#EDE4DC' : c);
 
-interface Drag { cueId: string; kind: 'move' | 'resize'; startMs: number; lengthMs: number; shift: number; /** Cues of the lane pushed ahead of a cue moved to the right: id to new start. */ pushed?: Map<string, number> }
+interface Drag { cueId: string; kind: 'move' | 'resize'; startMs: number; lengthMs: number; shift: number; /** The cues of a selection moving together: id to new start. */ group?: Map<string, number>; /** Cues of the lane pushed ahead of a cue moved to the right: id to new start. */ pushed?: Map<string, number> }
 /** A resized speech cue waiting for the answer to "shift the later cues too?". */
 interface Ask { drag: Drag; later: number; x: number; y: number; clamped: boolean }
 
-export function Timeline({ content, readOnly, onContent, onError, audioEdit, onAudioEdit }: {
+export function Timeline({ content, readOnly, onContent, onError, audioEdit, onAudioEdit, follow = true }: {
+  /** The view scrolls along with the playhead (the Follow switch of the bar). */
+  follow?: boolean;
   content: SegmentContent; readOnly: boolean; onContent: (c: SegmentContent) => void; onError: (m: string) => void;
   /** The cue open for audio editing (taller, with its volume envelope and a panel of settings), and the way to open or close it. */
   audioEdit: AudioEdit | null; onAudioEdit: (e: AudioEdit | null) => void;
@@ -41,7 +45,7 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
   const scene = content.scenes[sceneIndex]!;
 
   const [height, setHeight] = useLocalState('rs.timelineH', 240);
-  const [zoom, setZoom] = useState<number | null>(null); // pixels per second; null fits the scene to the width
+  const [zoom, setZoom] = useState<number | null>(DEFAULT_PPS); // pixels per second; null fits the scene to the width
   const [drag, setDrag] = useState<Drag | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -70,7 +74,17 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
   const [picking, setPicking] = useState<null | { cue: Cue; colour: string }>(null);
   const [removing, setRemoving] = useState<Cue | null>(null);
   const recording = useStoreValue(store, (st) => !!st.rec, false);
-  useEffect(() => setZoom(null), [scene.id]); // a new scene starts fitted
+  useEffect(() => setZoom(DEFAULT_PPS), [scene.id]);
+  const [multi, setMulti] = useState<string[]>([]); // cues selected together (Shift-click, Shift-drag a rectangle)
+  const [snap, setSnap] = useState<number | null>(null); // where a dragged cue is held by the magnetic line, ms
+  const [band, setBand] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  useEffect(() => setMulti([]), [scene.id]);
+  useEffect(() => {
+    if (!multi.length) return;
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement).closest('input, textarea')) setMulti([]); };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, [multi.length]);
 
   const generic = `Scene ${scene.position}`;
   const sceneTitle = scene.label && scene.label !== generic ? `${generic} · ${scene.label}` : generic;
@@ -144,6 +158,31 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
     return () => document.removeEventListener('keydown', key);
   }, [editId, onAudioEdit]);
 
+  // While playing, the playhead walks to the middle of the view, then the view scrolls to keep it there; at the end of the scene the playhead walks on alone.
+  // A hand on the timeline (press, wheel) leaves the view alone until a moment after it lets go.
+  const hold = useRef(0);
+  const glide = (ms: number) => {
+    const el = scroller.current;
+    if (!el || !follow || performance.now() < hold.current || drag) return;
+    // The playhead rests above the middle of the play button (the centre of the view when there is none).
+    const btn = document.querySelector('.nav-ctrls .play')?.getBoundingClientRect();
+    const cx = Math.max(labelW, btn ? btn.left + btn.width / 2 - el.getBoundingClientRect().left : labelW + vw / 2);
+    const target = Math.max(0, Math.min(el.scrollWidth - el.clientWidth, labelW + x(ms) - cx));
+    if (Math.abs(el.scrollLeft - target) >= 0.5 && labelW + x(ms) - el.scrollLeft >= cx - 1) el.scrollLeft = target;
+  };
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const down = () => {
+      hold.current = Infinity;
+      const up = () => { window.removeEventListener('pointerup', up); hold.current = performance.now() + 1500; };
+      window.addEventListener('pointerup', up);
+    };
+    const wheel = () => { hold.current = Math.max(hold.current === Infinity ? 0 : hold.current, performance.now() + 1500); };
+    el.addEventListener('pointerdown', down, true); el.addEventListener('wheel', wheel, { passive: true });
+    return () => { el.removeEventListener('pointerdown', down, true); el.removeEventListener('wheel', wheel); };
+  }, []);
+
   const seek = (ms: number) => store?.seek({ segmentId: content.segment.id, scene: sceneIndex, ms: Math.max(0, Math.round(ms)) });
   const seekAt = (clientX: number) => {
     seek(((clientX - canvasRef.current!.getBoundingClientRect().left) / pps) * 1000);
@@ -174,12 +213,89 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
     catch (e) { onError(errorText(e)); }
   };
 
+  /** How far the moving cues must be shifted more to align with an edge of a cue that stays: a start with an end, or an end with a start, within SNAP_MS. */
+  const snapDelta = (moving: Cue[], others: Cue[], d: number): { adj: number; at: number } | null => {
+    let best: { adj: number; at: number } | null = null;
+    const consider = (adj: number, at: number) => { if (Math.abs(adj) <= SNAP_MS && (!best || Math.abs(adj) < Math.abs(best.adj))) best = { adj, at }; };
+    for (const c of moving) {
+      const s = c.startMs + d, en = s + c.lengthMs;
+      for (const o of others) { consider(o.startMs + o.lengthMs - s, o.startMs + o.lengthMs); consider(o.startMs - en, o.startMs); }
+    }
+    return best;
+  };
+
+  /** While a cue is dragged near the left or right edge of the canvas, the view scrolls (faster the closer to the edge) and the drag goes on from the new position. */
+  const edgeScroll = (x0: number, move: (ev: PointerEvent) => void) => {
+    const el = scroller.current!, sl0 = el.scrollLeft;
+    let last: PointerEvent | null = null;
+    const dx = (ev: PointerEvent) => ev.clientX - x0 + (el.scrollLeft - sl0);
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      if (!last || Math.abs(dx(last)) < DRAG_PX) return;
+      const r = el.getBoundingClientRect(), L = r.left + labelRef.current, R = r.right, Z = 64;
+      const v = last.clientX > R - Z ? Math.min(1, (last.clientX - (R - Z)) / Z) : last.clientX < L + Z ? -Math.min(1, (L + Z - last.clientX) / Z) : 0;
+      if (!v) return;
+      const before = el.scrollLeft;
+      el.scrollLeft = before + Math.sign(v) * Math.max(2, Math.abs(v) * 22);
+      if (el.scrollLeft !== before) move(last);
+    };
+    let raf = requestAnimationFrame(tick);
+    return { dx, feed: (ev: PointerEvent) => { last = ev; }, stop: () => cancelAnimationFrame(raf) };
+  };
+
+  /** Dragging one of the selected cues moves them all, keeping their places relative to each other; nothing is pushed. */
+  const beginGroup = (cue: Cue, e: RPointerEvent) => {
+    const members = scene.cues.filter((c) => multi.includes(c.id));
+    const ids = new Set(members.map((c) => c.id));
+    const others = scene.cues.filter((c) => !ids.has(c.id));
+    let lo = -Math.min(...members.map((c) => c.startMs)), hi = MAX_MS - Math.max(...members.map((c) => c.startMs + c.lengthMs));
+    for (const c of members) for (const o of others) {
+      if (o.laneId !== c.laneId) continue;
+      if (o.startMs >= c.startMs + c.lengthMs) hi = Math.min(hi, o.startMs - (c.startMs + c.lengthMs));
+      else if (o.startMs + o.lengthMs <= c.startMs) lo = Math.max(lo, o.startMs + o.lengthMs - c.startMs);
+    }
+    const x0 = e.clientX;
+    let moved = false, delta = 0;
+    const es = edgeScroll(x0, (ev) => move(ev));
+    const move = (ev: PointerEvent) => {
+      es.feed(ev);
+      if (!moved && Math.abs(es.dx(ev)) < DRAG_PX) return;
+      moved = true;
+      let d = Math.max(lo, Math.min(hi, Math.round((es.dx(ev) / pps) * 100) * 10));
+      let line: number | null = null;
+      if (!ev.ctrlKey && !ev.metaKey) {
+        const s = snapDelta(members, others, d);
+        if (s && d + s.adj >= lo && d + s.adj <= hi) { d += s.adj; line = s.at; }
+      }
+      delta = d; setSnap(line);
+      setDrag({ cueId: cue.id, kind: 'move', startMs: cue.startMs + d, lengthMs: cue.lengthMs, shift: 0, group: new Map(members.map((c) => [c.id, c.startMs + d])) });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+      document.body.classList.remove('resizing'); es.stop();
+      setDrag(null); setSnap(null);
+      if (!moved) { setMulti([]); seek(cue.startMs); return; } // a plain click on a selected cue selects just that one
+      if (delta !== 0) void runOnCue('POST', '/api/cues/shift', { cueIds: [...ids], deltaMs: delta });
+    };
+    document.body.classList.add('resizing');
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
+
   const begin = (cue: Cue, kind: 'move' | 'resize') => (e: RPointerEvent) => {
     e.stopPropagation();
     if (e.button !== 0) return;
+    if (e.shiftKey && kind === 'move' && !readOnly) {
+      // Shift-click: the first click selects the cue, the second deselects it. A cue already selected joins the group.
+      e.preventDefault();
+      setMulti((m) => (m.includes(cue.id) ? m.filter((i) => i !== cue.id) : [...(m.length === 0 && selId && selId !== cue.id && scene.cues.some((c) => c.id === selId) ? [selId] : m), cue.id]));
+      return;
+    }
+    const inGroup = kind === 'move' && multi.length > 1 && multi.includes(cue.id);
+    if (!inGroup && multi.length) setMulti([]);
     setSelId(cue.id);
     if (readOnly) { seek(cue.startMs); return; }
     e.preventDefault();
+    if (inGroup) { beginGroup(cue, e); return; }
     const x0 = e.clientX;
     const mates = scene.cues.filter((c) => c.laneId === cue.laneId && c.id !== cue.id);
     const prevEnd = mates.filter((c) => c.startMs < cue.startMs).reduce((m, c) => Math.max(m, c.startMs + c.lengthMs), 0);
@@ -198,12 +314,20 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
     };
     let moved = false;
     let last: Drag = { cueId: cue.id, kind, startMs: cue.startMs, lengthMs: cue.lengthMs, shift: 0 };
+    const es = edgeScroll(x0, (ev) => move(ev));
     const move = (ev: PointerEvent) => {
-      if (!moved && Math.abs(ev.clientX - x0) < DRAG_PX) return;
+      es.feed(ev);
+      if (!moved && Math.abs(es.dx(ev)) < DRAG_PX) return;
       moved = true;
-      const dms = Math.round(((ev.clientX - x0) / pps) * 100) * 10; // steps of 10 ms
+      const dms = Math.round((es.dx(ev) / pps) * 100) * 10; // steps of 10 ms
       if (kind === 'move') {
         let start = Math.max(0, cue.startMs + dms, prevEnd);
+        let line: number | null = null;
+        if (!ev.ctrlKey && !ev.metaKey) { // Ctrl: no magnet, for small movements
+          const s = snapDelta([cue], scene.cues.filter((c) => c.id !== cue.id), start - cue.startMs);
+          if (s && start + s.adj >= Math.max(0, prevEnd)) { start += s.adj; line = s.at; }
+        }
+        setSnap(line);
         let push = pushFor(start);
         // The pushed chain must still fit in the scene: stop where its last cue reaches the end.
         for (let i = 0; i < 20 && push.end > MAX_MS && start > cue.startMs; i++) { start = Math.max(cue.startMs, start - (push.end - MAX_MS)); push = pushFor(start); }
@@ -219,8 +343,8 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
     };
     const up = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
-      document.body.classList.remove('resizing');
-      setDrag(null); // a speech cue's new length is kept in `ask` until it is answered
+      document.body.classList.remove('resizing'); es.stop();
+      setDrag(null); setSnap(null); // a speech cue's new length is kept in `ask` until it is answered
       if (!moved) { if (kind === 'move') seek(cue.startMs); return; }
       if (kind === 'move') { if (last.startMs !== cue.startMs) void commit(cue.id, { startMs: last.startMs, push: true }); }
       else if (last.lengthMs !== cue.lengthMs) {
@@ -247,6 +371,27 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
       window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
       return;
     }
+    if (e.shiftKey && !readOnly) {
+      // Shift-drag on empty space: a rectangle selects the cues it touches (added to the selection).
+      const r = canvasRef.current!.getBoundingClientRect();
+      const ax = e.clientX - r.left, ay = e.clientY - r.top, sl0 = el.scrollLeft;
+      let bx = ax, by = ay;
+      const move = (m: PointerEvent) => { bx = m.clientX - r.left + (el.scrollLeft - sl0); by = m.clientY - r.top; setBand({ x0: ax, y0: ay, x1: bx, y1: by }); };
+      const up = () => {
+        window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+        setBand(null);
+        const l = Math.min(ax, bx), rr = Math.max(ax, bx), tp = Math.min(ay, by), bt = Math.max(ay, by);
+        const hit = scene.cues.filter((c) => {
+          const li = lanes.findIndex((q) => q.id === c.laneId);
+          if (li < 0) return false;
+          const s = shown(c), cx0 = x(s.start), cx1 = x(s.start + s.len), cy0 = laneTop[li]! + 3, cy1 = cy0 + laneH[li]! - 6;
+          return cx0 <= rr && cx1 >= l && cy0 <= bt && cy1 >= tp;
+        }).map((c) => c.id);
+        if (hit.length) setMulti((prev) => [...new Set([...prev, ...hit])]);
+      };
+      window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+      return;
+    }
     const x0 = e.clientX, y0 = e.clientY, sl = el.scrollLeft, st = el.scrollTop;
     let panned = false;
     const move = (m: PointerEvent) => {
@@ -257,7 +402,7 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
     const up = () => {
       window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
       el.classList.remove('panning');
-      if (!panned) seekAt(x0);
+      if (!panned) { seekAt(x0); setMulti([]); }
     };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
@@ -303,6 +448,8 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
   const canRecord = !readOnly && !recording && target?.type === 'speech';
   const view = drag ?? ask?.drag ?? null;
   const shown = (c: Cue): { start: number; len: number } => {
+    const grouped = view?.group?.get(c.id);
+    if (grouped !== undefined) return { start: grouped, len: c.lengthMs };
     if (view && c.id === view.cueId) return { start: view.startMs, len: view.lengthMs };
     const pushedTo = view?.pushed?.get(c.id);
     if (pushedTo !== undefined) return { start: pushedTo, len: c.lengthMs };
@@ -316,7 +463,7 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
         <b>Timeline</b>
         <span className="muted">{sceneTitle} · {clock(scene.lengthMs)}</span>
         <span className="grow" />
-        <span className="muted small tl-hint">{readOnly ? 'View only' : 'Drag a cue to move it · drag its right edge to resize'}</span>
+        <span className="muted small tl-hint">{readOnly ? 'View only' : 'Drag a cue to move it (Ctrl: no magnet) · Shift: select several · drag its right edge to resize'}</span>
         <button className="tl-rec" disabled={!canRecord} data-testid="timeline-record" onClick={() => target && nav?.record(target.id)}
           title={canRecord ? 'Record a take for the selected cue' : 'Select a speech cue to record it'}><i />Record</button>
         <button className="tl-zoom" onClick={() => zoomBy(1 / 1.5)} title="Zoom out">−</button>
@@ -344,7 +491,7 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
               if (li < 0) return null;
               const s = shown(c);
               return <CueBlock key={c.id} cue={c} lane={lanes[li]!} left={x(s.start)} width={Math.max(3, x(s.len))} lengthMs={s.len}
-                top={laneTop[li]!} h={laneH[li]! - 6} now={c.id === curCue} sel={c.id === target?.id} dragging={view?.cueId === c.id} readOnly={readOnly}
+                top={laneTop[li]!} h={laneH[li]! - 6} now={c.id === curCue} sel={c.id === target?.id} dragging={view?.cueId === c.id || !!view?.group?.has(c.id)} multi={multi.includes(c.id)} readOnly={readOnly}
                 editing={c.id === editId ? audioEdit!.kind : null} onEditAudio={() => onAudioEdit({ cueId: c.id, kind: 'level' })}
                 onSeekIn={(ms) => seek(c.startMs + ms)}
                 onEnvelope={(points) => void runOnCue('PATCH', `/api/clips/${c.clipId}`, { [ENVELOPE_KEY[audioEdit!.kind]]: points })}
@@ -362,7 +509,9 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
                   <p className="muted small">Showing the {ENVELOPE_NAME[audioEdit!.kind].toLowerCase()} envelope. Double-click the cue to add a point, drag a point to move it, double-click a point to remove it. A click moves the playhead.</p>
                 </div>);
             })()}
-            <Playhead sceneId={scene.id} x={x} />
+            {snap !== null && <div className="tl-snap" style={{ left: x(snap), top: RULER_H, bottom: 0 }} />}
+            {band && <div className="tl-band" style={{ left: Math.min(band.x0, band.x1), top: Math.min(band.y0, band.y1), width: Math.abs(band.x1 - band.x0), height: Math.abs(band.y1 - band.y0) }} />}
+            <Playhead sceneId={scene.id} x={x} onFrame={glide} />
           </div>
         </div>
       </div>
@@ -385,15 +534,43 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
   );
 }
 
-const Playhead = memo(function Playhead({ sceneId, x }: { sceneId: string; x: (ms: number) => number }) {
+/** The playhead glides between the store's 100 ms steps; while playing it reports each frame so the view can follow it. */
+const Playhead = memo(function Playhead({ sceneId, x, onFrame }: { sceneId: string; x: (ms: number) => number; onFrame: (ms: number) => void }) {
   const nav = useNav();
-  const ms = useStoreValue(nav?.store, (s) => (s.currentSceneId() === sceneId && s.pos ? s.pos.ms : -1), -1);
-  if (ms < 0) return null;
-  return <div className="tl-playhead" style={{ left: x(ms) }} />;
+  const store = nav?.store;
+  const el = useRef<HTMLDivElement>(null);
+  const xr = useRef(x); xr.current = x;
+  const fr = useRef(onFrame); fr.current = onFrame;
+  const stamp = useRef({ ms: -1, at: 0 });
+  const draw = useRef<() => void>(() => {});
+  draw.current = () => {
+    const d = el.current;
+    if (!d || !store) return;
+    const on = store.currentSceneId() === sceneId && store.pos;
+    if (!on) { d.style.display = 'none'; return; }
+    const ms = store.playing ? stamp.current.ms + Math.min(performance.now() - stamp.current.at, 150) : store.pos!.ms;
+    d.style.display = '';
+    d.style.left = xr.current(ms) + 'px';
+    if (store.playing) fr.current(ms);
+  };
+  useEffect(() => {
+    if (!store) return;
+    let raf = 0;
+    const loop = () => { draw.current(); raf = store.playing ? requestAnimationFrame(loop) : 0; };
+    const sync = () => {
+      stamp.current = { ms: store.pos?.ms ?? -1, at: performance.now() };
+      if (store.playing && !raf) raf = requestAnimationFrame(loop); else if (!store.playing) draw.current();
+    };
+    sync();
+    const off = store.subscribe(sync);
+    return () => { off(); cancelAnimationFrame(raf); };
+  }, [store, sceneId]);
+  useLayoutEffect(() => draw.current());
+  return <div className="tl-playhead" ref={el} style={{ display: 'none' }} />;
 });
 
-const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top, h, now, sel, dragging, readOnly, editing, onEditAudio, onEnvelope, onSeekIn, onMove, onResize, onMenu }: {
-  cue: Cue; lane: Lane; left: number; width: number; lengthMs: number; top: number; h: number; now: boolean; sel: boolean; dragging: boolean; readOnly: boolean;
+const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top, h, now, sel, dragging, multi, readOnly, editing, onEditAudio, onEnvelope, onSeekIn, onMove, onResize, onMenu }: {
+  cue: Cue; lane: Lane; left: number; width: number; lengthMs: number; top: number; h: number; now: boolean; sel: boolean; dragging: boolean; multi: boolean; readOnly: boolean;
   editing: EnvelopeKind | null; onEditAudio: () => void; onEnvelope: (points: [number, number][] | null) => void; onSeekIn: (ms: number) => void;
   onMove: (e: RPointerEvent) => void; onResize: (e: RPointerEvent) => void; onMenu: (e: React.MouseEvent) => void;
 }) {
@@ -413,7 +590,7 @@ const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top,
     return () => { live = false; };
   }, [clip?.assetId, clip?.hasPeaks, clip?.status]);
   return (
-    <div className={'tl-cue' + (now ? ' now' : '') + (sel ? ' sel' : '') + (past ? ' past' : '') + (dragging ? ' dragging' : '') + (clip ? '' : ' empty') + (cue.muted ? ' muted' : '') + (editing ? ' audio-edit' : '')} data-cue-id={cue.id}
+    <div className={'tl-cue' + (now ? ' now' : '') + (sel ? ' sel' : '') + (multi ? ' multi' : '') + (past ? ' past' : '') + (dragging ? ' dragging' : '') + (clip ? '' : ' empty') + (cue.muted ? ' muted' : '') + (editing ? ' audio-edit' : '')} data-cue-id={cue.id}
       style={{ left, width, top: top + 3, height: h, '--c': colour } as React.CSSProperties}
       onPointerDown={editing ? undefined : onMove} onContextMenu={onMenu} title={cue.text || cue.type}
       onDoubleClick={() => { if (clip && !readOnly && !editing) onEditAudio(); }}>

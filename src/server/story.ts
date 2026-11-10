@@ -33,6 +33,7 @@ import {
   updateClip,
   updateCue,
   placeCue,
+  shiftCues,
   type CuePlace,
   type ClipOrigin,
   type ClipPatch,
@@ -417,6 +418,18 @@ export function registerStoryRoutes(app: FastifyInstance): void {
     }
     return segmentWrite(request, 'cue', id, async (tx) => {
       await placeCue(tx, id, place);
+    });
+  });
+
+  // Several cues of a scene moved together by the same time.
+  app.post('/api/cues/shift', small, async (request) => {
+    const body = asBody(request.body);
+    if (!Array.isArray(body.cueIds) || body.cueIds.length < 1 || body.cueIds.length > 500) throw badRequest('invalid_cueIds');
+    const cueIds = [...new Set(body.cueIds.map((c: unknown) => checkId(c)))];
+    const deltaMs = optInt(body, 'deltaMs', -MAX_SCENE_MS, MAX_SCENE_MS);
+    if (deltaMs === undefined) throw badRequest('invalid_deltaMs');
+    return segmentWrite(request, 'cue', cueIds[0]!, async (tx) => {
+      await shiftCues(tx, cueIds, deltaMs);
     });
   });
 

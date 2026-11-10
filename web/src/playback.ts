@@ -14,6 +14,8 @@ export interface RecState { cueId: string; phase: 'count' | 'rec' | 'saving'; co
 export class PlaybackStore {
   pos: Pos | null = null;
   playing = false;
+  /** Playback stops at the end of the scene instead of running into the next one (Follow is off: the view stays on this scene). */
+  holdScene = false;
   rec: RecState | null = null;
   /** A move into a segment whose content is still loading. */
   pending: { segmentId: string; arrive: Arrive } | null = null;
@@ -88,6 +90,12 @@ export class PlaybackStore {
 
   toggle() { if (this.pos) { if (this.playing) this.stop(); else this.start(); this.emit(); } }
   private start() {
+    // Resting at the end of a scene: playing goes on from the next one.
+    const d = this.current();
+    if (d && this.pos && this.pos.ms >= (d.scenes[this.pos.scene]?.lengthMs ?? 0)) {
+      const s = advance(d, this.pos, 0, this.order);
+      if ('pos' in s) this.pos = s.pos; else if ('move' in s) this.apply(s.move);
+    }
     this.playing = true; this.last = performance.now();
     this.timer ??= setInterval(() => this.tick(), TICK_MS);
   }
@@ -110,6 +118,10 @@ export class PlaybackStore {
       }
     }
     const s = advance(d, this.pos, dt, this.order);
+    if (this.holdScene && (!('pos' in s) || s.pos.scene !== this.pos.scene)) {
+      this.pos = { ...this.pos, ms: d.scenes[this.pos.scene]?.lengthMs ?? this.pos.ms };
+      this.stop(); this.emit(); return;
+    }
     if ('pos' in s) this.pos = s.pos;
     else if ('move' in s) this.apply(s.move);
     else { this.pos = s.end; this.stop(); }

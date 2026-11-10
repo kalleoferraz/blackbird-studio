@@ -389,6 +389,29 @@ export interface CuePlace {
  * the next cue of the lane begins; the chosen clip's piece of audio then follows the new length (see fitClipToCue).
  * A hand-set length turns length auto off.
  */
+/**
+ * Moves several cues of a scene by the same amount of time (a selection dragged on the timeline). Nothing is pushed: the cues
+ * keep their places relative to each other, and the move is refused if one of them would run into a cue that stays.
+ */
+export async function shiftCues(tx: Tx, cueIds: string[], deltaMs: number): Promise<void> {
+  const first = await cueRow(tx, cueIds[0]!);
+  const all = await sceneCues(tx, first.sceneId);
+  const ids = new Set(cueIds);
+  const moving = all.filter((c) => ids.has(c.id));
+  if (moving.length !== ids.size) throw new HttpError(400, 'invalid_cues', 'The cues are not all in the same scene.');
+  for (const c of moving) {
+    const start = c.startMs + deltaMs;
+    if (start < 0) throw new HttpError(409, 'before_start', 'A cue would start before the scene.');
+    checkSpan(start, c.lengthMs);
+    for (const o of all) {
+      if (ids.has(o.id) || o.laneId !== c.laneId) continue;
+      if (o.startMs < start + c.lengthMs && start < o.startMs + o.lengthMs) throw new HttpError(409, 'lane_overlap', 'Another cue on this lane is in the way.');
+    }
+  }
+  const now = new Date();
+  for (const c of moving) await tx.update(cue).set({ startMs: c.startMs + deltaMs, updatedAt: now }).where(eq(cue.id, c.id));
+}
+
 export async function placeCue(tx: Tx, cueId: string, place: CuePlace): Promise<CueRow> {
   let current = await cueRow(tx, cueId);
   const siblings = (await sceneCues(tx, current.sceneId)).filter((c) => c.id !== cueId && c.laneId === current.laneId);
