@@ -238,6 +238,21 @@ function checkSpan(startMs: number, lengthMs: number): void {
 
 // ---- cues -------------------------------------------------------------------------
 
+/**
+ * Where a cue inserted (or dropped) after another one starts, in script order (`cues` sorted by start, lane, id):
+ * where that cue ends, unless the next cue starts earlier (a long music bed under later cues, say); then where the
+ * next cue starts, so the new cue sits between the two and the ripple moves the next one on. Also returns the cues up
+ * to and including `after`, which must not move.
+ */
+export function insertionPoint(cues: readonly CueRow[], after: CueRow | undefined): { startMs: number; keep: string[] } {
+  if (!after) return { startMs: 0, keep: [] };
+  const i = cues.findIndex((c) => c.id === after.id);
+  const next = cues[i + 1];
+  const end = after.startMs + after.lengthMs;
+  const startMs = next && next.startMs < end ? Math.max(after.startMs, next.startMs) : end;
+  return { startMs, keep: cues.slice(0, i + 1).map((c) => c.id) };
+}
+
 export interface NewCue {
   afterCueId?: string | null;
   type?: CueType;
@@ -288,12 +303,13 @@ export async function insertCue(tx: Tx, sceneId: string, input: NewCue, userId: 
 
   const text = input.text ?? '';
   const lengthMs = type === 'speech' ? estimateSpeechMs(text, ctx.language, ctx.speech) : MIN_CUE_MS;
-  const desired = after ? after.startMs + after.lengthMs : 0;
-  const laneId = await laneFor(tx, ctx, { type, characterId, sceneId, startMs: desired, lengthMs });
+  const { startMs: desired, keep } = insertionPoint(cues, after);
   const id = newUlid();
   const now = new Date();
   checkSpan(desired, lengthMs);
-  await applyRipple(tx, sceneId, desired, lengthMs, []);
+  // Ripple first, so the lane is chosen with the later cues already out of the way.
+  await applyRipple(tx, sceneId, desired, lengthMs, keep);
+  const laneId = await laneFor(tx, ctx, { type, characterId, sceneId, startMs: desired, lengthMs });
   const startMs = await clearLaneConflicts(tx, { id, sceneId, laneId, startMs: desired, lengthMs });
   await tx.insert(cue).values({
     id,
@@ -498,15 +514,15 @@ export async function moveCue(tx: Tx, cueId: string, targetSceneId: string, afte
   await applyRipple(tx, current.sceneId, current.startMs + current.lengthMs, -current.lengthMs, [], [cueId]);
   // Park it so it does not take part while the target is arranged.
   const cues = (await sceneCues(tx, targetSceneId)).filter((c) => c.id !== cueId);
-  let desired = 0;
+  let after: CueRow | undefined;
   if (afterCueId) {
-    const after = cues.find((c) => c.id === afterCueId);
+    after = cues.find((c) => c.id === afterCueId);
     if (!after) throw new HttpError(400, 'invalid_after_cue');
-    desired = after.startMs + after.lengthMs;
   }
+  const { startMs: desired, keep } = insertionPoint(cues, after);
   checkSpan(desired, current.lengthMs);
   await tx.update(cue).set({ sceneId: targetSceneId, startMs: MAX_SCENE_MS * 2 }).where(eq(cue.id, cueId));
-  await applyRipple(tx, targetSceneId, desired, current.lengthMs, [cueId]);
+  await applyRipple(tx, targetSceneId, desired, current.lengthMs, [cueId, ...keep]);
   const startMs = await clearLaneConflicts(tx, {
     id: cueId,
     sceneId: targetSceneId,
