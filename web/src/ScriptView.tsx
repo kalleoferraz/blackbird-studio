@@ -10,7 +10,7 @@ import { PlaceholderContext } from './characterArt.tsx';
 import { RightPanel, type CharacterDialogState } from './RightPanel.tsx';
 import { ago, cueCountOrder, inOrder } from './format.ts';
 import { BlackbirdIcon } from './Brand.tsx';
-import { ChangeCount, MenuButton, errorText, useIsMobile, useLocalState, type MenuItem } from './ui.tsx';
+import { ChangeCount, MenuButton, errorText, useIsLandscape, useIsMobile, useLocalState, type MenuItem } from './ui.tsx';
 import { NavBar } from './NavBar.tsx';
 import { MobileAudioPanel } from './MobileAudio.tsx';
 import { accountItems } from './AccountMenu.tsx';
@@ -20,6 +20,7 @@ import { toNav, type Pos } from './nav.ts';
 import { recordTake } from './recording.ts';
 import { TrimDialog, type TrimRequest } from './TrimDialog.tsx';
 import { Timeline } from './Timeline.tsx';
+import { MobileLanesPanel } from './MobileLanes.tsx';
 import { AudioPlayer } from './audio-playback.ts';
 import { LibPlayContext, LibraryPlayer, type LibTrack } from './libplayer.ts';
 import { FileInfoPanel } from './Library.tsx';
@@ -108,7 +109,13 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
   const mainRef = useRef<HTMLElement>(null);
   const titlesRef = useRef<HTMLDivElement>(null);
   const [titlesGone, setTitlesGone] = useState(false);
-  const [tlOpen, setTlOpen] = useLocalState('rs.timelineOpen', true);
+  const [tlDesk, setTlDesk] = useLocalState('rs.timelineOpen', true);
+  // A phone keeps its own switch, closed at first: upright it opens the lane levels, sideways the timeline.
+  const [tlPhone, setTlPhone] = useLocalState('rs.timelineOpenPhone', false);
+  const tlOpen = isMobile ? tlPhone : tlDesk;
+  const setTlOpen = isMobile ? setTlPhone : setTlDesk;
+  const landscape = useIsLandscape();
+  const fullTimeline = tlOpen && (!isMobile || landscape);
   // A cue open for audio editing in the timeline (a button of the audio settings, a double click on the cue there).
   const [audioEdit, setAudioEdit] = useState<AudioEdit | null>(null);
   useEffect(() => onEditCueAudio((e) => {
@@ -161,7 +168,7 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
   useEffect(() => {
     const main = mainRef.current;
     if (!main) return;
-    if (isMobile) { main.removeAttribute('data-faces'); return; }
+    if (isMobile && !landscape) { main.removeAttribute('data-faces'); return; } // a phone held sideways has room for them
     const update = () => {
       const doc = main.querySelector('.doc');
       if (!doc) { main.removeAttribute('data-faces'); return; }
@@ -185,7 +192,7 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
     const mo = new MutationObserver(() => { watch(); update(); });
     mo.observe(main, { childList: true, subtree: true });
     return () => { ro.disconnect(); mo.disconnect(); };
-  }, [isMobile, content?.segment.id]);
+  }, [isMobile, landscape, content?.segment.id]);
   const refreshAfterEdit = () => { void loadProject(); void loadStory(); void loadNotes(); loadPlaceholder(); };
   const onContent = (c: SegmentContent) => { setContent(c); refreshAfterEdit(); };
   // On a phone, changing segment must not add history steps (Back would walk through segments instead of panels).
@@ -343,7 +350,7 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
     <LibPlayContext.Provider value={playLib}>
     <NotesContext.Provider value={notesInfo}>
     <PlaceholderContext.Provider value={placeholder}>
-    <div className="script">
+    <div className={'script' + (isMobile && landscape ? ' m-land' : '') + (isMobile && landscape && fullTimeline ? ' tl-on' : '')}>
       {isMobile ? (
         <header className="topbar mobile-top">
           <a href="#/" className="brand" title="Projects"><BlackbirdIcon /></a>
@@ -390,7 +397,7 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
               {topSceneLabel && <><span className="sep">›</span><span>{topSceneLabel}</span></>}
             </div></div>
             <div className="doc">
-              <div ref={titlesRef}>
+              <div ref={titlesRef} className="seg-titles">
               <TitleEdit className="chapter-title" value={content.segment.chapterTitle} disabled={!!readOnly} onSave={(v) => renameTitle('chapter', content.segment.chapterId, v)} />
               <TitleEdit className="segment-title" value={content.segment.title} disabled={!!readOnly} onSave={(v) => renameTitle('segment', content.segment.id, v)} />
               </div>
@@ -409,12 +416,13 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
           notes={notes} story={story} noteFocus={noteFocus} noteRequest={noteRequest} onNotesChanged={() => { void loadNotes(); void loadProject(); }} onAssetChanged={refreshAfterEdit} onOpenCue={showCue}
           mobileTab={isMobile && (mview === 'characters' || mview === 'library' || mview === 'notes') ? mview : undefined} />
       </div>
-      {content && project.type !== 'textbook' && tlOpen && !isMobile && <Timeline follow={follow} characters={characters} content={content} readOnly={!!readOnly} onContent={onContent} onError={setError} audioEdit={audioEdit} onAudioEdit={setAudioEdit} />}
+      {content && project.type !== 'textbook' && fullTimeline && <Timeline follow={follow} characters={characters} content={content} readOnly={!!readOnly} onContent={onContent} onError={setError} audioEdit={audioEdit} onAudioEdit={setAudioEdit} />}
       {libTrack && libInfo && <FileInfoPanel file={libTrack} notes={notes} onClose={() => setLibInfo(false)} onError={setError}
         onOpenCue={(c) => { lib.close(); showCue(c); }} onShowNote={() => notesInfo.show({ assetId: libTrack.id })} />}
-      {content && isMobile && audioEdit && <MobileAudioPanel content={content} edit={audioEdit} onEdit={setAudioEdit} onContent={onContent} onError={setError} onClose={() => setAudioEdit(null)} />}
+      {content && isMobile && !landscape && tlOpen && !audioEdit && project.type !== 'textbook' && <MobileLanesPanel content={content} readOnly={!!readOnly} onContent={onContent} onError={setError} onClose={() => setTlOpen(false)} />}
+      {content && isMobile && audioEdit && !fullTimeline && <MobileAudioPanel content={content} edit={audioEdit} onEdit={setAudioEdit} onContent={onContent} onError={setError} onClose={() => setAudioEdit(null)} />}
       <NavBar store={playback} lib={lib} libInfo={{ open: libInfo, onToggle: () => setLibInfo((v) => !v) }} story={story} follow={follow} onFollow={setFollow} editing={editing} mobile={isMobile}
-        timeline={project.type !== 'textbook' && !isMobile ? { open: tlOpen, onToggle: () => setTlOpen(!tlOpen) } : undefined} />
+        timeline={project.type !== 'textbook' ? { open: tlOpen, onToggle: () => setTlOpen(!tlOpen) } : undefined} />
       {addNote && <AddNoteDialog projectId={projectId} target={addNote.target} label={addNote.label} onClose={() => setAddNote(null)}
         onSaved={() => { void loadNotes(); void loadProject(); }} />}
       {trim && <TrimDialog req={trim} onDone={(keep) => { trim.resolve(keep); setTrim(null); }} />}

@@ -335,6 +335,7 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .tl-cue.now { box-shadow: 0 0 0 2px var(--primary); }
 .tl-cue.dragging { cursor: grabbing; z-index: 3; box-shadow: 0 2px 10px #000a; }
 .tl-wave { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+.tl-wave canvas { position: absolute; top: 0; height: 100%; }
 .tl-text { position: absolute; left: 6px; top: 2px; right: 8px; font-size: .72rem; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); text-shadow: 0 0 3px #000, 0 0 3px #000; pointer-events: none; }
 .tl-grip { position: absolute; right: 0; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
 .tl-grip::after { content: ''; position: absolute; right: 2px; top: 30%; bottom: 30%; width: 2px; border-radius: 1px; background: var(--c); opacity: .9; }
@@ -756,3 +757,30 @@ label.vs-check { display: flex; gap: 8px; align-items: center; margin: .5em 0; }
 .quota-fill { height: 100%; background: var(--green); } .quota-fill.high { background: var(--alert); } .quota-fill.full { background: var(--danger); }
 .change-count { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 9px; background: var(--alert); color: var(--on-primary); font-size: .72rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .integ-settings { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; } .integ-settings h4 { font-size: .85rem; margin: 0 0 4px; color: var(--muted); } .integ-settings label { margin: .5em 0; } .integ-settings select { width: 100%; }
+
+/* Lane level (decision log 2026-11-20): a button left of each lane name, and its slider. */
+.tl-lane-level { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; margin-right: -2px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.tl-lane-level:hover:not(:disabled), .tl-lane-level.on { color: var(--text); background: var(--panel2); }
+.tl-lane-level:disabled { opacity: .35; cursor: default; }
+.tl-lane-pop { position: fixed; z-index: 60; width: 260px; box-sizing: border-box; padding: 8px 10px; background: var(--panel2); border: 1px solid #4a3c3e; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.tl-lane-pop p { margin: 6px 0 0; }
+.as-row.lane { grid-template-columns: 44px 1fr 64px; }
+.as-note { grid-column: 1 / -1; margin-top: -2px; }
+
+/* Phone: the lane levels panel (upright), and a timeline that leaves room for the script (sideways). */
+.m-lanes .as-row.lane { grid-template-columns: minmax(70px, 34%) 1fr 64px; min-height: 34px; }
+.m-lanes .ml-name { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text); }
+.m-lanes .ml-name i { flex: none; width: 4px; height: 18px; border-radius: 2px; }
+/* Phone held sideways (ScriptView adds m-land; tl-on while the timeline is open): the top bar stays, the chapter and segment
+   titles go, the script leaves room at its left for the characters, and the player bar is one row (path · controls · buttons).
+   The open timeline takes the whole height above the player bar, the top bar included. */
+.script.m-land .where-wrap, .script.m-land .seg-titles { display: none; }
+.script.m-land .center-col { padding-top: 8px; }
+.script.m-land .doc { max-width: 750px; margin: 0 auto 0 84px; }
+.script.m-land .navbar.mobile .nav { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: "pos ctrls right"; gap: 10px; padding: 0 12px 4px; align-items: center; }
+.script.m-land .navbar.mobile .nav-right { justify-content: flex-end; }
+.script.m-land .nav-fold { height: 18px; }
+.script.m-land.tl-on .topbar.mobile-top, .script.m-land.tl-on .m-banner { display: none; }
+.script.m-land.tl-on .script-body { flex: 0 0 0; overflow: hidden; visibility: hidden; }
+.script.m-land.tl-on .timeline { flex: 1 1 auto; height: auto !important; border-top: 0; }
+.script.m-land.tl-on .tl-divider { display: none; }

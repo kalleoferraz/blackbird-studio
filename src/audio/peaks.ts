@@ -1,4 +1,5 @@
 import { MPEGDecoder } from 'mpg123-decoder';
+import { LoudnessMeter, type Loudness } from './loudness.js';
 import { parseWav, readFloatChannels, type WavInfo } from './wav.js';
 
 /**
@@ -57,25 +58,41 @@ export class PeakAccumulator {
 const BLOCK_FRAMES = 48000;
 
 export function peaksFromWav(wav: Uint8Array, info: WavInfo = parseWav(wav)): Uint8Array {
-  const acc = new PeakAccumulator(info.sampleRate);
-  for (let start = 0; start < info.frames; start += BLOCK_FRAMES) acc.push(readFloatChannels(wav, info, start, BLOCK_FRAMES));
-  return acc.finish();
+  return analyseWav(wav, info).peaks;
+}
+
+/** Peaks and loudness of a WAV in one pass. */
+export function analyseWav(wav: Uint8Array, info: WavInfo = parseWav(wav)): { peaks: Uint8Array; loudness: Loudness } {
+  const acc = new PeakAccumulator(info.sampleRate), meter = new LoudnessMeter(info.sampleRate);
+  for (let start = 0; start < info.frames; start += BLOCK_FRAMES) {
+    const block = readFloatChannels(wav, info, start, BLOCK_FRAMES);
+    acc.push(block);
+    meter.push(block);
+  }
+  return { peaks: acc.finish(), loudness: meter.result() };
 }
 
 /** Decodes an MP3 (WebAssembly mpg123, in blocks) and returns its peaks. */
 export async function peaksFromMp3(mp3: Uint8Array): Promise<Uint8Array> {
+  return (await analyseMp3(mp3)).peaks;
+}
+
+/** Peaks and loudness of an MP3 in one decoding pass. */
+export async function analyseMp3(mp3: Uint8Array): Promise<{ peaks: Uint8Array; loudness: Loudness }> {
   const decoder = new MPEGDecoder();
   await decoder.ready;
   try {
-    let acc: PeakAccumulator | null = null;
+    let acc: PeakAccumulator | null = null, meter: LoudnessMeter | null = null;
     for (let at = 0; at < mp3.length; at += 32768) {
       const r = decoder.decode(mp3.subarray(at, at + 32768));
       if (r.samplesDecoded === 0) continue;
       acc ??= new PeakAccumulator(r.sampleRate);
+      meter ??= new LoudnessMeter(r.sampleRate);
       acc.push(r.channelData);
+      meter.push(r.channelData);
     }
-    if (!acc) throw new Error('The MP3 could not be decoded.');
-    return acc.finish();
+    if (!acc || !meter) throw new Error('The MP3 could not be decoded.');
+    return { peaks: acc.finish(), loudness: meter.result() };
   } finally {
     decoder.free();
   }

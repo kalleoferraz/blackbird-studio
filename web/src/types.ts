@@ -37,6 +37,8 @@ export interface Clip {
   /** Audio settings: speed (pitch kept), pitch in cents (speed kept) and the volume envelope [ms, dB]. lengthMs is the playing time; the piece of the file is lengthMs * speed. */
   speed: number; pitchCents: number; volumePoints: [number, number][] | null; speedPoints: [number, number][] | null; pitchPoints: [number, number][] | null;
   origin: 'human-recorded' | 'generated' | 'voice-converted';
+  /** The level was set automatically to match the lane (limited: held back to avoid clipping or too much boost); null once set by hand. */
+  levelAuto: 'auto' | 'limited' | null;
   assetDurationMs: number | null; status: 'pending' | 'processing' | 'ready' | 'failed'; hasPeaks: boolean; light: boolean; fileMissing: boolean;
 }
 export interface Cue {

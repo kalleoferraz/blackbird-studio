@@ -176,6 +176,10 @@ export const asset = mysqlTable(
     sizeLightweight: bigint('size_lightweight', { mode: 'number', unsigned: true }), // null: no lightweight copy
     lightweightPath: ciVarchar('lightweight_path', { length: 255 }), // the derived copy (MP3 of a WAV, reduced image)
     mediaInfo: json('media_info'), // duration, sample rate, channels, bit depth, ...
+    // Audio only, measured when the file is processed or first needed (Bible, decision log 2026-11-20, lane levels):
+    // integrated loudness (null: silence or too short to measure) and the loudest sample. A null peak means not measured yet.
+    loudnessLufs: decimal('loudness_lufs', { precision: 5, scale: 2 }),
+    peakDb: decimal('peak_db', { precision: 5, scale: 2 }),
     // The state of the encoding and peaks work, claimed by a worker with a conditional UPDATE.
     status: mysqlEnum('status', ['pending', 'processing', 'ready', 'failed'])
       .notNull()
@@ -360,6 +364,9 @@ export const clip = mysqlTable(
     pitchPoints: json('pitch_points'), // and for the pitch: cents added to the Pitch setting
     volumePoints: json('volume_points'), // null, or [[ms from the start of the piece, dB], ...] sorted by time: the volume envelope, linear between points
     origin: mysqlEnum('origin', ['human-recorded', 'generated', 'voice-converted']).notNull(),
+    // The level was set automatically when the take was added (auto) and had to stop short of the wanted loudness (limited);
+    // null once the level is changed by hand, or when nothing was set automatically.
+    levelAuto: mysqlEnum('level_auto', ['auto', 'limited']),
     createdAt: createdAt(),
   },
   (t) => [

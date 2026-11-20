@@ -10,7 +10,7 @@ import { closeGap, openGap, PARKED } from '../db/positions.js';
 import { asset, assetPeaks, chapter, character, clip, cue, lane, project, segment, scene } from '../db/schema.js';
 import { MIN_CUE_MS, estimateSpeechMs, msPerUnit, speechUnits, type LearnedSpeech } from '../shared/estimate.js';
 import { ripple, type RippleCue } from '../shared/ripple.js';
-import { sourceAt, type VolumePoint } from '../shared/audio-settings.js';
+import { LEVEL_MAX_DB, LEVEL_MIN_DB, sourceAt, type VolumePoint } from '../shared/audio-settings.js';
 import { HttpError, badRequest, notFound } from './http.js';
 
 export type CueType = 'speech' | 'sfx' | 'music';
@@ -634,6 +634,8 @@ export interface ClipView {
   speedPoints: VolumePoint[] | null;
   pitchPoints: VolumePoint[] | null;
   origin: ClipOrigin;
+  /** The level was set automatically from the lane (auto), or set so but held back by the limits (limited); null otherwise. */
+  levelAuto: 'auto' | 'limited' | null;
   assetDurationMs: number | null;
   status: 'pending' | 'processing' | 'ready' | 'failed';
   hasPeaks: boolean;
@@ -671,6 +673,7 @@ export async function clipsOfCues(q: Q, cueIds: string[]): Promise<Map<string, C
       speedPoints: clip.speedPoints,
       pitchPoints: clip.pitchPoints,
       origin: clip.origin,
+      levelAuto: clip.levelAuto,
       peaks: assetPeaks.assetId,
     })
     .from(clip)
@@ -698,6 +701,7 @@ export async function clipsOfCues(q: Q, cueIds: string[]): Promise<Map<string, C
       speedPoints: pointsOf(r.speedPoints),
       pitchPoints: pointsOf(r.pitchPoints),
       origin: r.origin,
+      levelAuto: r.levelAuto ?? null,
       assetDurationMs: typeof dur === 'number' ? dur : null,
       status: r.status,
       hasPeaks: r.peaks !== null,
@@ -760,6 +764,8 @@ export interface NewClip {
   keepCueLength?: boolean;
   choose?: boolean;
   origin?: ClipOrigin;
+  /** The automatic level of a new take (see levels.ts); without it the take starts at 0 dB. */
+  level?: { gainDb: number; levelAuto: 'auto' | 'limited' } | null;
 }
 
 export async function addClip(tx: Tx, cueId: string, input: NewClip): Promise<string> {
@@ -784,6 +790,7 @@ export async function addClip(tx: Tx, cueId: string, input: NewClip): Promise<st
     fadeInMs: fade,
     fadeOutMs: fade,
     origin: input.origin ?? 'human-recorded',
+    ...(input.level ? { gainDb: input.level.gainDb.toFixed(2), levelAuto: input.level.levelAuto } : {}),
     createdAt: new Date(),
   });
   if (input.choose ?? true) {
@@ -842,7 +849,7 @@ export async function updateClip(tx: Tx, clipId: string, patch: ClipPatch): Prom
       lengthMs,
       fadeInMs,
       fadeOutMs,
-      ...(patch.gainDb !== undefined ? { gainDb: patch.gainDb.toFixed(2) } : {}),
+      ...(patch.gainDb !== undefined ? { gainDb: patch.gainDb.toFixed(2), levelAuto: null } : {}), // a level set by hand is no longer automatic
       ...(patch.loops !== undefined ? { loops: patch.loops } : {}),
       ...(patch.speed !== undefined ? { speed: patch.speed.toFixed(2) } : {}),
       ...(patch.pitchCents !== undefined ? { pitchCents: patch.pitchCents } : {}),
@@ -853,6 +860,19 @@ export async function updateClip(tx: Tx, clipId: string, patch: ClipPatch): Prom
     })
     .where(eq(clip.id, clipId));
   if (current.clipId === clipId && lengthMs !== current.lengthMs) await followClip(tx, current, lengthMs);
+}
+
+/**
+ * Moves the level of every take on a lane by the same number of dB (the same factor of loudness), so the lane gets louder
+ * or quieter as a whole and its takes keep their balance. Each level stays within the Level slider's range.
+ */
+export async function shiftLaneLevel(tx: Tx, laneId: string, deltaDb: number): Promise<void> {
+  const cues = await tx.select({ id: cue.id }).from(cue).where(eq(cue.laneId, laneId));
+  if (!cues.length || deltaDb === 0) return;
+  await tx
+    .update(clip)
+    .set({ gainDb: sql`LEAST(${LEVEL_MAX_DB}, GREATEST(${LEVEL_MIN_DB}, ${clip.gainDb} + ${deltaDb.toFixed(2)}))`, levelAuto: null })
+    .where(inArray(clip.cueId, cues.map((q) => q.id)));
 }
 
 /** Chooses the clip a cue plays (null: none; the cue keeps its length). */

@@ -5,6 +5,7 @@ import { asset, assetPeaks } from '../db/schema.js';
 import { blobStore } from '../storage/blob-store.js';
 import { MP3_KBPS } from './encode.js';
 import { PEAK_STEP_MS } from './peaks.js';
+import type { Loudness } from './loudness.js';
 import { closeEncodePool, encodePool } from './pool.js';
 
 /**
@@ -28,6 +29,9 @@ async function readAll(projectId: string, rel: string): Promise<Uint8Array> {
   for await (const c of blobStore().read(projectId, rel)) chunks.push(c as Buffer);
   return Buffer.concat(chunks);
 }
+
+/** The asset columns that keep a file's loudness (DECIMAL(5,2) as strings). */
+export const loudnessColumns = (l: Loudness) => ({ loudnessLufs: l.lufs === null ? null : l.lufs.toFixed(2), peakDb: l.peakDb.toFixed(2) });
 
 /** Takes the oldest pending audio asset, or returns null. The conditional UPDATE is the claim. */
 async function claimNext(): Promise<string | null> {
@@ -58,12 +62,12 @@ async function runJob(id: string, log?: Log): Promise<void> {
     const haveMp3 = !isWav || (row.sizeLightweight !== null && row.lightweightPath !== null && (await blobStore().size(row.projectId, row.lightweightPath)) !== null);
     if (isWav && !row.lightweightPath) throw new Error('The asset has no playback copy name.');
     const data = await readAll(row.projectId, row.path);
-    const { mp3, peaks, ms } = await encodePool().process({ kind: isWav ? 'wav' : 'mp3', data, kbps: MP3_KBPS, peaksOnly: haveMp3 });
+    const { mp3, peaks, loudness, ms } = await encodePool().process({ kind: isWav ? 'wav' : 'mp3', data, kbps: MP3_KBPS, peaksOnly: haveMp3 });
     // The file may have been renamed while it worked: write to the names the row has now.
     await withDb(async (db) => {
       const now = (await db.select().from(asset).where(eq(asset.id, id)).limit(1))[0];
       if (!now || now.claimedBy !== ME) return; // deleted, or claimed by someone else after a stale requeue
-      const patch: Partial<typeof asset.$inferInsert> = {};
+      const patch: Partial<typeof asset.$inferInsert> = { ...loudnessColumns(loudness) };
       if (mp3) {
         await blobStore().remove(now.projectId, now.lightweightPath!);
         await blobStore().put(now.projectId, now.lightweightPath!, mp3);
