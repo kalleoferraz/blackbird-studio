@@ -783,16 +783,27 @@ function EnvelopeLine({ points, lengthMs, width, height }: { points: [number, nu
   return <svg className="tl-envelope" width={width} height={height} aria-hidden="true"><path d={d} /></svg>;
 }
 
+/** A canvas wider than this is slow or refused by some browsers, so a long cue is drawn on several canvases side by side. */
+const WAVE_TILE = 4000; // a multiple of BAR + GAP, so no bar is cut between two canvases
+const WAVE_MAX = WAVE_TILE * 100; // beyond this (hours at high zoom) the bars are stretched rather than adding canvases
+
 export function Wave({ peaks, offsetMs, clipMs, lengthMs, width, colour, speed, speedPoints, height }: { peaks: Peaks; offsetMs: number; clipMs: number; lengthMs: number; width: number; colour: string; speed: number; speedPoints?: [number, number][] | null; height: number }) {
-  const ref = useRef<HTMLCanvasElement>(null);
+  const refs = useRef<(HTMLCanvasElement | null)[]>([]);
   const h = height;
-  const w = Math.min(4000, Math.max(1, Math.round(width)));
+  // The canvases are as many pixels wide as the cue, so every bar has the same width and spacing at any cue length.
+  const w = Math.min(WAVE_MAX, Math.max(1, Math.round(width)));
+  const tiles = Math.ceil(w / WAVE_TILE);
   useEffect(() => {
-    const cv = ref.current!;
-    cv.width = w; cv.height = h;
-    const g = cv.getContext('2d')!;
-    g.clearRect(0, 0, w, h);
-    g.fillStyle = colour; g.globalAlpha = 0.85;
+    const gs: CanvasRenderingContext2D[] = [];
+    for (let t = 0; t < tiles; t++) {
+      const cv = refs.current[t];
+      if (!cv) return;
+      cv.width = Math.min(WAVE_TILE, w - t * WAVE_TILE); cv.height = h;
+      const g = cv.getContext('2d')!;
+      g.clearRect(0, 0, cv.width, h);
+      g.fillStyle = colour; g.globalAlpha = 0.85;
+      gs.push(g);
+    }
     const played = Math.min(lengthMs, clipMs); // a longer cue is silent after its clip ends
     // Thin rounded bars with a gap between them: one bar every BAR+GAP pixels.
     const BAR = 2, GAP = 2;
@@ -804,10 +815,19 @@ export function Wave({ peaks, offsetMs, clipMs, lengthMs, width, colour, speed, 
       let m = 0;
       for (let i = a; i < b && i < peaks.data.length; i++) m = Math.max(m, peaks.data[i]!);
       const bar = m === 0 ? BAR : Math.max(BAR + 1, (m / 255) * (h - 8));
+      const x = k * (BAR + GAP), t = Math.floor(x / WAVE_TILE), g = gs[t];
+      if (!g) break;
       g.beginPath();
-      g.roundRect(k * (BAR + GAP), (h - bar) / 2, BAR, bar, BAR / 2);
+      g.roundRect(x - t * WAVE_TILE, (h - bar) / 2, BAR, bar, BAR / 2);
       g.fill();
     }
-  }, [peaks, offsetMs, clipMs, lengthMs, w, h, colour, speed, speedPoints]);
-  return <canvas ref={ref} className="tl-wave" />;
+  }, [peaks, offsetMs, clipMs, lengthMs, w, h, colour, speed, speedPoints, tiles]);
+  return (
+    <div className="tl-wave">
+      {Array.from({ length: tiles }, (_, t) => (
+        <canvas key={t} ref={(el) => { refs.current[t] = el; }}
+          style={{ left: `${(t * WAVE_TILE / w) * 100}%`, width: `${(Math.min(WAVE_TILE, w - t * WAVE_TILE) / w) * 100}%` }} />
+      ))}
+    </div>
+  );
 }
