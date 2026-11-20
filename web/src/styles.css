@@ -771,4 +771,16 @@ label.vs-check { display: flex; gap: 8px; align-items: center; margin: .5em 0; }
 .m-lanes .as-row.lane { grid-template-columns: minmax(70px, 34%) 1fr 64px; min-height: 34px; }
 .m-lanes .ml-name { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text); }
 .m-lanes .ml-name i { flex: none; width: 4px; height: 18px; border-radius: 2px; }
-@media (max-height: 500px) and (pointer: coarse) { .timeline { max-height: 55dvh; } }
+/* Phone held sideways (ScriptView adds m-land; tl-on while the timeline is open): the top bar stays, the chapter and segment
+   titles go, the script leaves room at its left for the characters, and the player bar is one row (path · controls · buttons).
+   The open timeline takes the whole height above the player bar, the top bar included. */
+.script.m-land .where-wrap, .script.m-land .seg-titles { display: none; }
+.script.m-land .center-col { padding-top: 8px; }
+.script.m-land .doc { max-width: 750px; margin: 0 auto 0 84px; }
+.script.m-land .navbar.mobile .nav { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: "pos ctrls right"; gap: 10px; padding: 0 12px 4px; align-items: center; }
+.script.m-land .navbar.mobile .nav-right { justify-content: flex-end; }
+.script.m-land .nav-fold { height: 18px; }
+.script.m-land.tl-on .topbar.mobile-top, .script.m-land.tl-on .m-banner { display: none; }
+.script.m-land.tl-on .script-body { flex: 0 0 0; overflow: hidden; visibility: hidden; }
+.script.m-land.tl-on .timeline { flex: 1 1 auto; height: auto !important; border-top: 0; }
+.script.m-land.tl-on .tl-divider { display: none; }

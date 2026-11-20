@@ -168,7 +168,7 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
   useEffect(() => {
     const main = mainRef.current;
     if (!main) return;
-    if (isMobile) { main.removeAttribute('data-faces'); return; }
+    if (isMobile && !landscape) { main.removeAttribute('data-faces'); return; } // a phone held sideways has room for them
     const update = () => {
       const doc = main.querySelector('.doc');
       if (!doc) { main.removeAttribute('data-faces'); return; }
@@ -192,7 +192,7 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
     const mo = new MutationObserver(() => { watch(); update(); });
     mo.observe(main, { childList: true, subtree: true });
     return () => { ro.disconnect(); mo.disconnect(); };
-  }, [isMobile, content?.segment.id]);
+  }, [isMobile, landscape, content?.segment.id]);
   const refreshAfterEdit = () => { void loadProject(); void loadStory(); void loadNotes(); loadPlaceholder(); };
   const onContent = (c: SegmentContent) => { setContent(c); refreshAfterEdit(); };
   // On a phone, changing segment must not add history steps (Back would walk through segments instead of panels).
@@ -350,7 +350,7 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
     <LibPlayContext.Provider value={playLib}>
     <NotesContext.Provider value={notesInfo}>
     <PlaceholderContext.Provider value={placeholder}>
-    <div className="script">
+    <div className={'script' + (isMobile && landscape ? ' m-land' : '') + (isMobile && landscape && fullTimeline ? ' tl-on' : '')}>
       {isMobile ? (
         <header className="topbar mobile-top">
           <a href="#/" className="brand" title="Projects"><BlackbirdIcon /></a>
@@ -397,7 +397,7 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
               {topSceneLabel && <><span className="sep">›</span><span>{topSceneLabel}</span></>}
             </div></div>
             <div className="doc">
-              <div ref={titlesRef}>
+              <div ref={titlesRef} className="seg-titles">
               <TitleEdit className="chapter-title" value={content.segment.chapterTitle} disabled={!!readOnly} onSave={(v) => renameTitle('chapter', content.segment.chapterId, v)} />
               <TitleEdit className="segment-title" value={content.segment.title} disabled={!!readOnly} onSave={(v) => renameTitle('segment', content.segment.id, v)} />
               </div>
