@@ -14,7 +14,7 @@ import { Menu, errorText, useLocalState } from './ui.tsx';
 import { AudioPicker } from './AudioPicker.tsx';
 import { audioMenuItems } from './audioMenu.ts';
 import { plainMd } from './md.tsx';
-import { ENVELOPE_RANGE, MAX_VOLUME_POINTS, VOLUME_MAX_DB, VOLUME_MIN_DB, sourceAt, type EnvelopeKind } from '../../src/shared/audio-settings.ts';
+import { ENVELOPE_RANGE, LEVEL_MAX_DB, LEVEL_MIN_DB, MAX_VOLUME_POINTS, VOLUME_MAX_DB, VOLUME_MIN_DB, sourceAt, type EnvelopeKind } from '../../src/shared/audio-settings.ts';
 import { AudioSliders, ENVELOPE_NAME, type AudioEdit } from './AudioSettings.tsx';
 import { RemoveAudioDialog } from './RemoveAudio.tsx';
 
@@ -70,7 +70,7 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
     if (!g) return 120;
     g.font = `${Math.round(0.8 * 16)}px ${getComputedStyle(document.body).fontFamily}`;
     const w = content.lanes.reduce((m, l) => Math.max(m, g.measureText(l.title).width), 0);
-    return Math.round(Math.min(320, Math.max(90, w + 44)));
+    return Math.round(Math.min(340, Math.max(110, w + 66))); // the colour mark, the lane level button and the padding
   }, [content.lanes]);
   const labelW = labelPref || autoLabelW;
   const vw = Math.max(200, bw - labelW);
@@ -488,6 +488,7 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
           <div className="tl-labels" style={{ width: labelW }}>
             <div className="tl-corner" style={{ height: RULER_H }} />
             {lanes.map((l, i) => <div key={l.id} className="tl-label" style={{ height: laneH[i] }} title={l.title}>
+              <LaneLevel lane={l} content={content} readOnly={readOnly} run={(m, u, b) => void runOnCue(m, u, b)} />
               <i style={{ background: laneColour(l.colour) }} />{l.title}
             </div>)}
             <div className="tl-label-grip" onPointerDown={startLabelResize} onDoubleClick={() => setLabelPref(0)} title="Drag to resize (double-click: fit the longest name)" />
@@ -582,6 +583,79 @@ const Playhead = memo(function Playhead({ sceneId, x, onFrame }: { sceneId: stri
 });
 
 /** The audio settings of the cue being edited: a panel outside the timeline (so nothing clips it), beside the cue, on the left when the screen ends on the right, and moved up when it would run off the bottom. */
+/** The middle value of some levels (null for none). */
+export const medianOf = (values: number[]): number | null => {
+  const v = [...values].sort((a, b) => a - b), n = v.length;
+  return n === 0 ? null : n % 2 ? v[(n - 1) / 2]! : (v[n / 2 - 1]! + v[n / 2]!) / 2;
+};
+
+/** The levels of the takes a lane's cues play, in the whole segment. */
+export const laneGains = (content: SegmentContent, laneId: string): number[] => content.scenes.flatMap((s) => s.cues)
+  .filter((c) => c.laneId === laneId && c.clipId).map((c) => c.clips.find((k) => k.id === c.clipId)?.gainDb).filter((g): g is number => g !== undefined);
+
+const levelText = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`;
+
+/**
+ * The lane level slider (Bible, decision log 2026-11-20): it shows the median level of the lane's takes; letting it go moves
+ * the level of every take on the lane by the same number of dB, so the lane gets louder or quieter as a whole. Used in the
+ * timeline's lane popover and in the phone's lane panel.
+ */
+export function LaneLevelRow({ lane, content, readOnly, run, label = 'Level' }: { lane: Lane; content: SegmentContent; readOnly: boolean; run: (method: string, url: string, body?: unknown) => void; label?: ReactNode }) {
+  const median = medianOf(laneGains(content, lane.id));
+  const [value, setValue] = useState(median ?? 0);
+  useEffect(() => setValue(median ?? 0), [median]);
+  const commit = (v: number) => {
+    if (median === null) return;
+    const deltaDb = Math.round((v - median) * 100) / 100;
+    if (deltaDb !== 0) run('POST', `/api/lanes/${lane.id}/level`, { deltaDb });
+  };
+  return (
+    <div className="as-row lane">
+      <span className="as-name" title="The middle level of the lane's takes">{label}</span>
+      <input type="range" min={LEVEL_MIN_DB} max={LEVEL_MAX_DB} step={0.5} value={value} disabled={readOnly || median === null} aria-label={`Level of ${lane.title}`}
+        onChange={(e) => setValue(Number(e.target.value))}
+        onPointerUp={(e) => commit(Number(e.currentTarget.value))} onKeyUp={(e) => commit(Number(e.currentTarget.value))} />
+      <output>{median === null ? '—' : levelText(value)}</output>
+    </div>
+  );
+}
+
+/** The lane level button left of a lane's name in the timeline, opening its slider. */
+function LaneLevel({ lane, content, readOnly, run }: { lane: Lane; content: SegmentContent; readOnly: boolean; run: (method: string, url: string, body?: unknown) => void }) {
+  const gains = laneGains(content, lane.id);
+  const median = medianOf(gains);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!at) return;
+    const away = (e: PointerEvent) => { if (!pop.current?.contains(e.target as Node)) setAt(null); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setAt(null); };
+    window.addEventListener('pointerdown', away, true); window.addEventListener('keydown', esc);
+    return () => { window.removeEventListener('pointerdown', away, true); window.removeEventListener('keydown', esc); };
+  }, [at]);
+  const none = median === null;
+  return (
+    <>
+      <button type="button" className={'tl-lane-level' + (at ? ' on' : '')} disabled={none} data-testid="lane-level"
+        title={none ? 'No takes on this lane yet' : `Lane level: ${levelText(median)} (the middle level of its takes)`} aria-label="Lane level"
+        onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAt(at ? null : { x: r.right + 6, y: r.top }); }}>
+        <LaneLevelIcon />
+      </button>
+      {at && !none && createPortal(
+        <div ref={pop} className="tl-lane-pop" role="dialog" aria-label={`Level of ${lane.title}`}
+          style={{ left: Math.min(at.x, window.innerWidth - 268), top: Math.max(8, Math.min(at.y, window.innerHeight - 120)) }}>
+          <div className="tl-ap-head"><b>{lane.title}</b><span className="muted small">{gains.length} take{gains.length === 1 ? '' : 's'}</span></div>
+          <LaneLevelRow lane={lane} content={content} readOnly={readOnly} run={run} />
+          <p className="muted small">{readOnly ? 'View only.' : 'Moves every take on this lane by the same amount.'}</p>
+        </div>, document.body)}
+    </>
+  );
+}
+
+export const LaneLevelIcon = () => (
+  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 2v12M8 2v12M12 2v12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity=".55" /><rect x="2" y="8" width="4" height="2.6" rx="1" fill="currentColor" /><rect x="6" y="4" width="4" height="2.6" rx="1" fill="currentColor" /><rect x="10" y="10" width="4" height="2.6" rx="1" fill="currentColor" /></svg>
+);
+
 function AudioPanel({ children, ...rest }: { children: ReactNode } & React.HTMLAttributes<HTMLDivElement>) {
   const el = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {

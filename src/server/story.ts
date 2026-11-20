@@ -13,6 +13,7 @@ import { usageOf } from './library.js';
 import { chapterIndexLabel } from '../library/managed.js';
 import { storylineName, takeKind } from '../library/storyline.js';
 import { accessTo, accessToEntity, checkId } from './access.js';
+import { assetLoudness, autoLevel, measureBytes, saveLoudness } from './levels.js';
 import { authenticate } from './auth-routes.js';
 import {
   MAX_SCENE_MS,
@@ -36,13 +37,14 @@ import {
   updateCue,
   placeCue,
   shiftCues,
+  shiftLaneLevel,
   type CuePlace,
   type ClipOrigin,
   type ClipPatch,
   type CuePatch,
   type CueType,
 } from './content.js';
-import { LEVEL_MAX_DB, PITCH_MAX_CENTS, SPEED_MAX, SPEED_MIN, cleanPoints } from '../shared/audio-settings.js';
+import { LEVEL_MAX_DB, LEVEL_MIN_DB, PITCH_MAX_CENTS, SPEED_MAX, SPEED_MIN, cleanPoints } from '../shared/audio-settings.js';
 import { HttpError, asBody, badRequest, optBool, optInt, optString, reqString } from './http.js';
 
 const MAX_NUMBERED = 99;
@@ -466,8 +468,11 @@ export function registerStoryRoutes(app: FastifyInstance): void {
       if (typeof body.origin !== 'string' || !CLIP_ORIGIN_LIST.includes(body.origin)) throw badRequest('invalid_origin');
       origin = body.origin as ClipOrigin;
     }
+    // A take chosen from the library is levelled like a new recording (lane levels).
+    const projectId = await withDb(async (db) => (await accessToEntity(db, userId(request), 'cue', id, { edit: true })).projectId);
+    const level = await autoLevel(projectId, id, await assetLoudness(projectId, assetId));
     const result = await segmentWrite(request, 'cue', id, async (tx) => ({
-      created: await addClip(tx, id, { assetId, offsetMs, lengthMs, keepCueLength, choose, origin }),
+      created: await addClip(tx, id, { assetId, offsetMs, lengthMs, keepCueLength, choose, origin, level }),
     }));
     return reply.code(201).send(result);
   });
@@ -521,10 +526,13 @@ export function registerStoryRoutes(app: FastifyInstance): void {
       const where = await storylineName(db, id, 'R');
       return { projectId: access.projectId, folder: where.folder, name: where.base + (isWav(data) ? '.wav' : '.mp3') };
     });
+    const loudness = await measureBytes(data); // before the file joins the encoding queue
     const stored = await withDb((db) => storeFile(db, { projectId, folder, name, data, only: ['audio'], maxBytes: MAX_UPLOAD }));
+    if (loudness) await saveLoudness(stored.asset.id, loudness);
     if (stored.asset.status === 'pending') kickAudioJobs(request.log);
+    const level = await autoLevel(projectId, id, loudness);
     const result = await segmentWrite(request, 'cue', id, async (tx) => {
-      const created = await addClip(tx, id, { assetId: stored.asset.id, keepCueLength: false, choose: true, origin: 'human-recorded' });
+      const created = await addClip(tx, id, { assetId: stored.asset.id, keepCueLength: false, choose: true, origin: 'human-recorded', level });
       await learnSpeechRate(tx, id, created); // a speech take teaches the project how fast it is spoken
       return { created, path: stored.asset.path };
     });
@@ -550,10 +558,13 @@ export function registerStoryRoutes(app: FastifyInstance): void {
       const where = await storylineName(db, id, takeKind(made.origin));
       return { folder: where.folder, name: `${where.base}.${made.ext}` };
     });
+    const loudness = await measureBytes(made.data);
     const stored = await withDb((db) => storeFile(db, { projectId, folder, name, data: made.data, only: ['audio'], maxBytes: MAX_UPLOAD }));
+    if (loudness) await saveLoudness(stored.asset.id, loudness);
     if (stored.asset.status === 'pending') kickAudioJobs(request.log);
+    const level = await autoLevel(projectId, id, loudness);
     const result = await segmentWrite(request, 'cue', id, async (tx) => {
-      const created = await addClip(tx, id, { assetId: stored.asset.id, keepCueLength: false, choose: true, origin: made.origin });
+      const created = await addClip(tx, id, { assetId: stored.asset.id, keepCueLength: false, choose: true, origin: made.origin, level });
       await tx.insert(generation).values({ id: newUlid(), projectId, clipId: created, ...made.record, createdByUserId: userId(request), createdAt: new Date() });
       return { created, path: stored.asset.path, characterCost: made.record.characterCost };
     });
@@ -609,20 +620,22 @@ export function registerStoryRoutes(app: FastifyInstance): void {
     const vs = (ids as string[]).map((v) => variation(checkId(v), userId(request)));
     if (vs.some((v) => v.cueId !== id)) throw badRequest('invalid_variationIds', 'A variation belongs to another cue.');
     const chosen = typeof b.chosen === 'string' && ids.includes(b.chosen) ? b.chosen : vs[0]!.id;
-    const kept: { v: (typeof vs)[number]; assetId: string; path: string }[] = [];
+    const kept: { v: (typeof vs)[number]; assetId: string; path: string; level: Awaited<ReturnType<typeof autoLevel>> }[] = [];
     for (const v of vs) {
       const { folder, name } = await withDb(async (db) => {
         const where = await storylineName(db, id, 'G', kept.length);
         return { folder: where.folder, name: `${where.base}.${v.ext}` };
       });
+      const loudness = await measureBytes(v.data);
       const st = await withDb((db) => storeFile(db, { projectId, folder, name, data: v.data, only: ['audio'], maxBytes: MAX_UPLOAD }));
-      kept.push({ v, assetId: st.asset.id, path: st.asset.path });
+      if (loudness) await saveLoudness(st.asset.id, loudness);
+      kept.push({ v, assetId: st.asset.id, path: st.asset.path, level: await autoLevel(projectId, id, loudness) });
     }
     kickAudioJobs(request.log);
     const result = await segmentWrite(request, 'cue', id, async (tx) => {
       const created: string[] = [];
       for (const k of kept) {
-        const clipId = await addClip(tx, id, { assetId: k.assetId, keepCueLength: k.v.id !== chosen, choose: k.v.id === chosen, origin: 'generated' });
+        const clipId = await addClip(tx, id, { assetId: k.assetId, keepCueLength: k.v.id !== chosen, choose: k.v.id === chosen, origin: 'generated', level: k.level });
         await tx.insert(generation).values({
           id: newUlid(), projectId, clipId, kind: 'sfx', model: k.v.settings.model, voiceId: null, textSent: k.v.settings.prompt, direction: null,
           settings: { durationMs: k.v.settings.durationMs, loop: k.v.settings.loop, promptInfluence: k.v.settings.promptInfluence },
@@ -679,6 +692,20 @@ export function registerStoryRoutes(app: FastifyInstance): void {
   });
 
   // ---- lanes ------------------------------------------------------------------------
+
+  /** Moves the level of every take on the lane by `deltaDb` (the lane's level slider). */
+  app.post('/api/lanes/:id/level', small, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    const body = asBody(request.body);
+    const span = LEVEL_MAX_DB - LEVEL_MIN_DB;
+    if (typeof body.deltaDb !== 'number' || !Number.isFinite(body.deltaDb) || Math.abs(body.deltaDb) > span) throw badRequest('invalid_deltaDb');
+    const deltaDb = Math.round(body.deltaDb * 100) / 100;
+    const row = (await withDb((db) => db.select({ segmentId: lane.segmentId }).from(lane).where(eq(lane.id, id)).limit(1)))[0];
+    if (!row) throw new HttpError(404, 'not_found');
+    return segmentWrite(request, 'segment', row.segmentId, async (tx) => {
+      await shiftLaneLevel(tx, id, deltaDb);
+    });
+  });
 
   app.patch('/api/lanes/:id', small, async (request) => {
     const id = checkId((request.params as { id: string }).id);

@@ -756,3 +756,18 @@ label.vs-check { display: flex; gap: 8px; align-items: center; margin: .5em 0; }
 .quota-fill { height: 100%; background: var(--green); } .quota-fill.high { background: var(--alert); } .quota-fill.full { background: var(--danger); }
 .change-count { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 9px; background: var(--alert); color: var(--on-primary); font-size: .72rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .integ-settings { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; } .integ-settings h4 { font-size: .85rem; margin: 0 0 4px; color: var(--muted); } .integ-settings label { margin: .5em 0; } .integ-settings select { width: 100%; }
+
+/* Lane level (decision log 2026-11-20): a button left of each lane name, and its slider. */
+.tl-lane-level { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; margin-right: -2px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.tl-lane-level:hover:not(:disabled), .tl-lane-level.on { color: var(--text); background: var(--panel2); }
+.tl-lane-level:disabled { opacity: .35; cursor: default; }
+.tl-lane-pop { position: fixed; z-index: 60; width: 260px; box-sizing: border-box; padding: 8px 10px; background: var(--panel2); border: 1px solid #4a3c3e; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.tl-lane-pop p { margin: 6px 0 0; }
+.as-row.lane { grid-template-columns: 44px 1fr 64px; }
+.as-note { grid-column: 1 / -1; margin-top: -2px; }
+
+/* Phone: the lane levels panel (upright), and a timeline that leaves room for the script (sideways). */
+.m-lanes .as-row.lane { grid-template-columns: minmax(70px, 34%) 1fr 64px; min-height: 34px; }
+.m-lanes .ml-name { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text); }
+.m-lanes .ml-name i { flex: none; width: 4px; height: 18px; border-radius: 2px; }
+@media (max-height: 500px) and (pointer: coarse) { .timeline { max-height: 55dvh; } }

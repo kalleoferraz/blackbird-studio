@@ -152,6 +152,15 @@ export function useIsMobile(): boolean {
   );
 }
 
+/** The screen is wider than tall (a phone turned sideways shows the timeline instead of the lane levels). */
+export function useIsLandscape(): boolean {
+  return useSyncExternalStore(
+    (cb) => { const m = window.matchMedia('(orientation: landscape)'); m.addEventListener('change', cb); return () => m.removeEventListener('change', cb); },
+    () => window.matchMedia('(orientation: landscape)').matches,
+    () => true,
+  );
+}
+
 export function useLocalState<T>(key: string, initial: T): [T, (v: T) => void] {
   const [v, setV] = useState<T>(() => {
     try { const s = localStorage.getItem(key); return s === null ? initial : (JSON.parse(s) as T); } catch { return initial; }

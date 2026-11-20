@@ -1,4 +1,5 @@
 import { Worker } from 'node:worker_threads';
+import type { Loudness } from './loudness.js';
 import type { WorkRequest, WorkResponse } from './types.js';
 
 // Under `tsx` the sources are .ts and the worker needs a small JavaScript entry that registers tsx first
@@ -7,6 +8,8 @@ const RUNNING_TS = import.meta.url.endsWith('.ts');
 const WORKER_URL = new URL(RUNNING_TS ? './worker-boot.mjs' : './worker.js', import.meta.url);
 
 export class EncodeError extends Error {}
+
+export interface Processed { mp3: Uint8Array | null; peaks: Uint8Array; loudness: Loudness; ms: number }
 
 /**
  * One worker thread, one encode at a time (Bible, section 6). The thread starts on the first job, stays
@@ -21,7 +24,7 @@ export class EncodePool {
   constructor(private readonly idleMs = 60_000, private readonly timeoutMs = 180_000) {}
 
   /** Runs a job; jobs queue up. The caller's buffer is copied, so it stays usable. */
-  process(job: Omit<WorkRequest, 'id'>): Promise<{ mp3: Uint8Array | null; peaks: Uint8Array; ms: number }> {
+  process(job: Omit<WorkRequest, 'id'>): Promise<Processed> {
     const next = this.queue.then(() => this.runOne(job));
     this.queue = next.catch(() => undefined);
     return next;
@@ -39,7 +42,7 @@ export class EncodePool {
     void worker.terminate();
   }
 
-  private async runOne(job: Omit<WorkRequest, 'id'>): Promise<{ mp3: Uint8Array | null; peaks: Uint8Array; ms: number }> {
+  private async runOne(job: Omit<WorkRequest, 'id'>): Promise<Processed> {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (!this.worker) {
       const w = new Worker(WORKER_URL);
@@ -63,7 +66,7 @@ export class EncodePool {
         worker.postMessage({ ...job, id, data: copy } satisfies WorkRequest, [copy.buffer]);
       });
       if (!response.ok) throw new EncodeError(`${response.error.name}: ${response.error.message}`);
-      return { mp3: response.mp3, peaks: response.peaks, ms: response.ms };
+      return { mp3: response.mp3, peaks: response.peaks, loudness: response.loudness, ms: response.ms };
     } finally {
       if (this.worker) {
         this.idleTimer = setTimeout(() => void this.close(), this.idleMs);

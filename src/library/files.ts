@@ -236,6 +236,8 @@ export async function storeFile(q: Q, o: StoreOptions): Promise<Stored> {
       sizeLightweight: light ? light.data.byteLength : null,
       lightweightPath: lightPath,
       mediaInfo: info,
+      loudnessLufs: null,
+      peakDb: null,
       status: d.kind === 'audio' ? 'pending' : 'ready', // audio waits for its peaks, and a WAV for its MP3 copy (audio/jobs.ts)
       fileState: 'ok',
       claimedBy: null,
@@ -322,6 +324,8 @@ export async function replaceFile(q: Q, row: AssetRow, data: Uint8Array): Promis
     hash,
     size: data.byteLength,
     mediaInfo: info,
+    loudnessLufs: null, // measured again with the new sound
+    peakDb: null,
     lightweightPath: lightPath,
     sizeLightweight: light ? light.data.byteLength : null,
     status: d.kind === 'audio' ? 'pending' : 'ready',

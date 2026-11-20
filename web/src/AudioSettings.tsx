@@ -47,6 +47,11 @@ export function AudioSliders({ clip, run, env, onEnv }: { clip: Clip; run: Run; 
       {row('speed', 'Faster or slower, the pitch stays', speed, SPEED_MIN, SPEED_MAX, 0.05, setSpeed, `${speed.toFixed(2)}×`, 1, (v) => { if (v !== clip.speed) send({ speed: v }); })}
       {row('pitch', 'Higher or lower, the speed stays', semi, -PITCH_MAX_CENTS / 100, PITCH_MAX_CENTS / 100, 0.5, setSemi, `${semi > 0 ? '+' : ''}${semi.toFixed(1)} st`, 0, (v) => { if (Math.round(v * 100) !== clip.pitchCents) send({ pitchCents: Math.round(v * 100) }); })}
       {row('level', 'The whole take, in dB', level, LEVEL_MIN_DB, LEVEL_MAX_DB, 0.5, setLevel, `${level > 0 ? '+' : ''}${level.toFixed(1)} dB`, 0, (v) => { if (v !== clip.gainDb) send({ gainDb: v }); })}
+      {clip.levelAuto && level === clip.gainDb && (
+        <div className="as-note muted small" data-testid="level-auto">
+          {clip.levelAuto === 'auto' ? 'Level set automatically to match the lane.' : 'Level set automatically, but held back so the take does not clip or get boosted too much.'}
+        </div>
+      )}
     </div>
   );
 }

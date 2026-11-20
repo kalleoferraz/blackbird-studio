@@ -16,6 +16,11 @@ const { runMigrations } = await import('../src/db/migrate.js');
 const { withDb } = await import('../src/db/client.js');
 const { createUser } = await import('../src/auth/accounts.js');
 const { closeResizePool } = await import('../src/library/pool.js');
+const { analyseWav } = await import('../src/audio/peaks.js');
+
+/** The level that brings a test file (by its seed) to a loudness, as the lane levels compute it. */
+const loudnessOf = (seed: number) => analyseWav(new Uint8Array(wavFile({ seconds: 10, seed }))).loudness.lufs!;
+const levelOf = (name: 'birds', target: number) => Math.round((target - loudnessOf({ birds: 3 }[name])) * 10) / 10;
 
 let app: FastifyInstance;
 const run = Date.now().toString(36);
@@ -82,8 +87,9 @@ describe('clips', () => {
     assert.equal(cue.clips.length, 1);
     assert.deepEqual(
       [cue.clips[0].number, cue.clips[0].offsetMs, cue.clips[0].lengthMs, cue.clips[0].fadeInMs, cue.clips[0].fadeOutMs, cue.clips[0].gainDb, cue.clips[0].name, cue.clips[0].assetDurationMs, cue.clips[0].hasPeaks, cue.clips[0].status],
-      [1, 2000, 3000, 100, 100, 0, 'birds.wav', 10000, true, 'ready'],
+      [1, 2000, 3000, 100, 100, levelOf('birds', -18), 'birds.wav', 10000, true, 'ready'],
     );
+    assert.equal(cue.clips[0].levelAuto, 'auto'); // the first take of a lane is levelled to -18 LUFS
     ids.k1 = r.body.created;
   });
 
@@ -224,5 +230,59 @@ describe('clips', () => {
     const again = await call('ann', 'POST', `/api/scenes/${c.scenes[0].id}/cues`, { type: 'speech', text });
     const len = cueOf(again.body, again.body.created).lengthMs;
     assert.notEqual(len, estimateSpeechMs(text, 'en-US'));
+  });
+});
+
+describe('lane levels', () => {
+  let seg = '';
+  const content = async () => (await call('ann', 'GET', `/api/segments/${seg}`)).body;
+  const cueOf = (body: any, id: string) => body.scenes.flatMap((s: any) => s.cues).find((c: any) => c.id === id);
+  const chosen = (body: any, id: string) => { const c = cueOf(body, id); return c.clips.find((k: any) => k.id === c.clipId); };
+
+  before(async () => {
+    const p = await call('ann', 'POST', '/api/projects', { type: 'audiobook', title: `Levels ${run}`, language: 'en-US' });
+    ids.p2 = p.body.id;
+    seg = (await call('ann', 'GET', `/api/projects/${ids.p2}/story`)).body.chapters[0].segments[0].id;
+    for (const [name, seed] of [['one.wav', 5], ['two.wav', 9]] as const) {
+      const up = await call('ann', 'POST', `/api/projects/${ids.p2}/library/files?folder=&name=${name}`, wavFile({ seconds: 10, seed }), { 'content-type': 'application/octet-stream' });
+      assert.equal(up.status, 201, JSON.stringify(up.body));
+      ids[name] = up.body.id;
+    }
+    await audioJobsIdle();
+  });
+
+  it('levels the first take to -18 LUFS, and a later take to how loud the cue before it plays', async () => {
+    const c = await content();
+    ids.l1 = (await call('ann', 'POST', `/api/scenes/${c.scenes[0].id}/cues`, { type: 'sfx', text: 'one' })).body.created;
+    let r = await call('ann', 'POST', `/api/cues/${ids.l1}/clips`, { assetId: ids['one.wav'] });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    const first = chosen(r.body, ids.l1);
+    assert.equal(first.gainDb, Math.round((-18 - loudnessOf(5)) * 10) / 10);
+    assert.equal(first.levelAuto, 'auto');
+    // The author makes it louder by hand: the level is no longer automatic, and the next take follows the new loudness.
+    r = await call('ann', 'PATCH', `/api/clips/${first.id}`, { gainDb: -8 });
+    assert.equal(chosen(r.body, ids.l1).levelAuto, null);
+    ids.l2 = (await call('ann', 'POST', `/api/scenes/${c.scenes[0].id}/cues`, { afterCueId: ids.l1, type: 'sfx', text: 'two' })).body.created;
+    r = await call('ann', 'POST', `/api/cues/${ids.l2}/clips`, { assetId: ids['two.wav'] });
+    const second = chosen(r.body, ids.l2);
+    assert.equal(cueOf(r.body, ids.l2).laneId, cueOf(r.body, ids.l1).laneId);
+    assert.equal(second.gainDb, Math.round((loudnessOf(5) - 8 - loudnessOf(9)) * 10) / 10);
+    assert.equal(second.levelAuto, 'auto');
+  });
+
+  it('moves every level of the lane by the same amount, within the slider range', async () => {
+    const before = await content();
+    const lane = cueOf(before, ids.l1).laneId;
+    const g1 = chosen(before, ids.l1).gainDb, g2 = chosen(before, ids.l2).gainDb;
+    let r = await call('ann', 'POST', `/api/lanes/${lane}/level`, { deltaDb: 3 });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(chosen(r.body, ids.l1).gainDb, g1 + 3);
+    assert.equal(chosen(r.body, ids.l2).gainDb, Math.round((g2 + 3) * 100) / 100);
+    assert.equal(chosen(r.body, ids.l2).levelAuto, null);
+    r = await call('ann', 'POST', `/api/lanes/${lane}/level`, { deltaDb: 50 });
+    assert.equal(r.status, 200);
+    assert.equal(chosen(r.body, ids.l1).gainDb, 30);
+    assert.equal((await call('ann', 'POST', `/api/lanes/${lane}/level`, { deltaDb: 'x' })).status, 400);
+    assert.notEqual((await call('cy', 'POST', `/api/lanes/${lane}/level`, { deltaDb: 1 })).status, 200);
   });
 });
