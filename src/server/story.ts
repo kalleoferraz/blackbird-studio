@@ -6,6 +6,7 @@ import { closeGap, openGap, parkRow } from '../db/positions.js';
 import { touchProject } from '../db/touch.js';
 import { asset, chapter, clip, cue, generation, lane, project, segment, scene } from '../db/schema.js';
 import { generateForCue } from '../voice/generate.js';
+import { MAX_VARIATIONS, dropVariation, generateVariations, parseSfxSettings, saveSfxSettings, sfxSettings, variation } from '../voice/sfx.js';
 import { kickAudioJobs } from '../audio/jobs.js';
 import { MAX_UPLOAD, removeFiles, storeFile, type AssetRow } from '../library/files.js';
 import { usageOf } from './library.js';
@@ -559,6 +560,84 @@ export function registerStoryRoutes(app: FastifyInstance): void {
       return { created, path: stored.asset.path, characterCost: made.record.characterCost };
     });
     return reply.code(201).send(result);
+  });
+
+  // ---- sound-effect cues: settings, variations, keeping some as takes (Bible, decision log 2026-11-20) ----
+
+  const sfxCue = async (request: { account?: { id: string } }, id: string, edit = true) => withDb(async (db) => {
+    const access = await accessToEntity(db, userId(request), 'cue', id, { edit });
+    const c = (await db.select({ type: cue.type }).from(cue).where(eq(cue.id, id)).limit(1))[0];
+    if (c?.type !== 'sfx') throw badRequest('not_sfx', 'This cue is not a sound effect.');
+    return access.projectId;
+  });
+
+  app.get('/api/cues/:id/sfx', auth, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    await sfxCue(request, id, false);
+    return withDb((db) => sfxSettings(db, id));
+  });
+
+  app.put('/api/cues/:id/sfx', small, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    const projectId = await sfxCue(request, id);
+    const settings = parseSfxSettings(asBody(request.body));
+    await inTransaction(async (tx) => { await saveSfxSettings(tx, id, settings); await touchProject(tx, projectId, userId(request)); });
+    return { ...settings, saved: true };
+  });
+
+  /** Saves the settings and generates 1 to 4 variations; they wait (30 minutes) until some are kept. */
+  app.post('/api/cues/:id/sfx/generate', small, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    const projectId = await sfxCue(request, id);
+    const b = asBody(request.body);
+    const settings = parseSfxSettings(b);
+    const count = typeof b.variations === 'number' && Number.isInteger(b.variations) && b.variations >= 1 && b.variations <= MAX_VARIATIONS ? b.variations : 1;
+    await inTransaction(async (tx) => { await saveSfxSettings(tx, id, settings); await touchProject(tx, projectId, userId(request)); });
+    return generateVariations({ cueId: id, projectId, userId: userId(request), settings, count });
+  });
+
+  app.get('/api/sfx-variations/:vid', auth, async (request, reply) => {
+    const v = variation(checkId((request.params as { vid: string }).vid), userId(request));
+    return reply.header('content-type', v.contentType).header('cache-control', 'private, no-store').send(v.data);
+  });
+
+  /** Keeps chosen variations as the cue's next takes (under Storyline); `chosen` names the one the cue plays. */
+  app.post('/api/cues/:id/sfx/keep', small, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    const projectId = await sfxCue(request, id);
+    const b = asBody(request.body);
+    const ids = Array.isArray(b.variationIds) ? b.variationIds : [];
+    if (!ids.length || ids.length > MAX_VARIATIONS * 5 || !ids.every((x) => typeof x === 'string')) throw badRequest('invalid_variationIds', 'Choose at least one variation to keep.');
+    const vs = (ids as string[]).map((v) => variation(checkId(v), userId(request)));
+    if (vs.some((v) => v.cueId !== id)) throw badRequest('invalid_variationIds', 'A variation belongs to another cue.');
+    const chosen = typeof b.chosen === 'string' && ids.includes(b.chosen) ? b.chosen : vs[0]!.id;
+    const kept: { v: (typeof vs)[number]; assetId: string; path: string }[] = [];
+    for (const v of vs) {
+      const { folder, name } = await withDb(async (db) => {
+        const last = (await db.select({ n: max(clip.number) }).from(clip).where(eq(clip.cueId, id)))[0]?.n ?? 0;
+        const where = await storylineName(db, id, Number(last) + 1 + kept.length);
+        return { folder: where.folder, name: `${where.base}.${v.ext}` };
+      });
+      const st = await withDb((db) => storeFile(db, { projectId, folder, name, data: v.data, only: ['audio'], maxBytes: MAX_UPLOAD }));
+      kept.push({ v, assetId: st.asset.id, path: st.asset.path });
+    }
+    kickAudioJobs(request.log);
+    const result = await segmentWrite(request, 'cue', id, async (tx) => {
+      const created: string[] = [];
+      for (const k of kept) {
+        const clipId = await addClip(tx, id, { assetId: k.assetId, keepCueLength: k.v.id !== chosen, choose: k.v.id === chosen, origin: 'generated' });
+        await tx.insert(generation).values({
+          id: newUlid(), projectId, clipId, kind: 'sfx', model: k.v.settings.model, voiceId: null, textSent: k.v.settings.prompt, direction: null,
+          settings: { durationMs: k.v.settings.durationMs, loop: k.v.settings.loop, promptInfluence: k.v.settings.promptInfluence },
+          sourceClipId: null, outputFormat: k.v.outputFormat, context: false, requestId: k.v.requestId, characterCost: k.v.characterCost,
+          createdByUserId: userId(request), createdAt: new Date(),
+        });
+        created.push(clipId);
+      }
+      return { created, paths: kept.map((k) => k.path) };
+    });
+    for (const k of kept) dropVariation(k.v.id);
+    return result;
   });
 
   // Takes the clip off its cue. With `?deleteAsset=1` the file goes from the library and the disk too, unless

@@ -4,7 +4,7 @@ import { and, asc, eq, inArray, or } from 'drizzle-orm';
 import { inTransaction, withDb, type Q } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { touchProject } from '../db/touch.js';
-import { asset, assetPeaks, chapter, character, clip, cue, generation, lane, membership, note, project, scene, segment } from '../db/schema.js';
+import { asset, assetPeaks, chapter, character, clip, cue, cueSfx, generation, lane, membership, note, project, scene, segment } from '../db/schema.js';
 import { parseVoiceSettings } from '../voice/character-voice.js';
 import type { VoiceSettings } from '../shared/voice.js';
 import { PITCH_MAX_CENTS, SPEED_MAX, SPEED_MIN, cleanPoints, type VolumePoint } from '../shared/audio-settings.js';
@@ -61,6 +61,8 @@ export async function buildBundle(q: Q, projectId: string): Promise<Json> {
   const gens = await q.select().from(generation).where(eq(generation.projectId, projectId));
   const genOf = new Map(gens.map((g) => [g.clipId, g]));
   const clipNumber = new Map(clips.map((k) => [k.id, k.number]));
+  const sfxRows = cues.length ? await q.select().from(cueSfx).where(inArray(cueSfx.cueId, cues.map((c) => c.id))) : [];
+  const sfxOf = new Map(sfxRows.map((x) => [x.cueId, x]));
 
   const iso = (d: Date | null) => (d ? d.toISOString() : null);
   const targets = new Map<string, { kind: string; path: number[] }>(); // entity id -> where it sits in the bundle
@@ -96,6 +98,10 @@ export async function buildBundle(q: Q, projectId: string): Promise<Json> {
                   lengthAuto: c.lengthAuto,
                   muted: c.muted,
                   text: c.textMd,
+                  sfx: (() => {
+                    const x = sfxOf.get(c.id);
+                    return x ? { prompt: x.prompt, durationMs: x.durationMs, loop: x.looped, promptInfluence: Number(x.promptInfluence), model: x.model } : null;
+                  })(),
                   clips: clips.filter((k) => k.cueId === c.id).map((k) => ({
                     asset: assetNo.get(k.assetId)!,
                     number: k.number,
@@ -248,7 +254,16 @@ interface ParsedGeneration {
   kind: 'speech' | 'sfx' | 'music' | 'voice_change'; model: string; voiceId: string | null; textSent: string | null; direction: string | null; settings: unknown;
   sourceTake: number | null; outputFormat: string; context: boolean; requestId: string | null; characterCost: number | null; createdAt: Date | null;
 }
-interface ParsedCue { lane: number; type: 'speech' | 'sfx' | 'music'; character: number | null; startMs: number; lengthMs: number; lengthAuto: boolean; muted: boolean; text: string; clips: ParsedClip[] }
+interface ParsedCue { lane: number; type: 'speech' | 'sfx' | 'music'; character: number | null; startMs: number; lengthMs: number; lengthAuto: boolean; muted: boolean; text: string; clips: ParsedClip[]; sfx: ParsedSfx | null }
+interface ParsedSfx { prompt: string; durationMs: number | null; loop: boolean; promptInfluence: number; model: string }
+function parseSfx(v: unknown, w: string): ParsedSfx | null {
+  if (v === undefined || v === null) return null;
+  const o = obj(v, w);
+  const pi = o.promptInfluence;
+  if (typeof pi !== 'number' || pi < 0 || pi > 1) fail(`${w}.promptInfluence`, 'expected a number from 0 to 1');
+  return { prompt: str(o.prompt, `${w}.prompt`, 450), durationMs: optInt(o.durationMs, `${w}.durationMs`, 500, 30_000), loop: bool(o.loop ?? false, `${w}.loop`),
+    promptInfluence: pi as number, model: str(o.model, `${w}.model`, 64) };
+}
 interface ParsedNote {
   type: 'comment' | 'reference' | 'task'; authorKind: 'user' | 'system' | 'llm'; text: string; refKey: string | null; link: string | null;
   doneAt: Date | null; createdAt: Date; editedAt: Date | null; deletedAt: Date | null;
@@ -372,7 +387,7 @@ export function parseBundle(raw: unknown) {
           return {
             lane: int(qo.lane, `${wq}.lane`, 0, Math.max(0, lanes.length - 1)), type: oneOf(qo.type, `${wq}.type`, ['speech', 'sfx', 'music'] as const),
             character: charRef(qo.character, `${wq}.character`), startMs: int(qo.startMs, `${wq}.startMs`, 0, MAX_SCENE_MS), lengthMs: int(qo.lengthMs, `${wq}.lengthMs`, 100, MAX_SCENE_MS),
-            lengthAuto: bool(qo.lengthAuto, `${wq}.lengthAuto`), muted: qo.muted === undefined ? false : bool(qo.muted, `${wq}.muted`), text: str(qo.text, `${wq}.text`, 60_000, 0), clips,
+            lengthAuto: bool(qo.lengthAuto, `${wq}.lengthAuto`), muted: qo.muted === undefined ? false : bool(qo.muted, `${wq}.muted`), text: str(qo.text, `${wq}.text`, 60_000, 0), clips, sfx: parseSfx(qo.sfx, `${wq}.sfx`),
           };
         });
         cueTotal += cues.length;
@@ -524,6 +539,7 @@ export async function importBundle(userId: string, raw: unknown, folderOverride?
     const clipRows: (typeof clip.$inferInsert)[] = [];
     const chosen: { cueId: string; clipId: string }[] = [];
     const gens: { g: ParsedGeneration; clipId: string; cueId: string; cueClips: ParsedClip[] }[] = [];
+    const sfxRows: (typeof cueSfx.$inferInsert)[] = [];
     for (const [ci, ch] of chapters.entries()) {
       const chapterId = newUlid();
       chapterIds.push(chapterId);
@@ -561,11 +577,13 @@ export async function importBundle(userId: string, raw: unknown, folderOverride?
               if (k.chosen) chosen.push({ cueId: ids[qi]!, clipId });
               if (k.generation) gens.push({ g: k.generation, clipId, cueClips: q.clips, cueId: ids[qi]! });
             }
+            if (q.sfx) sfxRows.push({ cueId: ids[qi]!, prompt: q.sfx.prompt, durationMs: q.sfx.durationMs, looped: q.sfx.loop, promptInfluence: q.sfx.promptInfluence.toFixed(2), model: q.sfx.model, updatedAt: now });
           }
         }
       }
     }
     for (let i = 0; i < clipRows.length; i += 500) await tx.insert(clip).values(clipRows.slice(i, i + 500));
+    for (let i = 0; i < sfxRows.length; i += 500) await tx.insert(cueSfx).values(sfxRows.slice(i, i + 500));
     if (gens.length) {
       const byCueNumber = new Map(clipRows.map((r) => [`${r.cueId}#${r.number}`, r.id!]));
       const rows = gens.map(({ g, clipId, cueId }) => ({

@@ -6,6 +6,8 @@ import { after, before, describe, it } from 'node:test';
 import { audioTags, pcmToWav, spokenText } from '../src/voice/generate.js';
 import { parseVoiceSettings, voiceName } from '../src/voice/character-voice.js';
 import { ElevenLabs } from '../src/voice/elevenlabs.js';
+import { firstSeconds } from '../src/server/voices.js';
+import { parseSfxSettings } from '../src/voice/sfx.js';
 import { parseWav } from '../src/audio/wav.js';
 import { HttpError } from '../src/server/http.js';
 
@@ -28,6 +30,29 @@ describe('voice text', () => {
     assert.deepEqual(parseVoiceSettings({ stability: 0.333, speed: 1.1, speakerBoost: false, style: null }), { stability: 0.33, speed: 1.1, speakerBoost: false });
     assert.equal(parseVoiceSettings({}), null);
     assert.throws(() => parseVoiceSettings({ speed: 2 }), HttpError);
+  });
+});
+
+describe('sample text', () => {
+  it('keeps the first few seconds of a cue', () => {
+    assert.equal(firstSeconds('Short line.'), 'Short line.');
+    const long = 'Era uma vez uma menina que morava perto do rio. Todas as manhãs ela descia a colina para ver os barcos passarem devagar.';
+    assert.equal(firstSeconds(long), 'Era uma vez uma menina que morava perto do rio.');
+    const run = 'palavra '.repeat(30);
+    const cut = firstSeconds(run);
+    assert.ok(cut.length <= 91 && cut.endsWith('palavra…'), cut);
+  });
+});
+
+describe('sound-effect settings', () => {
+  it('accepts the settings the API takes and refuses others', () => {
+    assert.deepEqual(parseSfxSettings({ prompt: ' door slam ', durationMs: 2500, loop: false, promptInfluence: 0.333, model: 'eleven_text_to_sound_v3' }),
+      { prompt: 'door slam', durationMs: 2500, loop: false, promptInfluence: 0.33, model: 'eleven_text_to_sound_v3' });
+    assert.equal(parseSfxSettings({ prompt: 'rain', durationMs: null, loop: true, promptInfluence: 1, model: 'eleven_text_to_sound_v2' }).durationMs, null);
+    assert.throws(() => parseSfxSettings({ prompt: 'x', durationMs: 31000, loop: false, promptInfluence: 0.3, model: 'eleven_text_to_sound_v3' }), HttpError);
+    assert.throws(() => parseSfxSettings({ prompt: '', durationMs: null, loop: false, promptInfluence: 0.3, model: 'eleven_text_to_sound_v3' }), HttpError);
+    assert.throws(() => parseSfxSettings({ prompt: 'x'.repeat(451), durationMs: null, loop: false, promptInfluence: 0.3, model: 'eleven_text_to_sound_v3' }), HttpError);
+    assert.throws(() => parseSfxSettings({ prompt: 'x', durationMs: null, loop: false, promptInfluence: 2, model: 'eleven_text_to_sound_v3' }), HttpError);
   });
 });
 
@@ -101,6 +126,8 @@ describe('ElevenLabs client', () => {
     await client().soundEffect({ text: 'door slam', durationSeconds: 2.5, loop: false }, 'wav_48000');
     assert.equal(seen.at(-1)!.url, '/v1/sound-generation?output_format=wav_48000');
     assert.equal(JSON.parse(seen.at(-1)!.body).duration_seconds, 2.5);
+    await client().soundEffect({ text: 'rain', durationSeconds: null, loop: true, promptInfluence: 0.7, modelId: 'eleven_text_to_sound_v2' }, 'mp3_44100_128');
+    assert.deepEqual(JSON.parse(seen.at(-1)!.body), { text: 'rain', model_id: 'eleven_text_to_sound_v2', loop: true, prompt_influence: 0.7 });
     await client().music({ prompt: 'slow strings', lengthMs: 30000 }, 'pcm_44100');
     assert.equal(seen.at(-1)!.url, '/v1/music?output_format=pcm_44100');
     assert.equal(JSON.parse(seen.at(-1)!.body).music_length_ms, 30000);

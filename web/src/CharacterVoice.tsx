@@ -5,8 +5,57 @@ import { ApiError, api, uploadFile } from './api.ts';
 import type { Character, LibFile, LibListing, VoiceSettings } from './types.ts';
 import { Confirm, Dialog, errorText } from './ui.tsx';
 import { useVoiceStatus } from './voiceStatus.ts';
+import { useNav, useStoreValue } from './playback.ts';
 import { VOICE_LANGUAGES } from '../../src/shared/voice.ts';
 import { MicRecorder, encodeWav, type Take } from './recorder.ts';
+
+/** About how many credits a sample costs: one per character on most models, half on Turbo and Flash (ElevenLabs API pricing, Nov 2026). */
+const sampleCredits = (text: string, model?: string) => Math.ceil(text.length * (/turbo|flash/.test(model ?? '') ? 0.5 : 1));
+
+/**
+ * The start of a cue spoken by a voice in the project's language (uses ElevenLabs credits; the same sample again is free).
+ * `key` names what is playing, so one button shows "stop".
+ */
+function useSamplePlayer(projectId: string, characterId: string) {
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const url = useRef<string | null>(null);
+  const [playing, setPlaying] = useState<string | null>(null);
+  const [loading, setLoading] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const stop = () => { audio.current?.pause(); audio.current = null; if (url.current) URL.revokeObjectURL(url.current); url.current = null; setPlaying(null); };
+  useEffect(() => stop, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const play = async (key: string, voiceId: string, text: string) => {
+    if (playing === key) { stop(); return; }
+    stop(); setError(''); setLoading(key);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/voices/sample`, {
+        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ voiceId, text, characterId }),
+      });
+      if (!res.ok) { let m = `Error ${res.status}`; try { const j = await res.json(); m = j.message ?? j.error ?? m; } catch { /* not JSON */ } throw new Error(m); }
+      url.current = URL.createObjectURL(await res.blob());
+      const a = new Audio(url.current);
+      a.onended = () => setPlaying(null);
+      audio.current = a; setPlaying(key);
+      await a.play();
+    } catch (e) { setError(errorText(e)); setPlaying(null); }
+    setLoading(null);
+  };
+  return { play, stop, playing, loading, error };
+}
+
+/** The sample text: the first few seconds of the cue selected in the script (under the playhead), editable. */
+function useSampleText() {
+  const nav = useNav();
+  const cueId = useStoreValue(nav?.store, (st) => st.currentCueId(), '');
+  const [text, setText] = useState('');
+  const [found, setFound] = useState(false);
+  useEffect(() => {
+    if (!cueId) { setText(''); setFound(false); return; }
+    void api<{ text: string }>('GET', `/api/cues/${cueId}/sample-text`)
+      .then((r) => { setText(r.text); setFound(!!r.text); }).catch(() => { setText(''); setFound(false); });
+  }, [cueId]);
+  return { text, setText, found };
+}
 
 const SOURCE_LABEL = { account: 'from the account', public: 'from the public library', clone: 'cloned' } as const;
 
@@ -114,6 +163,9 @@ function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChange
   const audio = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState<string | null>(null);
   const [managing, setManaging] = useState<VoiceRow | null>(null);
+  const status = useVoiceStatus();
+  const sample = useSamplePlayer(projectId, character.id);
+  const sampleText = useSampleText();
   useEffect(() => () => { audio.current?.pause(); }, []);
 
   const load = async (append: boolean) => {
@@ -152,6 +204,7 @@ function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChange
   const langOptions = projectLanguage && !VOICE_LANGUAGES.some((l) => l.code === projectLanguage) ? [{ code: projectLanguage, name: projectLanguage }, ...VOICE_LANGUAGES] : VOICE_LANGUAGES;
 
   const play = (r: VoiceRow) => {
+    sample.stop();
     audio.current?.pause();
     if (playing === r.voiceId || !r.previewUrl) { setPlaying(null); return; }
     const a = new Audio(r.previewUrl);
@@ -183,12 +236,21 @@ function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChange
         <button disabled={loading}>Search</button>
       </form>}
       {tab === 'account' && langPick !== 'all' && <p className="muted small">Multilingual voices can speak other languages too; choose "All languages" to see every voice in the account.</p>}
+      <div className="sample-bar">
+        <label>Sample text <span className="muted small">({sampleText.found ? 'the start of the selected cue' : 'select a cue in the script, or type a line'}; spoken in the project's language with {character.name}'s directions, about {sampleCredits(sampleText.text, status?.model)} credits per voice, free to hear again)</span>
+          <input value={sampleText.text} maxLength={200} onChange={(e) => sampleText.setText(e.target.value)} placeholder="A line to hear each voice speak" /></label>
+      </div>
+      {sample.error && <p className="error">{sample.error}</p>}
       {tab === 'public' && <p className="muted small">A public voice is added to the ElevenLabs account as "{character.name} (project title)".</p>}
       <ul className="voice-list">
         {rows.map((r) => (
           <li key={r.publicOwnerId ? r.publicOwnerId + '/' + r.voiceId : r.voiceId} className={r.voiceId === character.voice?.id ? 'current' : ''}>
             <button type="button" className="voice-play" disabled={!r.previewUrl} title={r.previewUrl ? 'Listen' : 'No preview'} onClick={() => play(r)}>{playing === r.voiceId ? '■' : '▶'}</button>
             <div className="grow"><b>{r.name}</b><div className="muted small">{r.info}{r.note ? <> · <span className="voice-note">{r.note}</span></> : null}</div></div>
+            <button type="button" className="voice-sample" disabled={!sampleText.text.trim() || (sample.loading !== null && sample.loading !== r.voiceId)}
+              title={`Hear this voice speak the sample text (about ${sampleCredits(sampleText.text, status?.model)} credits)`}
+              onClick={() => { audio.current?.pause(); setPlaying(null); void sample.play(r.voiceId, r.voiceId, sampleText.text.trim()); }}>
+              {sample.playing === r.voiceId ? '■ Sample' : sample.loading === r.voiceId ? '…' : '▶ Sample'}</button>
             {r.cloned && <button type="button" disabled={busy} onClick={() => setManaging(r)}>Manage</button>}
             <button type="button" disabled={busy || r.voiceId === character.voice?.id} onClick={() => void use(r)}>{r.voiceId === character.voice?.id ? 'In use' : tab === 'public' ? 'Add and use' : 'Use'}</button>
           </li>))}

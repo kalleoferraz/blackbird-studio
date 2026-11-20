@@ -742,3 +742,8 @@ label.vs-check { display: flex; gap: 8px; align-items: center; margin: .5em 0; }
 .rec-clock { font-variant-numeric: tabular-nums; color: var(--muted); } .rec-clock.on { color: var(--danger); font-weight: 600; }
 .sample-audio { width: 100%; margin: 4px 0; }
 .voice-sub { font-size: .9rem; margin: 14px 0 4px; } .sample-mini { height: 30px; max-width: 220px; }
+.sample-bar label { margin: 4px 0 8px; } .voice-sample { white-space: nowrap; }
+/* Sound-effect generation */
+.sfx-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; align-items: end; } .sfx-grid label { margin: .4em 0; }
+.sfx-influence { grid-template-columns: 110px 1fr 44px 60px; margin: 6px 0 10px; } .sfx-count { display: flex; gap: 6px; align-items: center; margin: 0; }
+.sfx-n { width: 20px; text-align: center; color: var(--muted); } .sfx-play { white-space: nowrap; margin: 0; }

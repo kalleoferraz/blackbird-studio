@@ -31,7 +31,10 @@ export function audioMenuItems(cue: Cue, o: {
     ...(cue.clips.length ? ['sep' as const] : []),
     { label: 'Record a take…', disabled: cue.type !== 'speech' || !!o.nav?.store.rec, onClick: () => o.nav?.record(cue.id) },
     { label: 'Choose audio…', onClick: o.chooseAudio },
-    ...(o.generate ? [{ label: 'Generate audio…', sub: (close: () => void) => createElement(GenerateSub, { cue, enabled: !!o.voice?.enabled, reason: o.voice?.reason, onPick: o.generate!, close }) } as MenuItem] : []),
+    // A sound effect opens its own dialog (prompt and settings, variations); speech and music have the Default / Custom / take submenu.
+    ...(o.generate ? [cue.type === 'sfx'
+      ? { label: 'Generate audio…', disabled: !o.voice?.enabled, hint: o.voice?.enabled ? undefined : 'off', onClick: () => o.generate!('sfx') } as MenuItem
+      : { label: 'Generate audio…', sub: (close: () => void) => createElement(GenerateSub, { cue, enabled: !!o.voice?.enabled, reason: o.voice?.reason, onPick: o.generate!, close }) } as MenuItem] : []),
     'sep',
     { label: 'Audio settings', disabled: !chosen, ...(o.panel ? { onClick: () => o.panel?.() } : { sub: (close) => chosen ? createElement(AudioSliders, { clip: chosen, run: o.run, onEnv: o.edit ? (k) => { close(); o.edit?.(k); } : undefined }) : null }) },
     { label: cue.muted ? 'Unmute audio' : 'Mute audio', disabled: !chosen, onClick: () => o.run('PATCH', `/api/cues/${cue.id}`, { muted: !cue.muted }) },

@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { and, eq, inArray } from 'drizzle-orm';
 import { inTransaction, withDb } from '../db/client.js';
 import { touchProject } from '../db/touch.js';
-import { asset, character, membership, project } from '../db/schema.js';
+import { asset, character, cue, membership, project } from '../db/schema.js';
+import { audioTags, spokenText } from '../voice/generate.js';
 import { blobStore } from '../storage/blob-store.js';
 import { voiceSamplesFolder } from '../library/managed.js';
 import { elevenLabs, type ElevenLabs } from '../voice/elevenlabs.js';
@@ -14,6 +15,21 @@ import { HttpError, asBody, badRequest, reqString } from './http.js';
 
 const VOICE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const MIN_SAMPLE_MS = 5_000, MIN_TOTAL_MS = 10_000;
+
+/** The first few seconds of a text: about 90 characters, cut at a sentence end when one comes late enough, else at a word. */
+export function firstSeconds(text: string, max = 90): string {
+  const t = text.replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const sentence = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+  if (sentence >= 40) return cut.slice(0, sentence + 1);
+  const space = cut.lastIndexOf(' ');
+  return (space > 20 ? cut.slice(0, space) : cut).replace(/[,;:]$/, '') + '…';
+}
+
+/** Samples already heard, so listening again costs nothing: key → audio. Kept in memory, the newest 60. */
+const sampleCache = new Map<string, Buffer>();
+const remember = (k: string, v: Buffer) => { sampleCache.delete(k); sampleCache.set(k, v); while (sampleCache.size > 60) sampleCache.delete(sampleCache.keys().next().value!); };
 
 export async function readAll(projectId: string, path: string): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -293,5 +309,58 @@ export function registerVoiceRoutes(app: FastifyInstance): void {
       for (const p of used.projectIds) await touchProject(tx, p, request.account!.id);
     });
     return { ok: true, charactersCleared: used.characters.length + used.elsewhere };
+  });
+
+  // ---- a sample of a voice speaking the start of a cue (uses credits; heard again from the cache) -----------
+
+  /** The text a voice sample reads: the first few seconds of a cue (the one selected in the script). */
+  app.get('/api/cues/:id/sample-text', auth, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    return withDb(async (db) => {
+      await accessToEntity(db, request.account!.id, 'cue', id, { edit: true });
+      const row = (await db.select({ text: cue.textMd, type: cue.type }).from(cue).where(eq(cue.id, id)).limit(1))[0];
+      return { text: row ? firstSeconds(spokenText(row.text)) : '', type: row?.type ?? null };
+    });
+  });
+
+  /**
+   * A voice speaking a short text in the project's language, with the character's directions and settings when a
+   * character is named. Nothing is stored; the same request again is answered from memory without new credits.
+   */
+  app.post('/api/projects/:id/voices/sample', { ...auth, bodyLimit: 4096 }, async (request, reply) => {
+    const projectId = checkId((request.params as { id: string }).id);
+    const b = asBody(request.body);
+    const voiceId = reqString(b, 'voiceId', 64);
+    if (!VOICE_ID.test(voiceId)) throw badRequest('invalid_voiceId');
+    const text = reqString(b, 'text', 200);
+    const characterId = typeof b.characterId === 'string' ? checkId(b.characterId) : null;
+    const { lang, ch } = await withDb(async (db) => {
+      await accessTo(db, request.account!.id, projectId, { edit: true });
+      const lang = (await db.select({ l: project.language }).from(project).where(eq(project.id, projectId)).limit(1))[0]?.l ?? '';
+      const ch = characterId ? (await db.select().from(character).where(and(eq(character.id, characterId), eq(character.projectId, projectId))).limit(1))[0] ?? null : null;
+      return { lang, ch };
+    });
+    const { client, model } = await elevenLabs();
+    const tags = audioTags(ch?.voiceDirection);
+    const sent = tags ? `${tags} ${text}` : text;
+    const settings = (ch?.voiceSettings ?? null) as Record<string, unknown> | null;
+    const key = JSON.stringify([voiceId, model, lang, sent, settings]);
+    let audio = sampleCache.get(key);
+    const cached = !!audio;
+    if (!audio) {
+      const languageCode = model.startsWith('eleven_multilingual_v2') ? null : lang.split('-')[0]!.toLowerCase() || null;
+      try {
+        const a = await client.speech(voiceId, { text: sent, modelId: model, languageCode, settings }, 'mp3_44100_64');
+        audio = a.data;
+      } catch (e) {
+        if (e instanceof HttpError && e.code === 'voice_not_found') {
+          throw new HttpError(409, 'voice_not_in_account', 'This voice is not in the ElevenLabs account, so it cannot speak a sample yet. Add it first (Add and use), or listen to its preview.');
+        }
+        throw e;
+      }
+      remember(key, audio);
+    }
+    return reply.header('content-type', 'audio/mpeg').header('x-sample-cached', cached ? '1' : '0')
+      .header('cache-control', 'no-store').send(audio);
   });
 }

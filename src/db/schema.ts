@@ -467,3 +467,17 @@ export const generation = mysqlTable(
   },
   (t) => [index('generation_project_idx').on(t.projectId), index('generation_clip_idx').on(t.clipId)],
 );
+
+// ---- a sound-effect cue's generation settings, kept for regenerating (Bible, decision log 2026-11-20) -------
+
+export const cueSfx = mysqlTable('cue_sfx', {
+  cueId: ulid('cue_id')
+    .primaryKey()
+    .references(() => cue.id, { onDelete: 'cascade' }),
+  prompt: text('prompt').notNull(), // by default a copy of the cue's text; often written in English
+  durationMs: int('duration_ms'), // null: the model chooses the length
+  looped: boolean('looped').notNull().default(false), // `loop` is a reserved word in MySQL
+  promptInfluence: decimal('prompt_influence', { precision: 3, scale: 2 }).notNull().default('0.30'), // 0 to 1
+  model: asciiVarchar('model', { length: 64 }).notNull().default('eleven_text_to_sound_v3'),
+  updatedAt: updatedAt(),
+});

@@ -201,10 +201,14 @@ export class ElevenLabs {
     });
   }
 
-  async soundEffect(body: { text: string; durationSeconds: number | null; loop: boolean }, outputFormat: string): Promise<Audio> {
+  async soundEffect(body: { text: string; durationSeconds: number | null; loop: boolean; promptInfluence?: number; modelId?: string }, outputFormat: string): Promise<Audio> {
     return this.audio('/v1/sound-generation', 'generating a sound effect', {
       query: { output_format: outputFormat },
-      json: { text: body.text, model_id: 'eleven_text_to_sound_v3', loop: body.loop, ...(body.durationSeconds ? { duration_seconds: body.durationSeconds } : {}) },
+      json: {
+        text: body.text, model_id: body.modelId ?? 'eleven_text_to_sound_v3', loop: body.loop,
+        ...(body.durationSeconds ? { duration_seconds: body.durationSeconds } : {}),
+        ...(typeof body.promptInfluence === 'number' ? { prompt_influence: body.promptInfluence } : {}),
+      },
     });
   }
 

@@ -2,7 +2,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm';
 import { connect } from '../db/connection.js';
 import { drizzle } from 'drizzle-orm/mysql2';
 import { newUlid } from '../db/ids.js';
-import { asset, chapter, character, clip, cue, lane, note, project, segment, scene, snapshot, generation } from '../db/schema.js';
+import { asset, chapter, character, clip, cue, lane, note, project, segment, scene, snapshot, generation, cueSfx } from '../db/schema.js';
 import { buildSnapshotFiles, type Rows } from './build.js';
 import type { VersionStore } from './version-store.js';
 
@@ -41,7 +41,8 @@ export async function readProjectRows(projectId: string): Promise<{ rows: Rows; 
         const notes = await tx.select().from(note).where(and(eq(note.projectId, projectId), undefined));
         const assets = await tx.select().from(asset).where(eq(asset.projectId, projectId));
         const generations = await tx.select().from(generation).where(eq(generation.projectId, projectId));
-        const rows: Rows = { project: p, characters, chapters, segments, scenes, lanes, cues, clips, notes, assets, generations };
+        const sfx = gIds.length && cues.length ? await tx.select().from(cueSfx).where(inArray(cueSfx.cueId, cues.map((q) => q.id))) : [];
+        const rows: Rows = { project: p, characters, chapters, segments, scenes, lanes, cues, clips, notes, assets, generations, sfx };
         return { rows, revision: Number(p.revision), title: p.title, folder: p.repoFolder ?? '' };
       })();
     } finally {

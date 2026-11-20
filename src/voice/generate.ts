@@ -45,7 +45,7 @@ export function pcmToWav(pcm: Buffer, sampleRate: number): Buffer {
   return Buffer.concat([h, pcm]);
 }
 
-function asStored(a: Audio, format: string): { data: Buffer; ext: 'wav' | 'mp3' } {
+export function stored(a: Audio, format: string): { data: Buffer; ext: 'wav' | 'mp3' } {
   if (format.startsWith('pcm_')) return { data: pcmToWav(a.data, Number(format.split('_')[1])), ext: 'wav' };
   if (format.startsWith('wav_')) return { data: a.data, ext: 'wav' };
   return { data: a.data, ext: 'mp3' };
@@ -94,7 +94,7 @@ export async function generateForCue(q: Q, cueId: string, input: GenerateInput):
     if (src.a.status !== 'ready') throw new HttpError(409, 'not_ready', 'The take is still being processed.');
     const audio = await client.changeVoice(voiceId, await assetAudio(src.a), { settings, removeNoise: input.removeNoise }, outputFormat);
     return {
-      ...asStored(audio, outputFormat), origin: 'voice-converted',
+      ...stored(audio, outputFormat), origin: 'voice-converted',
       record: { kind: 'voice_change', model: 'eleven_multilingual_sts_v2', voiceId, textSent: null, direction: null, settings: { voice: settings, removeNoise: input.removeNoise },
         sourceClipId: src.k.id, outputFormat, context: false, requestId: audio.requestId, characterCost: audio.characterCost },
     };
@@ -115,7 +115,7 @@ export async function generateForCue(q: Q, cueId: string, input: GenerateInput):
       languageCode: model.startsWith('eleven_multilingual_v2') ? null : languageCode,
     }, outputFormat);
     return {
-      ...asStored(audio, outputFormat), origin: 'generated',
+      ...stored(audio, outputFormat), origin: 'generated',
       record: { kind: 'speech', model, voiceId, textSent: sent, direction: input.direction, settings, sourceClipId: null, outputFormat,
         context: input.context, requestId: audio.requestId, characterCost: audio.characterCost },
     };
@@ -130,7 +130,7 @@ export async function generateForCue(q: Q, cueId: string, input: GenerateInput):
     const seconds = wanted === null ? null : clamp(wanted, SFX_MIN_MS, SFX_MAX_MS) / 1000;
     const audio = await client.soundEffect({ text: prompt, durationSeconds: seconds, loop }, outputFormat);
     return {
-      ...asStored(audio, outputFormat), origin: 'generated',
+      ...stored(audio, outputFormat), origin: 'generated',
       record: { kind: 'sfx', model: 'eleven_text_to_sound_v3', voiceId: null, textSent: prompt, direction: input.direction, settings: { durationSeconds: seconds, loop },
         sourceClipId: null, outputFormat, context: false, requestId: audio.requestId, characterCost: audio.characterCost },
     };
@@ -140,7 +140,7 @@ export async function generateForCue(q: Q, cueId: string, input: GenerateInput):
   const lengthMs = wanted === null ? null : clamp(wanted, MUSIC_MIN_MS, MUSIC_MAX_MS);
   const audio = await client.music({ prompt, lengthMs }, musicFormat);
   return {
-    ...asStored(audio, musicFormat), origin: 'generated',
+    ...stored(audio, musicFormat), origin: 'generated',
     record: { kind: 'music', model: 'music_v2_5', voiceId: null, textSent: prompt, direction: input.direction, settings: { lengthMs },
       sourceClipId: null, outputFormat: musicFormat, context: false, requestId: audio.requestId, characterCost: audio.characterCost },
   };

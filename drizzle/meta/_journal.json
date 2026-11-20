@@ -50,6 +50,13 @@
       "when": 1795164177438,
       "tag": "0006_generation",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1795179503666,
+      "tag": "0007_cue_sfx",
+      "breakpoints": true
     }
   ]
 }
