@@ -36,6 +36,20 @@
       "when": 1794086400000,
       "tag": "0004_clip_envelopes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1795164177130,
+      "tag": "0005_character_voice",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1795164177438,
+      "tag": "0006_generation",
+      "breakpoints": true
     }
   ]
 }

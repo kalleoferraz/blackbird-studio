@@ -5,6 +5,8 @@
 import { createPortal } from 'react-dom';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
 import { api } from './api.ts';
+import { GenerateDialog, type GeneratePreset } from './GenerateAudio.tsx';
+import { useVoiceStatus } from './voiceStatus.ts';
 import type { Character, Cue, Lane, SegmentContent } from './types.ts';
 import { useNav, useStoreValue } from './playback.ts';
 import { loadPeaks, type Peaks } from './peaks.ts';
@@ -203,6 +205,8 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
     setSelId(cue.id);
     setMenu({ x: e.clientX, y: e.clientY, cue, colour: laneColour(lane.colour) });
   };
+  const [generating, setGenerating] = useState<null | { cue: Cue; preset: GeneratePreset }>(null);
+  const voice = useVoiceStatus();
   const runOnCue = async (method: string, url: string, body?: unknown) => {
     try { onContent(await api<SegmentContent>(method, url, body)); } catch (e) { onError(errorText(e)); }
   };
@@ -523,9 +527,10 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
         </div>
       </div>
       {menu && <Menu anchor={{ x: menu.x, y: menu.y }} onClose={() => setMenu(null)}
-        items={audioMenuItems(menu.cue, { nav, run: (m, u, b) => void runOnCue(m, u, b), chooseAudio: () => setPicking({ cue: menu.cue, colour: menu.colour }), removeAudio: () => setRemoving(menu.cue), edit: (kind) => onAudioEdit({ cueId: menu.cue.id, kind }) })} />}
+        items={audioMenuItems(menu.cue, { nav, run: (m, u, b) => void runOnCue(m, u, b), chooseAudio: () => setPicking({ cue: menu.cue, colour: menu.colour }), generate: (p) => setGenerating({ cue: menu.cue, preset: p }), voice, removeAudio: () => setRemoving(menu.cue), edit: (kind) => onAudioEdit({ cueId: menu.cue.id, kind }) })} />}
       {picking && <AudioPicker cue={picking.cue} content={content} colour={picking.colour} onContent={onContent} onError={onError} onClose={() => setPicking(null)} />}
       {removing && <RemoveAudioDialog cue={removing} onContent={onContent} onError={onError} onClose={() => setRemoving(null)} />}
+      {generating && <GenerateDialog cue={generating.cue} characters={characters} preset={generating.preset} onContent={onContent} onClose={() => setGenerating(null)} />}
       {ask && (
         <div className="tl-ask" role="dialog" style={{ left: Math.max(8, Math.min(window.innerWidth - 330, ask.x - 150)), bottom: window.innerHeight - ask.y + 14 }}>
           <div>Shift the {ask.later} later cue{ask.later === 1 ? '' : 's'} with it?</div>

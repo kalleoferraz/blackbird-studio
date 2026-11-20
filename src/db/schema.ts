@@ -221,6 +221,12 @@ export const character = mysqlTable(
     pictureAssetId: ulid('picture_asset_id').references(() => asset.id, { onDelete: 'restrict' }),
     description: text('description'),
     folder: varchar('folder', { length: 30 }).notNull(), // sanitized folder name under Characters/, a number added on collision
+    // The character's ElevenLabs voice (Bible, decision log 2026-11-20); all null until one is chosen.
+    voiceId: asciiVarchar('voice_id', { length: 64 }),
+    voiceName: varchar('voice_name', { length: 100 }), // the name shown in the app, as it was when chosen
+    voiceSource: mysqlEnum('voice_source', ['account', 'public', 'clone']),
+    voiceDirection: text('voice_direction'), // "Voice Settings": directions added to every generation as audio tags
+    voiceSettings: json('voice_settings'), // { stability, similarity, style, speed, speakerBoost }, each optional
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -432,3 +438,32 @@ export const appSetting = mysqlTable('app_setting', {
   value: text('value').notNull(),
   updatedAt: updatedAt(),
 });
+
+// ---- generated takes: how each one was made (Bible, decision log 2026-11-20) -------------
+
+export const generation = mysqlTable(
+  'generation',
+  {
+    id: ulid('id').primaryKey(),
+    projectId: ulid('project_id')
+      .notNull()
+      .references(() => project.id, { onDelete: 'cascade' }),
+    clipId: ulid('clip_id')
+      .notNull()
+      .references(() => clip.id, { onDelete: 'cascade' }),
+    kind: mysqlEnum('kind', ['speech', 'sfx', 'music', 'voice_change']).notNull(),
+    model: asciiVarchar('model', { length: 64 }).notNull(),
+    voiceId: asciiVarchar('voice_id', { length: 64 }), // speech and voice change
+    textSent: text('text_sent'), // what was sent: the text with its audio tags, or the prompt
+    direction: text('direction'), // the custom directions typed for this take, if any
+    settings: json('settings'), // the voice settings or the length asked for
+    sourceClipId: ulid('source_clip_id').references((): AnyMySqlColumn => clip.id, { onDelete: 'set null' }), // voice change: the take converted
+    outputFormat: asciiVarchar('output_format', { length: 40 }).notNull(),
+    context: boolean('context').notNull().default(false), // the neighbouring cues' text was sent
+    requestId: asciiVarchar('request_id', { length: 64 }),
+    characterCost: int('character_cost'),
+    createdByUserId: ulid('created_by_user_id').references(() => user.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+  },
+  (t) => [index('generation_project_idx').on(t.projectId), index('generation_clip_idx').on(t.clipId)],
+);

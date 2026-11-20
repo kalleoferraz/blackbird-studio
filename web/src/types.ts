@@ -54,7 +54,13 @@ export interface SegmentContent {
 export interface Character {
   id: string; name: string; isNarrator: boolean; colour: string; description: string | null;
   folder: string | null; pictureAssetId: string | null; cueCount?: number;
+  /** The ElevenLabs voice (Bible, decision log 2026-11-20). */
+  voice?: { id: string; name: string; source: 'account' | 'public' | 'clone' | null } | null;
+  /** "Voice Settings": directions added to every generation as audio tags. */
+  voiceDirection?: string | null;
+  voiceSettings?: VoiceSettings | null;
 }
+export interface VoiceSettings { stability?: number | null; similarity?: number | null; style?: number | null; speed?: number | null; speakerBoost?: boolean | null }
 export interface Member { userId: string; name: string; email: string; role: 'author' | 'viewer'; addedAt: string }
 
 export interface LibFolder { name: string; path: string; managed: boolean; writable: boolean }

@@ -8,6 +8,8 @@ import { COLOUR_PATTERN, nextColour } from '../shared/palette.js';
 import { accessTo, accessToEntity, checkId } from './access.js';
 import { authenticate } from './auth-routes.js';
 import { HttpError, asBody, badRequest, optBool, optString, reqString } from './http.js';
+import { parseVoiceSettings, retireVoice } from '../voice/character-voice.js';
+import { elevenLabs } from '../voice/elevenlabs.js';
 
 const FOLDER_MAX = 30;
 
@@ -49,6 +51,11 @@ export async function createCharacter(
     defaultColour: input.colour ?? nextColour(existing.map((e) => e.defaultColour)),
     pictureAssetId: null,
     description: input.description ?? null,
+    voiceId: null,
+    voiceName: null,
+    voiceSource: null,
+    voiceDirection: null,
+    voiceSettings: null,
     folder: folderName(input.name, existing.map((e) => e.folder)),
     createdAt: now,
     updatedAt: now,
@@ -57,7 +64,7 @@ export async function createCharacter(
   return row;
 }
 
-function view(c: typeof character.$inferSelect, usage?: { cues: number; segments: number }) {
+export function characterView(c: typeof character.$inferSelect, usage?: { cues: number; segments: number }) {
   return {
     id: c.id,
     name: c.name,
@@ -66,6 +73,9 @@ function view(c: typeof character.$inferSelect, usage?: { cues: number; segments
     description: c.description,
     folder: c.folder,
     pictureAssetId: c.pictureAssetId,
+    voice: c.voiceId ? { id: c.voiceId, name: c.voiceName ?? '', source: c.voiceSource } : null,
+    voiceDirection: c.voiceDirection,
+    voiceSettings: c.voiceSettings ?? null,
     ...(usage ? { usage } : {}),
   };
 }
@@ -100,7 +110,7 @@ export function registerCharacterRoutes(app: FastifyInstance): void {
         .where(eq(chapter.projectId, projectId))
         .groupBy(cue.characterId);
       const cueCount = new Map(counts.map((c) => [c.characterId, Number(c.cues)]));
-      return { characters: rows.map((r) => ({ ...view(r), cueCount: cueCount.get(r.id) ?? 0 })) };
+      return { characters: rows.map((r) => ({ ...characterView(r), cueCount: cueCount.get(r.id) ?? 0 })) };
     });
   });
 
@@ -117,7 +127,7 @@ export function registerCharacterRoutes(app: FastifyInstance): void {
       await touchProject(tx, projectId, request.account!.id);
       return row;
     });
-    return reply.code(201).send(view(created));
+    return reply.code(201).send(characterView(created));
   });
 
   app.patch('/api/characters/:id', { ...auth, bodyLimit: 16384 }, async (request) => {
@@ -128,6 +138,8 @@ export function registerCharacterRoutes(app: FastifyInstance): void {
     if (colour !== undefined && (colour === null || !COLOUR_PATTERN.test(colour))) throw badRequest('invalid_colour');
     const description = optString(body, 'description', 20000, { allowNull: true });
     const updateLanes = optBool(body, 'updateLanes') ?? false;
+    const voiceDirection = optString(body, 'voiceDirection', 2000, { allowNull: true });
+    const voiceSettings = 'voiceSettings' in body ? parseVoiceSettings(body.voiceSettings) : undefined;
     return inTransaction(async (tx) => {
       const access = await accessToEntity(tx, request.account!.id, 'character', id, { edit: true });
       const current = (await tx.select().from(character).where(eq(character.id, id)).limit(1))[0]!;
@@ -142,12 +154,14 @@ export function registerCharacterRoutes(app: FastifyInstance): void {
       }
       if (colour) set.defaultColour = colour;
       if (description !== undefined) set.description = description;
+      if (voiceDirection !== undefined) set.voiceDirection = voiceDirection || null;
+      if (voiceSettings !== undefined) set.voiceSettings = voiceSettings;
       await tx.update(character).set(set).where(eq(character.id, id));
       if (colour && updateLanes) {
         await tx.update(lane).set({ colour, updatedAt: new Date() }).where(eq(lane.characterId, id));
       }
       await touchProject(tx, access.projectId, request.account!.id);
-      return view((await tx.select().from(character).where(eq(character.id, id)).limit(1))[0]!);
+      return characterView((await tx.select().from(character).where(eq(character.id, id)).limit(1))[0]!);
     });
   });
 
@@ -164,6 +178,12 @@ export function registerCharacterRoutes(app: FastifyInstance): void {
       await tx.delete(lane).where(eq(lane.characterId, id)); // lanes left empty by earlier edits
       await tx.delete(character).where(and(eq(character.id, id)));
       await touchProject(tx, access.projectId, request.account!.id);
+      return current;
+    }).then(async (gone) => {
+      // Its voice stays in the ElevenLabs account, renamed as unused when the app created it.
+      if (gone.voiceId) {
+        try { const { client } = await elevenLabs(); await withDb((db) => retireVoice(db, client, gone, request.log)); } catch { /* no key */ }
+      }
       return { ok: true };
     });
   });

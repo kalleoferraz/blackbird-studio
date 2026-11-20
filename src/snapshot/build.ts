@@ -13,6 +13,8 @@ export interface Rows {
   cues: Record<string, unknown>[];
   clips: Record<string, unknown>[];
   notes: Record<string, unknown>[];
+  /** How generated takes were made (optional for callers that predate it). */
+  generations?: Record<string, unknown>[];
   assets: Record<string, unknown>[];
 }
 
@@ -63,6 +65,7 @@ export function buildProjectJson(rows: Rows): string {
   const scenesBy = group(rows.scenes as Obj[], 'segmentId');
   const lanesBy = group(rows.lanes as Obj[], 'segmentId');
   const cuesBy = group(rows.cues as Obj[], 'sceneId');
+  const genByClip = new Map((rows.generations ?? []).map((g) => [g.clipId as string, g as Obj]));
   const tree = [...(rows.chapters as Obj[])].sort(byPosition).map((ch) => ({
     ...omit(ch, ['projectId', 'position']),
     index: indexes.get(ch.id),
@@ -73,7 +76,10 @@ export function buildProjectJson(rows: Rows): string {
         ...omit(sg, ['segmentId', 'position']),
         cues: (cuesBy.get(sg.id) ?? []).sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id)).map((q) => ({
           ...omit(q, ['sceneId', 'title']),
-          clips: (clipsByCue.get(q.id) ?? []).sort((a, b) => a.number - b.number).map((c) => omit(c, ['cueId'])),
+          clips: (clipsByCue.get(q.id) ?? []).sort((a, b) => a.number - b.number).map((c) => {
+            const g = genByClip.get(c.id);
+            return { ...omit(c, ['cueId']), ...(g ? { generation: omit(g, ['projectId', 'clipId', 'id']) } : {}) };
+          }),
         })),
       })),
     })),

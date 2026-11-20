@@ -3,6 +3,7 @@ import { api } from './api.ts';
 import type { Me } from './types.ts';
 import { Brand } from './Brand.tsx';
 import { Confirm, Dialog, errorText } from './ui.tsx';
+import type { OutputFormat } from '../../src/shared/voice.ts';
 
 interface AdminUser { id: string; email: string; displayName: string; isAdmin: boolean; disabled: boolean; mustChangePassword: boolean; memberships: { projectId: string; title: string; role: string }[] }
 interface AdminTeam { id: string; name: string; members: { id: string; email: string; displayName: string }[] }
@@ -86,6 +87,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
       </section>
 
       <SnapshotSettings />
+      <VoiceSettingsCard />
 
       {secret && (
         <Dialog title="Temporary password" onClose={() => setSecret(null)}>
@@ -143,6 +145,84 @@ function SnapshotSettings() {
         </div>
       </form>
       {note && <p className={note.ok ? 'muted' : 'error'} role="status">{note.text}</p>}
+    </section>
+  );
+}
+
+interface VoiceConfig {
+  apiUrl: string; outputFormat: string; model: string; keySet: boolean; keyUnreadable: boolean; canStoreKey: boolean;
+  source: { apiUrl: string | null; key: string | null; outputFormat: string | null; model: string | null };
+  defaults: { apiUrl: string }; formats: OutputFormat[]; models: string[];
+}
+interface Plan { tier: string; status: string; characterCount: number; characterLimit: number; nextResetUnix: number | null; voiceLimit: number; voiceSlotsUsed: number; canClone: boolean }
+
+/** ElevenLabs: API URL (without a version), key, output format and speech model, plus the plan's figures. */
+function VoiceSettingsCard() {
+  const [cfg, setCfg] = useState<VoiceConfig | null>(null);
+  const [apiUrl, setApiUrl] = useState('');
+  const [format, setFormat] = useState('');
+  const [model, setModel] = useState('');
+  const [key, setKey] = useState('');
+  const [plan, setPlan] = useState<Plan | null>(null);
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const show = (c: VoiceConfig) => {
+    setCfg(c); setApiUrl(c.source.apiUrl === 'app' ? c.apiUrl : ''); setFormat(c.outputFormat); setModel(c.source.model === 'app' ? c.model : ''); setKey('');
+  };
+  const loadPlan = () => api<{ plan: Plan | null }>('GET', '/api/admin/settings/voices/plan').then((r) => setPlan(r.plan)).catch((e) => setNote({ ok: false, text: errorText(e) }));
+  useEffect(() => {
+    api<VoiceConfig>('GET', '/api/admin/settings/voices').then((c) => { show(c); if (c.keySet) void loadPlan(); }).catch((e) => setNote({ ok: false, text: errorText(e) }));
+  }, []);
+  const run = async (fn: () => Promise<void>) => { setBusy(true); setNote(null); try { await fn(); } catch (e) { setNote({ ok: false, text: errorText(e) }); } setBusy(false); };
+  const save = () => run(async () => {
+    const r = await api<VoiceConfig>('PUT', '/api/admin/settings/voices', { apiUrl, outputFormat: format, model, ...(key ? { key } : {}) });
+    show(r); setNote({ ok: true, text: 'Saved.' }); if (r.keySet) void loadPlan(); else setPlan(null);
+  });
+  const test = () => run(async () => {
+    const r = await api<{ ok: boolean; message: string; plan?: Plan }>('POST', '/api/admin/settings/voices/test', { apiUrl: apiUrl || undefined, ...(key ? { key } : {}) });
+    setNote({ ok: r.ok, text: r.message }); if (r.plan) setPlan(r.plan);
+  });
+  const clearKey = () => run(async () => { show(await api<VoiceConfig>('PUT', '/api/admin/settings/voices', { clearKey: true })); setPlan(null); setNote({ ok: true, text: 'The saved key was removed.' }); });
+  const from = (s: string | null) => (s === 'env' ? ' (now taken from the server settings)' : '');
+  const state = !cfg ? '' : cfg.keySet ? 'Voice features are on.' : `Voice features are off: ${cfg.keyUnreadable ? 'the saved key can no longer be read' : 'no API key'}.`;
+  const groups = cfg ? (['MP3', 'PCM', 'WAV'] as const).map((g) => ({ g, items: cfg.formats.filter((f) => f.id.startsWith(g.toLowerCase())) })) : [];
+  const n = (v: number) => v.toLocaleString();
+  return (
+    <section className="card">
+      <h2>Voices (ElevenLabs)</h2>
+      <p className="muted">Speech, sound effects, music and the voice changer in the studio use this ElevenLabs account. {state}</p>
+      <form className="settings-form" onSubmit={(e) => { e.preventDefault(); void save(); }}>
+        <label>API URL<input placeholder={cfg?.defaults.apiUrl ?? 'https://api.elevenlabs.io'} value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} autoComplete="off" />
+          <span className="muted small">Without a version: each call adds its own (for example /v1/text-to-speech, /v2/voices){cfg ? from(cfg.source.apiUrl) : ''}.</span></label>
+        <label>API key<input type="password" placeholder={cfg?.keySet ? '•••••••• saved (type to replace)' : 'Paste an ElevenLabs API key'} value={key} onChange={(e) => setKey(e.target.value)} autoComplete="new-password" />
+          <span className="muted small">Stored encrypted and never shown again{cfg ? from(cfg.source.key) : ''}.</span></label>
+        {cfg && !cfg.canStoreKey && <p className="error">A key cannot be stored: SESSION_SECRET is missing on this server.</p>}
+        <label>Output format<select value={format} onChange={(e) => setFormat(e.target.value)}>
+          {groups.map(({ g, items }) => <optgroup key={g} label={g}>{items.map((f) => <option key={f.id} value={f.id}>{f.label}{f.plan ? ` (${f.plan} plan or higher)` : ''}</option>)}</optgroup>)}
+        </select>
+          <span className="muted small">A format the current plan does not include is refused by ElevenLabs when audio is generated, and the studio shows why. Music has no WAV output, so WAV is asked for as PCM there.</span></label>
+        <label>Speech model<input list="voice-models" placeholder={cfg?.model ?? 'eleven_v4'} value={model} onChange={(e) => setModel(e.target.value)} autoComplete="off" />
+          <datalist id="voice-models">{cfg?.models.map((m) => <option key={m} value={m} />)}</datalist>
+          <span className="muted small">Used by every media project{cfg ? from(cfg.source.model) : ''}.</span></label>
+        <div className="row">
+          <button className="primary" disabled={busy || !cfg}>Save</button>
+          <button type="button" disabled={busy || !cfg} onClick={() => void test()}>Test key</button>
+          {cfg?.source.key === 'app' && <button type="button" disabled={busy} onClick={() => void clearKey()}>Remove saved key</button>}
+        </div>
+      </form>
+      {note && <p className={note.ok ? 'muted' : 'error'} role="status">{note.text}</p>}
+      {plan && (
+        <div className="voice-plan">
+          <h3>Plan</h3>
+          <dl>
+            <dt>Plan</dt><dd>{plan.tier || '—'}{plan.status ? ` · ${plan.status}` : ''}</dd>
+            <dt>Characters</dt><dd>{n(plan.characterCount)} of {n(plan.characterLimit)} used · {n(Math.max(0, plan.characterLimit - plan.characterCount))} left</dd>
+            <dt>Resets</dt><dd>{plan.nextResetUnix ? new Date(plan.nextResetUnix * 1000).toLocaleString() : '—'}</dd>
+            <dt>Voice slots</dt><dd>{plan.voiceSlotsUsed} of {plan.voiceLimit} used</dd>
+            <dt>Voice cloning</dt><dd>{plan.canClone ? 'Allowed' : 'Not in this plan'}</dd>
+          </dl>
+          <button type="button" disabled={busy} onClick={() => void loadPlan()}>Refresh</button>
+        </div>)}
     </section>
   );
 }

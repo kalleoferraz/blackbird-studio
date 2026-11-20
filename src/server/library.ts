@@ -9,7 +9,7 @@ import {
 } from '../library/files.js';
 import { kickAudioJobs, retryAudio } from '../audio/jobs.js';
 import { blobStore, cleanPath, PATH_MAX } from '../storage/blob-store.js';
-import { CHARACTERS, MANAGED_ROOTS, isCharactersRoot, isStoryline, pictureFolder } from '../library/managed.js';
+import { CHARACTERS, MANAGED_ROOTS, VOICE_SAMPLES, isCharactersRoot, isStoryline, pictureFolder } from '../library/managed.js';
 import { touchProject } from '../db/touch.js';
 import { addFitTasks } from './replaced.js';
 import { accessTo, accessToEntity, checkId } from './access.js';
@@ -93,7 +93,9 @@ function lockedForWrite(folder: string): boolean {
 function lockedForDelete(folder: string, characterDirs: string[]): boolean {
   if (isStoryline(folder) || isCharactersRoot(folder)) return true;
   const parts = lower(folder).split('/');
-  return parts[0] === lower(CHARACTERS) && parts.length === 2 && characterDirs.some((c) => lower(c) === parts[1]);
+  if (parts[0] !== lower(CHARACTERS) || !characterDirs.some((c) => lower(c) === parts[1])) return false;
+  // A character's folder, and its Voice Samples folder.
+  return parts.length === 2 || (parts.length === 3 && parts[2] === lower(VOICE_SAMPLES));
 }
 
 function rawBody(request: FastifyRequest): Buffer {
@@ -189,6 +191,8 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
         MANAGED_ROOTS.forEach((n) => names.set(lower(n), n));
       }
       if (isCharactersRoot(folder)) charDirs.forEach(addFolder);
+      // Every character's folder shows its Voice Samples folder, even before a sample is in it.
+      { const p = lower(folder).split('/'); if (p.length === 2 && p[0] === lower(CHARACTERS) && charDirs.some((c) => lower(c) === p[1])) names.set(lower(VOICE_SAMPLES), VOICE_SAMPLES); }
       const usage = await usageOf(db, projectId, here.map((a) => a.id));
       const folders = [...names.values()]
         .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))

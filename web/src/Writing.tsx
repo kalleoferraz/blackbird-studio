@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, type CSSProperties, type DragEvent as RDragEvent, type MouseEvent as RMouseEvent } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type DragEvent as RDragEvent, type MouseEvent as RMouseEvent } from 'react';
 import { api } from './api.ts';
 import type { Character, Cue, CueType, Lane, SegmentContent, Scene } from './types.ts';
 import { formatClock, formatMinutes, formatMs, formatSeconds, formatTenths, parseLength } from './format.ts';
 import { CHARACTER_DRAG, Confirm, MenuButton, errorText, useIsMobile, type MenuItem } from './ui.tsx';
 import { useNav, useStoreValue } from './playback.ts';
 import { AudioPicker } from './AudioPicker.tsx';
+import { GenerateDialog, type GeneratePreset } from './GenerateAudio.tsx';
+import { useVoiceStatus } from './voiceStatus.ts';
 import { audioMenuItems } from './audioMenu.ts';
 import { RemoveAudioDialog } from './RemoveAudio.tsx';
 import { CueNoteIcons, useNotes } from './notesContext.tsx';
@@ -48,7 +50,11 @@ const dragCue: { id: string | null } = { id: null };
 
 const TYPE_LABEL: Record<CueType, string> = { speech: 'Speech', sfx: 'Sound effect', music: 'Music' };
 
+/** Opens "Generate audio" for a cue (set by Writing, used by every cue block). */
+const GenerateCtx = createContext<((cue: Cue, preset: GeneratePreset) => void) | null>(null);
+
 export function Writing({ content, characters, readOnly, onContent, onError, onNewCharacter, onOpenCharacter }: Props) {
+  const [generating, setGenerating] = useState<null | { cue: Cue; preset: GeneratePreset }>(null);
   const [confirm, setConfirm] = useState<null | { title: string; message: string; label: string; run: () => Promise<void> }>(null);
   const [picking, setPicking] = useState<null | { cue: Cue; colour: string }>(null);
   const [removing, setRemoving] = useState<Cue | null>(null);
@@ -79,6 +85,7 @@ export function Writing({ content, characters, readOnly, onContent, onError, onN
 
   const total = content.scenes.length;
   return (
+    <GenerateCtx.Provider value={(cue, preset) => setGenerating({ cue, preset })}>
     <div className="writing">
       {content.scenes.map((seg, i) => (
         <SceneBlock key={seg.id} seg={seg} index={i} total={total} segmentId={content.segment.id} chapterId={content.segment.chapterId} lanes={lanes} characters={characters} readOnly={readOnly}
@@ -89,7 +96,9 @@ export function Writing({ content, characters, readOnly, onContent, onError, onN
       {picking && <AudioPicker cue={picking.cue} content={content} colour={picking.colour} onContent={onContent} onError={onError} onClose={() => setPicking(null)} />}
       {removing && <RemoveAudioDialog cue={removing} onContent={onContent} onError={onError} onClose={() => setRemoving(null)} />}
       {confirm && <Confirm title={confirm.title} message={confirm.message} confirmLabel={confirm.label} danger onConfirm={confirm.run} onClose={() => setConfirm(null)} />}
+      {generating && <GenerateDialog cue={generating.cue} characters={characters} preset={generating.preset} onContent={onContent} onClose={() => setGenerating(null)} />}
     </div>
+    </GenerateCtx.Provider>
   );
 }
 
@@ -218,6 +227,8 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
   /** The cue's segment, scene and chapter (for its notes icon); absent for a draft. */
   place?: { segmentId: string; sceneId: string; chapterId: string };
 }) {
+  const openGenerate = useContext(GenerateCtx);
+  const voice = useVoiceStatus();
   const notes = useNotes();
   const isMobile = useIsMobile();
   const [editing, setEditing] = useState(!!drafting);
@@ -299,6 +310,7 @@ function CueBlock({ cue, lane, characters, readOnly, call, isLast, startDraft, a
 
   const audioMenu = audioMenuItems(cue, {
     nav, run: (m, u, b) => void patch2(m, u, b),
+    generate: openGenerate ? (p) => openGenerate(cue, p) : undefined, voice,
     chooseAudio: () => setPicking({ cue, colour: colour.toLowerCase() === '#000000' ? '#EDE4DC' : colour }),
     removeAudio: () => setRemoving(cue),
     edit: isMobile ? undefined : (kind) => editCueAudio(cue.id, kind),

@@ -10,6 +10,8 @@ import { registerSnapshotRoutes } from './snapshots.js';
 import { registerStoryRoutes } from './story.js';
 import { registerTransferRoutes } from './transfer.js';
 import { registerUi } from './ui.js';
+import { registerVoiceAdminRoutes } from './voice-admin.js';
+import { registerVoiceRoutes } from './voices.js';
 
 export function buildApp(): FastifyInstance {
   // The host sits behind a proxy: trust it for the client address (login rate limit). A forged
@@ -28,10 +30,12 @@ export function buildApp(): FastifyInstance {
   registerErrorHandler(app);
   registerAuthRoutes(app);
   registerAdminRoutes(app);
+  registerVoiceAdminRoutes(app);
   registerTransferRoutes(app);
   registerProjectRoutes(app);
   registerStoryRoutes(app);
   registerCharacterRoutes(app);
+  registerVoiceRoutes(app);
   registerLibraryRoutes(app);
   registerNoteRoutes(app);
   registerSnapshotRoutes(app);

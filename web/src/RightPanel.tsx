@@ -6,6 +6,7 @@ import type { Character, LibListing, NoteFocus, NoteItem, NoteRequest, Story } f
 import { CHARACTER_DRAG, ColourPicker, Confirm, Dialog, errorText, useLocalState } from './ui.tsx';
 import { nextColour } from '../../src/shared/palette.ts';
 import { Initials } from './characterArt.tsx';
+import { CharacterVoice } from './CharacterVoice.tsx';
 
 /** What the Characters tab is editing: null = the list; {} = a new character; {character} = that character. */
 export type CharacterDialogState = null | { character?: Character; then?: (c: Character) => void };
@@ -143,6 +144,7 @@ export function CharacterEditor({ projectId, state, characters, readOnly, showBa
           <div className="row end"><button type="button" onClick={cancelEdit}>Cancel</button><button className="primary" disabled={!name.trim()}>Save</button></div>
         </form>
       )}
+      {current && <CharacterVoice projectId={projectId} character={current} readOnly={readOnly} onSaved={(c) => { setCurrent(c); setLibShow((n) => n + 1); onSaved(c); }} />}
       {current?.folder
         ? <LibraryPanel root={{ path: `Characters/${current.folder}`, name: current.folder }} hideRoot title="Library files" showAlso={{ n: libShow, folder: '' }} projectId={projectId} readOnly={readOnly}
             onError={onError} onAssetChanged={onAssetChanged} notes={notes} onOpenCue={onOpenCue} />

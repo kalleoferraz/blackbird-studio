@@ -4,7 +4,9 @@ import { and, asc, eq, inArray, or } from 'drizzle-orm';
 import { inTransaction, withDb, type Q } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { touchProject } from '../db/touch.js';
-import { asset, assetPeaks, chapter, character, clip, cue, lane, membership, note, project, scene, segment } from '../db/schema.js';
+import { asset, assetPeaks, chapter, character, clip, cue, generation, lane, membership, note, project, scene, segment } from '../db/schema.js';
+import { parseVoiceSettings } from '../voice/character-voice.js';
+import type { VoiceSettings } from '../shared/voice.js';
 import { PITCH_MAX_CENTS, SPEED_MAX, SPEED_MIN, cleanPoints, type VolumePoint } from '../shared/audio-settings.js';
 import { COLOUR_PATTERN } from '../shared/palette.js';
 import { languageProfile } from '../shared/languages.js';
@@ -55,6 +57,10 @@ export async function buildBundle(q: Q, projectId: string): Promise<Json> {
   const cues = scenes.length ? await q.select().from(cue).where(inArray(cue.sceneId, scenes.map((s) => s.id))) : [];
   const clips = cues.length ? await q.select().from(clip).where(inArray(clip.cueId, cues.map((c) => c.id))).orderBy(asc(clip.number)) : [];
   const notes = await q.select().from(note).where(eq(note.projectId, projectId)).orderBy(asc(note.createdAt), asc(note.id));
+  // How generated takes were made (Bible, decision log 2026-11-20); a voice change names its source take by number.
+  const gens = await q.select().from(generation).where(eq(generation.projectId, projectId));
+  const genOf = new Map(gens.map((g) => [g.clipId, g]));
+  const clipNumber = new Map(clips.map((k) => [k.id, k.number]));
 
   const iso = (d: Date | null) => (d ? d.toISOString() : null);
   const targets = new Map<string, { kind: string; path: number[] }>(); // entity id -> where it sits in the bundle
@@ -107,6 +113,14 @@ export async function buildBundle(q: Q, projectId: string): Promise<Json> {
                     origin: k.origin,
                     chosen: c.clipId === k.id,
                     createdAt: iso(k.createdAt),
+                    generation: (() => {
+                      const g = genOf.get(k.id);
+                      return g ? {
+                        kind: g.kind, model: g.model, voiceId: g.voiceId, textSent: g.textSent, direction: g.direction, settings: g.settings ?? null,
+                        sourceTake: g.sourceClipId ? clipNumber.get(g.sourceClipId) ?? null : null, outputFormat: g.outputFormat, context: g.context,
+                        requestId: g.requestId, characterCost: g.characterCost, createdAt: iso(g.createdAt),
+                      } : null;
+                    })(),
                   })),
                 };
               }),
@@ -135,6 +149,7 @@ export async function buildBundle(q: Q, projectId: string): Promise<Json> {
     characters: chars.map((c) => ({
       name: c.name, isNarrator: c.isNarrator, colour: c.defaultColour, description: c.description, folder: c.folder,
       picture: c.pictureAssetId === null ? null : assetNo.get(c.pictureAssetId) ?? null, createdAt: iso(c.createdAt),
+      voice: c.voiceId ? { id: c.voiceId, name: c.voiceName, source: c.voiceSource } : null, voiceDirection: c.voiceDirection, voiceSettings: c.voiceSettings ?? null,
     })),
     chapters: chapterOut,
     notes: notes.map((n) => {
@@ -199,7 +214,40 @@ export function cleanFolder(raw: string): string | null {
   return clean || null;
 }
 
-interface ParsedClip { asset: number; number: number; offsetMs: number; lengthMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number; loops: number; speed: number; pitchCents: number; volumePoints: VolumePoint[] | null; speedPoints: VolumePoint[] | null; pitchPoints: VolumePoint[] | null; origin: 'human-recorded' | 'generated' | 'voice-converted'; chosen: boolean; createdAt: Date | null }
+/** A character's voice in a file (optional: older files have none). */
+function parseCharacterVoice(o: Json, w: string) {
+  let voice: { id: string; name: string | null; source: 'account' | 'public' | 'clone' | null } | null = null;
+  if (o.voice !== undefined && o.voice !== null) {
+    const v = obj(o.voice, `${w}.voice`);
+    const id = str(v.id, `${w}.voice.id`, 64);
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) fail(`${w}.voice.id`, 'expected a voice ID');
+    voice = { id, name: optStr(v.name, `${w}.voice.name`, 100), source: v.source === null || v.source === undefined ? null : oneOf(v.source, `${w}.voice.source`, ['account', 'public', 'clone'] as const) };
+  }
+  let voiceSettings: VoiceSettings | null = null;
+  if (o.voiceSettings !== undefined && o.voiceSettings !== null) {
+    try { voiceSettings = parseVoiceSettings(o.voiceSettings); } catch (e) { fail(`${w}.voiceSettings`, (e as Error).message); }
+  }
+  return { voice, voiceDirection: optStr(o.voiceDirection, `${w}.voiceDirection`, 2000), voiceSettings };
+}
+
+function parseGeneration(v: unknown, w: string): ParsedGeneration | null {
+  if (v === undefined || v === null) return null;
+  const o = obj(v, w);
+  const settings = o.settings ?? null;
+  if (settings !== null && (typeof settings !== 'object' || JSON.stringify(settings).length > 4000)) fail(`${w}.settings`, 'expected a small object');
+  return {
+    kind: oneOf(o.kind, `${w}.kind`, ['speech', 'sfx', 'music', 'voice_change'] as const), model: str(o.model, `${w}.model`, 64), voiceId: optStr(o.voiceId, `${w}.voiceId`, 64),
+    textSent: optStr(o.textSent, `${w}.textSent`, 60_000), direction: optStr(o.direction, `${w}.direction`, 500), settings,
+    sourceTake: optInt(o.sourceTake, `${w}.sourceTake`, 1, 65_535), outputFormat: str(o.outputFormat, `${w}.outputFormat`, 40), context: bool(o.context ?? false, `${w}.context`),
+    requestId: optStr(o.requestId, `${w}.requestId`, 64), characterCost: optInt(o.characterCost, `${w}.characterCost`, 0, 1_000_000_000), createdAt: optDate(o.createdAt, `${w}.createdAt`),
+  };
+}
+
+interface ParsedClip { asset: number; number: number; offsetMs: number; lengthMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number; loops: number; speed: number; pitchCents: number; volumePoints: VolumePoint[] | null; speedPoints: VolumePoint[] | null; pitchPoints: VolumePoint[] | null; origin: 'human-recorded' | 'generated' | 'voice-converted'; chosen: boolean; createdAt: Date | null; generation: ParsedGeneration | null }
+interface ParsedGeneration {
+  kind: 'speech' | 'sfx' | 'music' | 'voice_change'; model: string; voiceId: string | null; textSent: string | null; direction: string | null; settings: unknown;
+  sourceTake: number | null; outputFormat: string; context: boolean; requestId: string | null; characterCost: number | null; createdAt: Date | null;
+}
 interface ParsedCue { lane: number; type: 'speech' | 'sfx' | 'music'; character: number | null; startMs: number; lengthMs: number; lengthAuto: boolean; muted: boolean; text: string; clips: ParsedClip[] }
 interface ParsedNote {
   type: 'comment' | 'reference' | 'task'; authorKind: 'user' | 'system' | 'llm'; text: string; refKey: string | null; link: string | null;
@@ -272,6 +320,7 @@ export function parseBundle(raw: unknown) {
     return {
       name: str(o.name, `${w}.name`, 100), isNarrator: bool(o.isNarrator, `${w}.isNarrator`), colour: colour(o.colour, `${w}.colour`),
       description: optStr(o.description, `${w}.description`, 60_000), folder, picture: assetRef(o.picture, `${w}.picture`), createdAt: optDate(o.createdAt, `${w}.createdAt`),
+      ...parseCharacterVoice(o, w),
     };
   });
   if (chars.filter((c) => c.isNarrator).length !== 1) fail('characters', 'exactly one narrator is required');
@@ -315,6 +364,7 @@ export function parseBundle(raw: unknown) {
               gainDb: gain, fadeInMs: int(ko.fadeInMs, `${wk}.fadeInMs`, 0, MAX_SCENE_MS), fadeOutMs: int(ko.fadeOutMs, `${wk}.fadeOutMs`, 0, MAX_SCENE_MS),
               loops: int(ko.loops, `${wk}.loops`, -1, 1000), origin: oneOf(ko.origin, `${wk}.origin`, ['human-recorded', 'generated', 'voice-converted'] as const),
               chosen: bool(ko.chosen ?? false, `${wk}.chosen`), createdAt: optDate(ko.createdAt, `${wk}.createdAt`),
+              generation: parseGeneration(ko.generation, `${wk}.generation`),
             };
           });
           if (new Set(clips.map((k) => k.number)).size !== clips.length) fail(`${wq}.clips`, 'clip numbers must be unique');
@@ -460,6 +510,7 @@ export async function importBundle(userId: string, raw: unknown, folderOverride?
       await tx.insert(character).values({
         id: cid, projectId, name: c.name, isNarrator: c.isNarrator, defaultColour: c.colour, pictureAssetId: c.picture === null ? null : assetIds[c.picture]!,
         description: c.description, folder: c.folder, createdAt: new Date(at), updatedAt: now,
+        voiceId: c.voice?.id ?? null, voiceName: c.voice?.name ?? null, voiceSource: c.voice?.source ?? null, voiceDirection: c.voiceDirection, voiceSettings: c.voiceSettings,
       });
       charIds.push(cid);
     }
@@ -472,6 +523,7 @@ export async function importBundle(userId: string, raw: unknown, folderOverride?
     let cueSeq = 0; // cues are ordered by start, lane, then id: ids that rise with the file's order keep ties in that order
     const clipRows: (typeof clip.$inferInsert)[] = [];
     const chosen: { cueId: string; clipId: string }[] = [];
+    const gens: { g: ParsedGeneration; clipId: string; cueId: string; cueClips: ParsedClip[] }[] = [];
     for (const [ci, ch] of chapters.entries()) {
       const chapterId = newUlid();
       chapterIds.push(chapterId);
@@ -507,12 +559,22 @@ export async function importBundle(userId: string, raw: unknown, folderOverride?
                 fadeInMs: k.fadeInMs, fadeOutMs: k.fadeOutMs, loops: k.loops, origin: k.origin, createdAt: k.createdAt ?? now,
               });
               if (k.chosen) chosen.push({ cueId: ids[qi]!, clipId });
+              if (k.generation) gens.push({ g: k.generation, clipId, cueClips: q.clips, cueId: ids[qi]! });
             }
           }
         }
       }
     }
     for (let i = 0; i < clipRows.length; i += 500) await tx.insert(clip).values(clipRows.slice(i, i + 500));
+    if (gens.length) {
+      const byCueNumber = new Map(clipRows.map((r) => [`${r.cueId}#${r.number}`, r.id!]));
+      const rows = gens.map(({ g, clipId, cueId }) => ({
+        id: newUlid(), projectId, clipId, kind: g.kind, model: g.model, voiceId: g.voiceId, textSent: g.textSent, direction: g.direction, settings: g.settings,
+        sourceClipId: g.sourceTake === null ? null : byCueNumber.get(`${cueId}#${g.sourceTake}`) ?? null, outputFormat: g.outputFormat, context: g.context,
+        requestId: g.requestId, characterCost: g.characterCost, createdByUserId: null, createdAt: g.createdAt ?? now,
+      }));
+      for (let i = 0; i < rows.length; i += 500) await tx.insert(generation).values(rows.slice(i, i + 500));
+    }
     for (const c of chosen) await tx.update(cue).set({ clipId: c.clipId }).where(eq(cue.id, c.cueId));
 
     // Notes: roots first, then replies, each in the file's order.

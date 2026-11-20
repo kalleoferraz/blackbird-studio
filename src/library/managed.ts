@@ -20,6 +20,10 @@ export const isCharactersRoot = (p: string) => lower(p) === lower(CHARACTERS);
 /** The library folder of a character; its profile picture is the file `Profile.<ext>` in it. */
 export const pictureFolder = (characterFolder: string) => `${CHARACTERS}/${characterFolder}`;
 
+/** The managed folder with a character's voice samples for cloning (Bible, decision log 2026-11-20). */
+export const VOICE_SAMPLES = 'Voice Samples';
+export const voiceSamplesFolder = (characterFolder: string) => `${CHARACTERS}/${characterFolder}/${VOICE_SAMPLES}`;
+
 /**
  * Brings one project's managed folders to the current spelling: the folders on disk and the paths of the files in
  * them (`path` and `lightweight_path`). Safe to repeat. Returns what it changed.

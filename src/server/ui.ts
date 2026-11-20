@@ -24,7 +24,7 @@ export function registerUi(app: FastifyInstance): void {
       .header('x-content-type-options', 'nosniff')
       .header('x-frame-options', 'DENY')
       .header('referrer-policy', 'same-origin')
-      .header('content-security-policy', "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' data:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+      .header('content-security-policy', "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' data:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: https:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
       .send(content);
   };
   // The app opens from the root. It is also the host's health check (GET / must return 200), so a missing build
