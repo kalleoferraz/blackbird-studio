@@ -134,7 +134,7 @@ export function NavBar({ store, lib, libInfo, story, follow, onFollow, editing, 
           ) : recView ? (
             <button type="button" className={'play rec ' + recKind} disabled={recView === 'saving'}
               aria-label={recView === 'saving' ? 'Saving the take' : store.rec?.phase === 'count' ? 'Cancel the recording' : 'Stop recording'}
-              title={recView === 'saving' ? 'Saving the take…' : store.rec?.phase === 'count' ? 'Cancel (Space)' : 'Stop recording (Space)'}
+              title={recView === 'saving' ? 'Saving the take…' : store.rec?.phase === 'count' ? 'Cancel (Space or Esc) · Backspace counts in again' : 'Stop recording (Space) · Esc cancels without saving · Backspace starts over'}
               onClick={() => store.rec?.stop()}>
               {recKind === 'count' ? <span key={recView} className="rec-count">{recView.slice(6) === '0' ? '…' : recView.slice(6)}</span>
                 : recKind === 'saving' ? <span className="rec-count">…</span> : <span className="rec-dot"><Icon>{ICONS.rec}</Icon></span>}
