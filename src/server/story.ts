@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { and, asc, count, eq, inArray, max, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, sql } from 'drizzle-orm';
 import { inTransaction, withDb, type Q, type Tx } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { closeGap, openGap, parkRow } from '../db/positions.js';
@@ -11,7 +11,7 @@ import { kickAudioJobs } from '../audio/jobs.js';
 import { MAX_UPLOAD, removeFiles, storeFile, type AssetRow } from '../library/files.js';
 import { usageOf } from './library.js';
 import { chapterIndexLabel } from '../library/managed.js';
-import { storylineName } from '../library/storyline.js';
+import { storylineName, takeKind } from '../library/storyline.js';
 import { accessTo, accessToEntity, checkId } from './access.js';
 import { authenticate } from './auth-routes.js';
 import {
@@ -518,8 +518,7 @@ export function registerStoryRoutes(app: FastifyInstance): void {
     if (!Buffer.isBuffer(data)) throw badRequest('invalid_body', 'Send the recording as application/octet-stream.');
     const { projectId, folder, name } = await withDb(async (db) => {
       const access = await accessToEntity(db, userId(request), 'cue', id, { edit: true });
-      const last = (await db.select({ n: max(clip.number) }).from(clip).where(eq(clip.cueId, id)))[0]?.n ?? 0;
-      const where = await storylineName(db, id, Number(last) + 1);
+      const where = await storylineName(db, id, 'R');
       return { projectId: access.projectId, folder: where.folder, name: where.base + (isWav(data) ? '.wav' : '.mp3') };
     });
     const stored = await withDb((db) => storeFile(db, { projectId, folder, name, data, only: ['audio'], maxBytes: MAX_UPLOAD }));
@@ -548,8 +547,7 @@ export function registerStoryRoutes(app: FastifyInstance): void {
     const projectId = await withDb(async (db) => (await accessToEntity(db, userId(request), 'cue', id, { edit: true })).projectId);
     const made = await withDb((db) => generateForCue(db, id, input));
     const { folder, name } = await withDb(async (db) => {
-      const last = (await db.select({ n: max(clip.number) }).from(clip).where(eq(clip.cueId, id)))[0]?.n ?? 0;
-      const where = await storylineName(db, id, Number(last) + 1);
+      const where = await storylineName(db, id, takeKind(made.origin));
       return { folder: where.folder, name: `${where.base}.${made.ext}` };
     });
     const stored = await withDb((db) => storeFile(db, { projectId, folder, name, data: made.data, only: ['audio'], maxBytes: MAX_UPLOAD }));
@@ -614,8 +612,7 @@ export function registerStoryRoutes(app: FastifyInstance): void {
     const kept: { v: (typeof vs)[number]; assetId: string; path: string }[] = [];
     for (const v of vs) {
       const { folder, name } = await withDb(async (db) => {
-        const last = (await db.select({ n: max(clip.number) }).from(clip).where(eq(clip.cueId, id)))[0]?.n ?? 0;
-        const where = await storylineName(db, id, Number(last) + 1 + kept.length);
+        const where = await storylineName(db, id, 'G', kept.length);
         return { folder: where.folder, name: `${where.base}.${v.ext}` };
       });
       const st = await withDb((db) => storeFile(db, { projectId, folder, name, data: v.data, only: ['audio'], maxBytes: MAX_UPLOAD }));

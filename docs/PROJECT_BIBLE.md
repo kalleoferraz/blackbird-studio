@@ -1,6 +1,6 @@
 # Blackbird Script Studio — Project Bible
 
-Sep 30, 2026 · @Kalleo · Updated Nov 20, 2026, 16:30 (Berlin)
+Sep 30, 2026 · @Kalleo · Updated Nov 20, 2026, 17:50 (Berlin)
 
 ## 1. Vision and users
 
@@ -300,12 +300,12 @@ The version history exists to show that the text was written gradually, in small
 **Storyline naming.** Dialogue and narration recorded or uploaded in a cue go under `storyline`. Any cue type (speech, sfx or music) can be recorded in place, and the take goes under `storyline` with the same pattern (amended 2026-10-21). Files for sound effects and music can still come from the library.
 
 ```text
-storyline/{00A..00Z | 01..99} - {chapter}/{01..99} - {segment}/{01..99}.{MMSS} - {lane} - {text} ({n}).ext
+storyline/{00A..00Z | 01..99} - {chapter}/{01..99} - {segment}/{01..99}.{MMSS} - {lane} - {text} ({R|G}{n}).ext
 ```
 
 - Chapter index: `00A` to `00Z` for introductory chapters, `01` to `99` for the others. Segment index and scene index start at `01`, with two digits. Alphabetical order is chronological order.
-- `MMSS` is the cue's start within its scene (minutes and seconds). `{n}` is the clip's number among the cue's alternatives, from 1, never renumbered.
-- Chapter, segment, lane and the text part are sanitized to plain ASCII (accents transliterated, unsafe characters dropped) and cut to 10 characters; an empty result becomes "untitled". The path is at most about 85 characters.
+- `MMSS` is the cue's start within its scene (minutes and seconds). The last part says how the take was made and counts it (2026-11-20): `R` for a recorded take, `G` for a generated one (text to speech, sound effect, music or voice changer), then its number among the cue's takes of that kind, from 1, such as `(R2)` or `(G1)`; a name a kept file already has is skipped. The clip's own number ("Take N" in the menu) is unchanged. Files named before this keep their `({n})` names.
+- Chapter, segment, lane and the text part are sanitized to plain ASCII (accents transliterated, unsafe characters dropped); chapter, segment and lane are cut to 10 characters and the text part to 30 (raised from 10 on 2026-11-20); an empty result becomes "untitled". The path is at most about 110 characters.
 - If two names still collide, the app replaces the end of the title part with a short ID so the length cap holds. Paths are unique per media project.
 - Reordering chapters, segments or scenes, and renaming chapters, segments or lanes, rename the folders and files and update the asset paths. A character rename renames its `characters/{name}` folder; a lane keeps the name it copied.
 

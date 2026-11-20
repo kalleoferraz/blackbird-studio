@@ -181,3 +181,12 @@ describe('ElevenLabs client', () => {
     await assert.rejects(new ElevenLabs('http://127.0.0.1:1', 'k').subscription(), (e: HttpError) => e.code === 'voice_unreachable');
   });
 });
+
+describe('take file names', () => {
+  it('cuts the text part at 30 characters and the others at 10', async () => {
+    const { sanitizePart, TEXT_PART_MAX, takeKind } = await import('../src/library/storyline.js');
+    assert.equal(sanitizePart('Era uma vez uma menina que morava perto do rio', TEXT_PART_MAX), 'Era uma vez uma menina que mor');
+    assert.equal(sanitizePart('Marta Albuquerque'), 'Marta Albu');
+    assert.deepEqual(['human-recorded', 'generated', 'voice-converted'].map(takeKind), ['R', 'G', 'G']);
+  });
+});
