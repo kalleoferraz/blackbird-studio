@@ -2,9 +2,10 @@
 // a playhead that follows playback, click to seek, drag to move a cue and drag its right edge to resize it.
 // After resizing a speech cue the author is asked whether the later cues move with it (ripple) or stay where they are;
 // sound effects and music never ripple: they only stop where the next cue of their lane begins.
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
 import { api } from './api.ts';
-import type { Cue, Lane, SegmentContent } from './types.ts';
+import type { Character, Cue, Lane, SegmentContent } from './types.ts';
 import { useNav, useStoreValue } from './playback.ts';
 import { loadPeaks, type Peaks } from './peaks.ts';
 import { Menu, errorText, useLocalState } from './ui.tsx';
@@ -30,7 +31,9 @@ interface Drag { cueId: string; kind: 'move' | 'resize'; startMs: number; length
 /** A resized speech cue waiting for the answer to "shift the later cues too?". */
 interface Ask { drag: Drag; later: number; x: number; y: number; clamped: boolean }
 
-export function Timeline({ content, readOnly, onContent, onError, audioEdit, onAudioEdit, follow = true }: {
+export function Timeline({ content, readOnly, onContent, onError, audioEdit, onAudioEdit, follow = true, characters = [] }: {
+  /** The project's characters: the Narrator's lane comes first among the speech lanes. */
+  characters?: Character[];
   /** The view scrolls along with the playhead (the Follow switch of the bar). */
   follow?: boolean;
   content: SegmentContent; readOnly: boolean; onContent: (c: SegmentContent) => void; onError: (m: string) => void;
@@ -127,8 +130,14 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
 
   const lanes = useMemo(() => {
     const used = new Set(scene.cues.map((c) => c.laneId));
-    return content.lanes.filter((l) => used.has(l.id)).sort((a, b) => a.position - b.position);
-  }, [content.lanes, scene.cues]);
+    // Music first, then sound effects, then speech (the Narrator, or no character, on top); each group alphabetically.
+    const narr = new Set(characters.filter((c) => c.isNarrator).map((c) => c.id));
+    const rank = new Map<string, number>();
+    for (const c of scene.cues) rank.set(c.laneId, Math.min(rank.get(c.laneId) ?? 9, c.type === 'music' ? 0 : c.type === 'sfx' ? 1 : 2));
+    const sub = (l: Lane) => ((rank.get(l.id) ?? 2) === 2 && (!l.characterId || narr.has(l.characterId)) ? 0 : 1);
+    return content.lanes.filter((l) => used.has(l.id))
+      .sort((a, b) => (rank.get(a.id) ?? 2) - (rank.get(b.id) ?? 2) || sub(a) - sub(b) || a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }) || a.position - b.position);
+  }, [content.lanes, scene.cues, characters]);
 
   // The lane of the cue open for audio editing is half as tall again, so the volume envelope has room; the others move down with a transition.
   const editId = audioEdit?.cueId ?? null;
@@ -500,14 +509,12 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
             {editCue && (() => {
               const li = lanes.findIndex((l) => l.id === editCue.laneId), s = shown(editCue), k = editCue.clips.find((q) => q.id === editCue.clipId);
               if (li < 0 || !k) return null;
-              const PANEL_W = 290, right = x(s.start) + Math.max(3, x(s.len)) + 8;
-              const left = right + PANEL_W > width ? Math.max(4, x(s.start) - PANEL_W - 8) : right;
               return (
-                <div className="tl-audio-panel" style={{ left, top: laneTop[li]! + 3 }} onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+                <AudioPanel onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
                   <div className="tl-ap-head"><b>Audio settings</b><button className="tl-ap-done" onClick={() => onAudioEdit(null)}>Done</button></div>
                   <AudioSliders clip={k} run={(m, u, b) => void runOnCue(m, u, b)} env={audioEdit!.kind} onEnv={(kind) => onAudioEdit({ cueId: editCue.id, kind })} />
                   <p className="muted small">Showing the {ENVELOPE_NAME[audioEdit!.kind].toLowerCase()} envelope. Double-click the cue to add a point, drag a point to move it, double-click a point to remove it. A click moves the playhead.</p>
-                </div>);
+                </AudioPanel>);
             })()}
             {snap !== null && <div className="tl-snap" style={{ left: x(snap), top: RULER_H, bottom: 0 }} />}
             {band && <div className="tl-band" style={{ left: Math.min(band.x0, band.x1), top: Math.min(band.y0, band.y1), width: Math.abs(band.x1 - band.x0), height: Math.abs(band.y1 - band.y0) }} />}
@@ -568,6 +575,27 @@ const Playhead = memo(function Playhead({ sceneId, x, onFrame }: { sceneId: stri
   useLayoutEffect(() => draw.current());
   return <div className="tl-playhead" ref={el} style={{ display: 'none' }} />;
 });
+
+/** The audio settings of the cue being edited: a panel outside the timeline (so nothing clips it), beside the cue, on the left when the screen ends on the right, and moved up when it would run off the bottom. */
+function AudioPanel({ children, ...rest }: { children: ReactNode } & React.HTMLAttributes<HTMLDivElement>) {
+  const el = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    let raf = 0;
+    const place = () => {
+      raf = requestAnimationFrame(place);
+      const d = el.current, cue = document.querySelector('.tl-cue.audio-edit');
+      if (!d || !cue) return;
+      const r = cue.getBoundingClientRect(), w = d.offsetWidth, h = d.offsetHeight, W = window.innerWidth, H = window.innerHeight;
+      let left = r.right + 8;
+      if (left + w > W - 8) left = r.left - 8 - w >= 8 ? r.left - 8 - w : Math.max(8, W - 8 - w);
+      const top = Math.max(8, Math.min(r.top, H - 8 - h));
+      d.style.left = left + 'px'; d.style.top = top + 'px'; d.style.visibility = '';
+    };
+    place();
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return createPortal(<div ref={el} className="tl-audio-panel" style={{ visibility: 'hidden' }} {...rest}>{children}</div>, document.body);
+}
 
 const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top, h, now, sel, dragging, multi, readOnly, editing, onEditAudio, onEnvelope, onSeekIn, onMove, onResize, onMenu }: {
   cue: Cue; lane: Lane; left: number; width: number; lengthMs: number; top: number; h: number; now: boolean; sel: boolean; dragging: boolean; multi: boolean; readOnly: boolean;

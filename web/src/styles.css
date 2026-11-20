@@ -675,7 +675,7 @@ button.audio-btn:hover { color: var(--primary); background: var(--line); }
 .tl-cue.audio-edit { cursor: default; z-index: 4; box-shadow: 0 0 0 2px var(--primary); }
 .tl-envelope.edit { pointer-events: auto; cursor: crosshair; touch-action: none; } .tl-envelope.edit .zero { stroke: var(--faint); stroke-dasharray: 4 3; } .tl-envelope.edit path.flat { stroke-dasharray: 5 4; opacity: .6; }
 .tl-envelope.edit circle { fill: var(--primary); stroke: var(--bg, #0E0B10); stroke-width: 2; cursor: grab; }
-.tl-audio-panel { position: absolute; z-index: 8; width: 290px; box-sizing: border-box; padding: 8px 10px; background: var(--panel2); border: 1px solid #4a3c3e; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.5); cursor: default; }
+.tl-audio-panel { position: fixed; z-index: 55; max-height: calc(100vh - 16px); overflow: auto; width: 290px; box-sizing: border-box; padding: 8px 10px; background: var(--panel2); border: 1px solid #4a3c3e; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.5); cursor: default; }
 .tl-ap-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; } .tl-ap-done { padding: 2px 10px; font-size: .78rem; }
 .tl-audio-panel p { margin: 6px 0 0; }
 

@@ -11,15 +11,21 @@ export type MenuItem =
 function SubItem({ label, sub, disabled, onClose }: { label: string; sub: ReactNode | ((close: () => void) => ReactNode); disabled?: boolean; onClose: () => void }) {
   const [open, setOpen] = useState(false);
   const [left, setLeft] = useState(false);
+  const [up, setUp] = useState(0);
   const host = useRef<HTMLDivElement>(null);
   const pop = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (open && host.current && pop.current) setLeft(host.current.getBoundingClientRect().right + pop.current.offsetWidth > window.innerWidth - 8);
+    if (!open || !host.current || !pop.current) { setUp(0); return; }
+    const h = host.current.getBoundingClientRect(), w = pop.current.offsetWidth, ph = pop.current.offsetHeight;
+    // Opens to the right of its item, or to the left when the screen ends there; and moves up when its height does not fit below.
+    setLeft(h.right + w + 2 > window.innerWidth - 8 && h.left - w - 2 >= 8);
+    const top = h.top - 5;
+    setUp(Math.max(0, Math.min(top + ph - (window.innerHeight - 8), top - 8)));
   }, [open]);
   return (
     <div ref={host} className="menu-subhost" onMouseEnter={() => !disabled && setOpen(true)} onMouseLeave={() => setOpen(false)}>
       <button className="menu-item" disabled={disabled} onClick={() => setOpen(true)}><span className="menu-check" />{label}<span className="menu-hint">▸</span></button>
-      {open && <div ref={pop} className={'menu menu-sub' + (left ? ' left' : '')}>{typeof sub === 'function' ? sub(onClose) : sub}</div>}
+      {open && <div ref={pop} className={'menu menu-sub' + (left ? ' left' : '')} style={up ? { top: -5 - up } : undefined}>{typeof sub === 'function' ? sub(onClose) : sub}</div>}
     </div>
   );
 }

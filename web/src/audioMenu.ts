@@ -24,7 +24,7 @@ export function audioMenuItems(cue: Cue, o: {
     ...cue.clips.map((k): MenuItem => ({ label: `Take ${k.number} · ${k.name}`, hint: formatMs(k.lengthMs), checked: k.id === cue.clipId,
       onClick: () => { if (k.id !== cue.clipId) o.run('POST', `/api/cues/${cue.id}/choose-clip`, { clipId: k.id }); } })),
     ...(cue.clips.length ? ['sep' as const] : []),
-    { label: 'Record a take…', disabled: !!o.nav?.store.rec, onClick: () => o.nav?.record(cue.id) },
+    { label: 'Record a take…', disabled: cue.type !== 'speech' || !!o.nav?.store.rec, onClick: () => o.nav?.record(cue.id) },
     { label: 'Choose audio…', onClick: o.chooseAudio },
     'sep',
     { label: 'Audio settings', disabled: !chosen, ...(o.panel ? { onClick: () => o.panel?.() } : { sub: (close) => chosen ? createElement(AudioSliders, { clip: chosen, run: o.run, onEnv: o.edit ? (k) => { close(); o.edit?.(k); } : undefined }) : null }) },
