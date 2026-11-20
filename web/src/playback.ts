@@ -108,16 +108,15 @@ export class PlaybackStore {
     this.last = now;
     const d = this.current();
     if (!d || !this.pos) return; // loading: the clock waits
-    if (this.rec?.phase === 'rec') {
-      // Recording: the playhead stays inside the cue, however long the take runs.
-      this.flat(d);
-      const f = this.flatFor?.byId.get(this.rec.cueId);
-      if (f) {
-        const hold = f.cue.startMs + Math.max(1, f.cue.lengthMs) - 1;
-        if (this.pos.scene === f.scene && this.pos.ms + dt > hold) { this.pos = { ...this.pos, ms: Math.max(this.pos.ms, hold) }; this.emit(); return; }
-      }
-    }
     const s = advance(d, this.pos, dt, this.order);
+    if (this.rec?.phase === 'rec' && !('pos' in s)) {
+      // Recording: time runs on past the end of the cue (the other lanes keep playing; the cue keeps its length until
+      // the take is reviewed), but not into another segment: at the end of this one the playhead waits there.
+      const last = d.scenes.length - 1;
+      const end = d.scenes[last]?.lengthMs ?? this.pos.ms;
+      if (this.pos.scene !== last || this.pos.ms !== end) { this.pos = { ...this.pos, scene: Math.max(0, last), ms: end }; this.emit(); }
+      return;
+    }
     if (this.holdScene && (!('pos' in s) || s.pos.scene !== this.pos.scene)) {
       this.pos = { ...this.pos, ms: d.scenes[this.pos.scene]?.lengthMs ?? this.pos.ms };
       this.stop(); this.emit(); return;
