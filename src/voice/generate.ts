@@ -68,14 +68,14 @@ async function neighbours(q: Q, cueId: string, segmentId: string): Promise<{ pre
 
 export async function generateForCue(q: Q, cueId: string, input: GenerateInput): Promise<Generated> {
   const row = (await q
-    .select({ c: cue, segmentId: scene.segmentId, language: project.language })
+    .select({ c: cue, segmentId: scene.segmentId, language: project.language, projectId: project.id })
     .from(cue).innerJoin(scene, eq(scene.id, cue.sceneId)).innerJoin(segment, eq(segment.id, scene.segmentId))
     .innerJoin(chapter, eq(chapter.id, segment.chapterId)).innerJoin(project, eq(project.id, chapter.projectId))
     .where(eq(cue.id, cueId)).limit(1))[0];
   if (!row) throw new HttpError(404, 'not_found');
   const c = row.c;
   const ch = c.characterId ? (await q.select().from(character).where(eq(character.id, c.characterId)).limit(1))[0] ?? null : null;
-  const { client, outputFormat, model } = await elevenLabs();
+  const { client, outputFormat, model } = await elevenLabs(row.projectId);
   const settings = (ch?.voiceSettings ?? null) as VoiceSettings | null;
   const needVoice = () => {
     if (!ch) throw new HttpError(409, 'no_character', 'This cue has no character, so there is no voice to speak it. Choose a character for the cue first.');

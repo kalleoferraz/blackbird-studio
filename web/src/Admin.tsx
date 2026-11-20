@@ -1,9 +1,9 @@
+import { formatDateTime } from './format.ts';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api.ts';
 import type { Me } from './types.ts';
 import { Brand } from './Brand.tsx';
 import { Confirm, Dialog, errorText } from './ui.tsx';
-import type { OutputFormat } from '../../src/shared/voice.ts';
 
 interface AdminUser { id: string; email: string; displayName: string; isAdmin: boolean; disabled: boolean; mustChangePassword: boolean; memberships: { projectId: string; title: string; role: string }[] }
 interface AdminTeam { id: string; name: string; members: { id: string; email: string; displayName: string }[] }
@@ -150,24 +150,22 @@ function SnapshotSettings() {
 }
 
 interface VoiceConfig {
-  apiUrl: string; outputFormat: string; model: string; keySet: boolean; keyUnreadable: boolean; canStoreKey: boolean;
-  source: { apiUrl: string | null; key: string | null; outputFormat: string | null; model: string | null };
-  defaults: { apiUrl: string }; formats: OutputFormat[]; models: string[];
+  apiUrl: string; keySet: boolean; keyUnreadable: boolean; canStoreKey: boolean;
+  source: { apiUrl: string | null; key: string | null };
+  defaults: { apiUrl: string };
 }
 interface Plan { tier: string; status: string; characterCount: number; characterLimit: number; nextResetUnix: number | null; voiceLimit: number; voiceSlotsUsed: number; canClone: boolean }
 
-/** ElevenLabs: API URL (without a version), key, output format and speech model, plus the plan's figures. */
+/** ElevenLabs: API URL (without a version) and key, plus the plan's figures. The speech model and output format are set per project (Integrations). */
 function VoiceSettingsCard() {
   const [cfg, setCfg] = useState<VoiceConfig | null>(null);
   const [apiUrl, setApiUrl] = useState('');
-  const [format, setFormat] = useState('');
-  const [model, setModel] = useState('');
   const [key, setKey] = useState('');
   const [plan, setPlan] = useState<Plan | null>(null);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const show = (c: VoiceConfig) => {
-    setCfg(c); setApiUrl(c.source.apiUrl === 'app' ? c.apiUrl : ''); setFormat(c.outputFormat); setModel(c.source.model === 'app' ? c.model : ''); setKey('');
+    setCfg(c); setApiUrl(c.source.apiUrl === 'app' ? c.apiUrl : ''); setKey('');
   };
   const loadPlan = () => api<{ plan: Plan | null }>('GET', '/api/admin/settings/voices/plan').then((r) => setPlan(r.plan)).catch((e) => setNote({ ok: false, text: errorText(e) }));
   useEffect(() => {
@@ -175,7 +173,7 @@ function VoiceSettingsCard() {
   }, []);
   const run = async (fn: () => Promise<void>) => { setBusy(true); setNote(null); try { await fn(); } catch (e) { setNote({ ok: false, text: errorText(e) }); } setBusy(false); };
   const save = () => run(async () => {
-    const r = await api<VoiceConfig>('PUT', '/api/admin/settings/voices', { apiUrl, outputFormat: format, model, ...(key ? { key } : {}) });
+    const r = await api<VoiceConfig>('PUT', '/api/admin/settings/voices', { apiUrl, ...(key ? { key } : {}) });
     show(r); setNote({ ok: true, text: 'Saved.' }); if (r.keySet) void loadPlan(); else setPlan(null);
   });
   const test = () => run(async () => {
@@ -185,7 +183,6 @@ function VoiceSettingsCard() {
   const clearKey = () => run(async () => { show(await api<VoiceConfig>('PUT', '/api/admin/settings/voices', { clearKey: true })); setPlan(null); setNote({ ok: true, text: 'The saved key was removed.' }); });
   const from = (s: string | null) => (s === 'env' ? ' (now taken from the server settings)' : '');
   const state = !cfg ? '' : cfg.keySet ? 'Voice features are on.' : `Voice features are off: ${cfg.keyUnreadable ? 'the saved key can no longer be read' : 'no API key'}.`;
-  const groups = cfg ? (['MP3', 'PCM', 'WAV'] as const).map((g) => ({ g, items: cfg.formats.filter((f) => f.id.startsWith(g.toLowerCase())) })) : [];
   const n = (v: number) => v.toLocaleString();
   return (
     <section className="card">
@@ -197,13 +194,7 @@ function VoiceSettingsCard() {
         <label>API key<input type="password" placeholder={cfg?.keySet ? '•••••••• saved (type to replace)' : 'Paste an ElevenLabs API key'} value={key} onChange={(e) => setKey(e.target.value)} autoComplete="new-password" />
           <span className="muted small">Stored encrypted and never shown again{cfg ? from(cfg.source.key) : ''}.</span></label>
         {cfg && !cfg.canStoreKey && <p className="error">A key cannot be stored: SESSION_SECRET is missing on this server.</p>}
-        <label>Output format<select value={format} onChange={(e) => setFormat(e.target.value)}>
-          {groups.map(({ g, items }) => <optgroup key={g} label={g}>{items.map((f) => <option key={f.id} value={f.id}>{f.label}{f.plan ? ` (${f.plan} plan or higher)` : ''}</option>)}</optgroup>)}
-        </select>
-          <span className="muted small">A format the current plan does not include is refused by ElevenLabs when audio is generated, and the studio shows why. Music has no WAV output, so WAV is asked for as PCM there.</span></label>
-        <label>Speech model<input list="voice-models" placeholder={cfg?.model ?? 'eleven_v4'} value={model} onChange={(e) => setModel(e.target.value)} autoComplete="off" />
-          <datalist id="voice-models">{cfg?.models.map((m) => <option key={m} value={m} />)}</datalist>
-          <span className="muted small">Used by every media project{cfg ? from(cfg.source.model) : ''}.</span></label>
+        <p className="muted small">The speech model and the output format are chosen per media project, in the script's Integrations dialog.</p>
         <div className="row">
           <button className="primary" disabled={busy || !cfg}>Save</button>
           <button type="button" disabled={busy || !cfg} onClick={() => void test()}>Test key</button>
@@ -217,7 +208,7 @@ function VoiceSettingsCard() {
           <dl>
             <dt>Plan</dt><dd>{plan.tier || '—'}{plan.status ? ` · ${plan.status}` : ''}</dd>
             <dt>Characters</dt><dd>{n(plan.characterCount)} of {n(plan.characterLimit)} used · {n(Math.max(0, plan.characterLimit - plan.characterCount))} left</dd>
-            <dt>Resets</dt><dd>{plan.nextResetUnix ? new Date(plan.nextResetUnix * 1000).toLocaleString() : '—'}</dd>
+            <dt>Resets</dt><dd>{plan.nextResetUnix ? formatDateTime(plan.nextResetUnix * 1000) : '—'}</dd>
             <dt>Voice slots</dt><dd>{plan.voiceSlotsUsed} of {plan.voiceLimit} used</dd>
             <dt>Voice cloning</dt><dd>{plan.canClone ? 'Allowed' : 'Not in this plan'}</dd>
           </dl>

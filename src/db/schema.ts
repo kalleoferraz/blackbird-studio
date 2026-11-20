@@ -134,6 +134,9 @@ export const project = mysqlTable('project', {
   activeSession: ulid('active_session'),
   // Folder name in the snapshot repo: suggested from the title at creation, unique ignoring case, not changed by title edits.
   repoFolder: ciVarchar('repo_folder', { length: 80 }),
+  // ElevenLabs choices of this media project (Bible, decision log 2026-11-20); null uses the app's defaults.
+  voiceModel: asciiVarchar('voice_model', { length: 64 }),
+  voiceOutputFormat: asciiVarchar('voice_output_format', { length: 40 }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [uniqueIndex('project_repo_folder_uq').on(t.repoFolder)]);

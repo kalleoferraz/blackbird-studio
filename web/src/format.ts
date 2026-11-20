@@ -18,13 +18,24 @@ export function formatBytes(n: number): string {
   while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
   return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
 }
+const two = (n: number) => String(n).padStart(2, '0');
+/** A date in the European form dd/mm/yy, in local time (used wherever the app shows a date). */
+export function formatDate(at: string | number | Date): string {
+  const d = at instanceof Date ? at : new Date(at);
+  return `${two(d.getDate())}/${two(d.getMonth() + 1)}/${two(d.getFullYear() % 100)}`;
+}
+/** dd/mm/yy HH:mm (24-hour clock), in local time. */
+export function formatDateTime(at: string | number | Date): string {
+  const d = at instanceof Date ? at : new Date(at);
+  return `${formatDate(d)} ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
 export function ago(iso: string | null): string {
   if (!iso) return 'never';
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
   if (s < 60) return 'just now';
   if (s < 3600) return `${Math.floor(s / 60)} min ago`;
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  return new Date(iso).toLocaleDateString();
+  return formatDate(iso);
 }
 /** Readable text colour on a lane colour. */
 export function ink(hex: string): string {

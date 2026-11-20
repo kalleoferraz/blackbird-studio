@@ -12,6 +12,8 @@ export interface ProjectCard {
   createdAt: string;
   lastEditedAt: string | null;
   dirtySince: string | null;
+  /** Saves since the last snapshot (0 when nothing is unsaved). */
+  changesSinceSnapshot: number;
   lastSnapshotAt: string | null;
   chapterCount: number;
   sizeBytes: number;

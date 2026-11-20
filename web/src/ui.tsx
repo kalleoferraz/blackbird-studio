@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { PALETTE } from '../../src/shared/palette.ts';
 
 export type MenuItem =
-  | { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; checked?: boolean; hint?: string; color?: string }
+  | { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; checked?: boolean; hint?: ReactNode; color?: string }
   /** A submenu: its own content (controls such as sliders) opens beside the item, on hover or click, and the menu stays open while it is used. */
   | { label: string; sub: ReactNode | ((close: () => void) => ReactNode); disabled?: boolean }
   | 'sep';
@@ -62,6 +62,15 @@ export function Menu({ anchor, items, onClose }: { anchor: HTMLElement | { x: nu
     </div>,
     document.body,
   );
+}
+
+/** The number of saves since the last snapshot, as a small badge with a pencil (Bible, decision log 2026-11-20). */
+export function ChangeCount({ n }: { n: number }) {
+  return (
+    <span className="change-count" title={`${n} saved change${n === 1 ? '' : 's'} since the last snapshot`} aria-label={`${n} changes since the last snapshot`}>
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z" /></svg>
+      {n > 999 ? '999+' : n}
+    </span>);
 }
 
 /** A button that opens a Menu on click. */

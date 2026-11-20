@@ -3,7 +3,8 @@
  * version; every call here adds its own (`/v2/voices`, `/v1/...`). Errors become HttpErrors with a clear message.
  */
 import { HttpError } from '../server/http.js';
-import { voiceConfig } from './settings.js';
+import { projectVoiceSettings, voiceConfig } from './settings.js';
+import { DEFAULT_OUTPUT_FORMAT, DEFAULT_SPEECH_MODEL } from '../shared/voice.js';
 import type { VoiceSettings } from '../shared/voice.js';
 
 export interface Subscription {
@@ -241,13 +242,17 @@ function settingsBody(s: VoiceSettings): Record<string, number | boolean> {
   return out;
 }
 
-/** A client with the saved settings, or a 409 `voice_not_configured` when no key is set. */
-export async function elevenLabs(): Promise<{ client: ElevenLabs; outputFormat: string; model: string }> {
+/**
+ * A client with the saved settings, with the speech model and output format of a media project (the defaults when none
+ * is named), or a 409 `voice_not_configured` when no key is set.
+ */
+export async function elevenLabs(projectId?: string): Promise<{ client: ElevenLabs; outputFormat: string; model: string }> {
   const c = await voiceConfig();
   if (!c.key) {
     throw new HttpError(409, 'voice_not_configured', c.keyUnreadable
       ? 'The saved ElevenLabs API key can no longer be read; the admin must enter it again.'
       : 'Voice features are off: no ElevenLabs API key is set in the admin area.');
   }
-  return { client: new ElevenLabs(c.apiUrl, c.key), outputFormat: c.outputFormat, model: c.model };
+  const p = projectId ? await projectVoiceSettings(projectId) : { model: DEFAULT_SPEECH_MODEL, outputFormat: DEFAULT_OUTPUT_FORMAT };
+  return { client: new ElevenLabs(c.apiUrl, c.key), outputFormat: p.outputFormat, model: p.model };
 }

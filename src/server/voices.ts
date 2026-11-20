@@ -4,6 +4,8 @@ import { inTransaction, withDb } from '../db/client.js';
 import { touchProject } from '../db/touch.js';
 import { asset, character, cue, membership, project } from '../db/schema.js';
 import { audioTags, spokenText } from '../voice/generate.js';
+import { projectVoiceSettings } from '../voice/settings.js';
+import { DEFAULT_OUTPUT_FORMAT, DEFAULT_SPEECH_MODEL, OUTPUT_FORMATS, SPEECH_MODELS, isOutputFormat } from '../shared/voice.js';
 import { blobStore } from '../storage/blob-store.js';
 import { voiceSamplesFolder } from '../library/managed.js';
 import { elevenLabs, type ElevenLabs } from '../voice/elevenlabs.js';
@@ -340,7 +342,7 @@ export function registerVoiceRoutes(app: FastifyInstance): void {
       const ch = characterId ? (await db.select().from(character).where(and(eq(character.id, characterId), eq(character.projectId, projectId))).limit(1))[0] ?? null : null;
       return { lang, ch };
     });
-    const { client, model } = await elevenLabs();
+    const { client, model } = await elevenLabs(projectId);
     const tags = audioTags(ch?.voiceDirection);
     const sent = tags ? `${tags} ${text}` : text;
     const settings = (ch?.voiceSettings ?? null) as Record<string, unknown> | null;
@@ -362,5 +364,36 @@ export function registerVoiceRoutes(app: FastifyInstance): void {
     }
     return reply.header('content-type', 'audio/mpeg').header('x-sample-cached', cached ? '1' : '0')
       .header('cache-control', 'no-store').send(audio);
+  });
+
+  // ---- the project's own speech model and output format (Bible, decision log 2026-11-20) -----------------------
+
+  app.get('/api/projects/:id/voices/settings', auth, async (request) => {
+    const projectId = checkId((request.params as { id: string }).id);
+    const access = await withDb((db) => accessTo(db, request.account!.id, projectId));
+    return { ...(await projectVoiceSettings(projectId)), canEdit: access.canEdit, defaults: { model: DEFAULT_SPEECH_MODEL, outputFormat: DEFAULT_OUTPUT_FORMAT }, formats: OUTPUT_FORMATS, models: SPEECH_MODELS };
+  });
+
+  /** `model` and `outputFormat`: a value, or null for the default. Authors only. */
+  app.patch('/api/projects/:id/voices/settings', { ...auth, bodyLimit: 2048 }, async (request) => {
+    const projectId = checkId((request.params as { id: string }).id);
+    const b = asBody(request.body);
+    const set: { voiceModel?: string | null; voiceOutputFormat?: string | null } = {};
+    if ('model' in b) {
+      const m = b.model === null || b.model === '' ? null : typeof b.model === 'string' ? b.model.trim() : undefined;
+      if (m === undefined || (m !== null && !/^[\w.-]{1,64}$/.test(m))) throw badRequest('invalid_model', 'The model ID has characters that are not allowed.');
+      set.voiceModel = m;
+    }
+    if ('outputFormat' in b) {
+      const f = b.outputFormat === null || b.outputFormat === '' ? null : b.outputFormat;
+      if (f !== null && (typeof f !== 'string' || !isOutputFormat(f))) throw badRequest('invalid_outputFormat', 'Choose one of the listed output formats.');
+      set.voiceOutputFormat = f as string | null;
+    }
+    await inTransaction(async (tx) => {
+      await accessTo(tx, request.account!.id, projectId, { edit: true });
+      if (Object.keys(set).length) await tx.update(project).set(set).where(eq(project.id, projectId));
+      await touchProject(tx, projectId, request.account!.id);
+    });
+    return projectVoiceSettings(projectId);
   });
 }

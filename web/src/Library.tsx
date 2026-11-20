@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api, assetUrl, uploadFile } from './api.ts';
-import { formatBytes, formatDuration } from './format.ts';
+import { formatBytes, formatDuration, formatDate } from './format.ts';
 import type { LibFile, LibFolder, LibListing, NoteItem } from './types.ts';
 import { Confirm, Dialog, MenuButton, errorText, useLocalState } from './ui.tsx';
 import { AssetNoteIcons, useNotes } from './notesContext.tsx';
@@ -386,7 +386,7 @@ export function FileInfoPanel({ file, notes, onOpenCue, onShowNote, onError, onC
     ['Sample rate', khz ? `${khz}${file.channels ? (file.channels === 1 ? ' · mono' : ' · stereo') : ''}` : '–'],
     ['Size', formatBytes(file.size)],
     ...(file.sizeLightweight ? [['MP3 copy', formatBytes(file.sizeLightweight)] as [string, string]] : []),
-    ['Added', new Date(file.createdAt).toLocaleDateString()],
+    ['Added', formatDate(file.createdAt)],
   ];
   return (
     <section className="lib-info" aria-label="File info">

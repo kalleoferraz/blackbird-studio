@@ -6,7 +6,7 @@ import { newUlid } from '../db/ids.js';
 import { touchProject } from '../db/touch.js';
 import { asset, assetPeaks, chapter, character, clip, cue, cueSfx, generation, lane, membership, note, project, scene, segment } from '../db/schema.js';
 import { parseVoiceSettings } from '../voice/character-voice.js';
-import type { VoiceSettings } from '../shared/voice.js';
+import { isOutputFormat, type VoiceSettings } from '../shared/voice.js';
 import { PITCH_MAX_CENTS, SPEED_MAX, SPEED_MIN, cleanPoints, type VolumePoint } from '../shared/audio-settings.js';
 import { COLOUR_PATTERN } from '../shared/palette.js';
 import { languageProfile } from '../shared/languages.js';
@@ -146,6 +146,7 @@ export async function buildBundle(q: Q, projectId: string): Promise<Json> {
     project: {
       type: p.type, title: p.title, subtitle: p.subtitle, language: p.language, repoFolder: p.repoFolder,
       speechUnits: p.speechUnits, speechMs: p.speechMs, cover: p.coverAssetId === null ? null : assetNo.get(p.coverAssetId) ?? null,
+      voiceModel: p.voiceModel, voiceOutputFormat: p.voiceOutputFormat,
     },
     assets: assets.map((a) => ({
       path: a.path, hash: a.hash, mediaKind: a.mediaKind, size: a.size, sizeLightweight: a.sizeLightweight, lightweightPath: a.lightweightPath,
@@ -283,6 +284,9 @@ export function parseBundle(raw: unknown) {
     language: str(p.language, 'project.language', 10),
     repoFolder: ((): string | null => { const f = optStr(p.repoFolder, 'project.repoFolder', 200); return f === null ? null : cleanFolder(f); })(),
     speechUnits: typeof p.speechUnits === 'number' && p.speechUnits >= 0 && p.speechUnits < 1e12 ? p.speechUnits : 0,
+    // Optional (older files have none); an unknown model or format is dropped, so the defaults apply.
+    voiceModel: typeof p.voiceModel === 'string' && /^[\w.-]{1,64}$/.test(p.voiceModel) ? p.voiceModel : null,
+    voiceOutputFormat: typeof p.voiceOutputFormat === 'string' && isOutputFormat(p.voiceOutputFormat) ? p.voiceOutputFormat : null,
     speechMs: int(p.speechMs ?? 0, 'project.speechMs', 0, Number.MAX_SAFE_INTEGER),
     cover: optInt(p.cover, 'project.cover', 0, 1_000_000),
   };
@@ -496,7 +500,7 @@ export async function importBundle(userId: string, raw: unknown, folderOverride?
     const now = new Date();
     const projectId = newUlid();
     await tx.insert(project).values({
-      id: projectId, type: proj.type, title: proj.title, subtitle: proj.subtitle, language: proj.language, speechUnits: proj.speechUnits, speechMs: proj.speechMs,
+      id: projectId, type: proj.type, title: proj.title, subtitle: proj.subtitle, language: proj.language, speechUnits: proj.speechUnits, speechMs: proj.speechMs, voiceModel: proj.voiceModel, voiceOutputFormat: proj.voiceOutputFormat,
       revision: 0, repoFolder: wanted, createdAt: now, updatedAt: now,
     });
     await tx.insert(membership).values({ userId, projectId, role: 'author', createdAt: now });

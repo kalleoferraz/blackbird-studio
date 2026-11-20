@@ -163,7 +163,8 @@ function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChange
   const audio = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState<string | null>(null);
   const [managing, setManaging] = useState<VoiceRow | null>(null);
-  const status = useVoiceStatus();
+  const [model, setModel] = useState<string | undefined>(undefined);
+  useEffect(() => { void api<{ model: string }>('GET', `/api/projects/${projectId}/voices/settings`).then((r) => setModel(r.model)).catch(() => undefined); }, [projectId]);
   const sample = useSamplePlayer(projectId, character.id);
   const sampleText = useSampleText();
   useEffect(() => () => { audio.current?.pause(); }, []);
@@ -237,7 +238,7 @@ function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChange
       </form>}
       {tab === 'account' && langPick !== 'all' && <p className="muted small">Multilingual voices can speak other languages too; choose "All languages" to see every voice in the account.</p>}
       <div className="sample-bar">
-        <label>Sample text <span className="muted small">({sampleText.found ? 'the start of the selected cue' : 'select a cue in the script, or type a line'}; spoken in the project's language with {character.name}'s directions, about {sampleCredits(sampleText.text, status?.model)} credits per voice, free to hear again)</span>
+        <label>Sample text <span className="muted small">({sampleText.found ? 'the start of the selected cue' : 'select a cue in the script, or type a line'}; spoken in the project's language with {character.name}'s directions, about {sampleCredits(sampleText.text, model)} credits per voice, free to hear again)</span>
           <input value={sampleText.text} maxLength={200} onChange={(e) => sampleText.setText(e.target.value)} placeholder="A line to hear each voice speak" /></label>
       </div>
       {sample.error && <p className="error">{sample.error}</p>}
@@ -248,7 +249,7 @@ function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChange
             <button type="button" className="voice-play" disabled={!r.previewUrl} title={r.previewUrl ? 'Listen' : 'No preview'} onClick={() => play(r)}>{playing === r.voiceId ? '■' : '▶'}</button>
             <div className="grow"><b>{r.name}</b><div className="muted small">{r.info}{r.note ? <> · <span className="voice-note">{r.note}</span></> : null}</div></div>
             <button type="button" className="voice-sample" disabled={!sampleText.text.trim() || (sample.loading !== null && sample.loading !== r.voiceId)}
-              title={`Hear this voice speak the sample text (about ${sampleCredits(sampleText.text, status?.model)} credits)`}
+              title={`Hear this voice speak the sample text (about ${sampleCredits(sampleText.text, model)} credits)`}
               onClick={() => { audio.current?.pause(); setPlaying(null); void sample.play(r.voiceId, r.voiceId, sampleText.text.trim()); }}>
               {sample.playing === r.voiceId ? '■ Sample' : sample.loading === r.voiceId ? '…' : '▶ Sample'}</button>
             {r.cloned && <button type="button" disabled={busy} onClick={() => setManaging(r)}>Manage</button>}

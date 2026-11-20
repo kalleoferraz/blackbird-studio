@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { api } from './api.ts';
 
-export interface VoiceStatus { enabled: boolean; reason?: string; model?: string; outputFormat?: string }
+export interface VoiceStatus { enabled: boolean; reason?: string }
 
 let cached: Promise<VoiceStatus> | null = null;
 export const voiceStatus = () => (cached ??= api<VoiceStatus>('GET', '/api/voices/status').catch(() => ({ enabled: false, reason: 'The voice settings could not be read.' })));

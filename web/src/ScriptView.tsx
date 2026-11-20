@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as RPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
 import { api, assetUrl, uploadFile } from './api.ts';
 import { go } from './App.tsx';
 import type { Character, LibListing, Me, NoteFocus, NoteItem, NoteRequest, NoteTargetKind, ProjectCard, SegmentContent, Story } from './types.ts';
@@ -10,7 +10,7 @@ import { PlaceholderContext } from './characterArt.tsx';
 import { RightPanel, type CharacterDialogState } from './RightPanel.tsx';
 import { ago, cueCountOrder, inOrder } from './format.ts';
 import { BlackbirdIcon } from './Brand.tsx';
-import { MenuButton, errorText, useIsMobile, useLocalState, type MenuItem } from './ui.tsx';
+import { ChangeCount, MenuButton, errorText, useIsMobile, useLocalState, type MenuItem } from './ui.tsx';
 import { NavBar } from './NavBar.tsx';
 import { MobileAudioPanel } from './MobileAudio.tsx';
 import { accountItems } from './AccountMenu.tsx';
@@ -23,6 +23,7 @@ import { Timeline } from './Timeline.tsx';
 import { AudioPlayer } from './audio-playback.ts';
 import { LibPlayContext, LibraryPlayer, type LibTrack } from './libplayer.ts';
 import { FileInfoPanel } from './Library.tsx';
+import { IntegrationsDialog } from './Integrations.tsx';
 
 export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { me: Me; projectId: string; segmentId?: string; onAccount: () => void; onLogout: () => void }) {
   const [project, setProject] = useState<ProjectCard | null>(null);
@@ -326,6 +327,7 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
     catch (e) { setError(errorText(e)); }
   };
 
+  const [integrations, setIntegrations] = useState(false);
   const saveSnapshot = async () => {
     setSaving(true); setSaved(''); setError('');
     try { await api('POST', `/api/projects/${projectId}/snapshot`, {}); setSaved('Snapshot saved.'); await loadProject(); }
@@ -348,7 +350,7 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
           <div className={'m-title' + (mview === 'characters' && dialog ? ' tap' : '')} onClick={() => { if (mview === 'characters' && dialog) closeEditor(!!dialog.then); }}><b>{mview === 'script' ? project.title : MOBILE_VIEWS.find((v) => v.id === mview)!.label}</b>
             {(mview !== 'script' || readOnly) && <span>{mview === 'script' ? 'view only' : project.title + (readOnly ? ' · view only' : '')}</span>}</div>
           <MenuButton className="m-menu" title="Menu" items={mobileMenu(mview, (v) => (v === 'characters' && mview === 'characters' && dialog ? closeEditor(!!dialog.then) : showView(v)), {
-            readOnly: !!readOnly, saving, status: project.dirtySince ? 'unsaved' : ago(project.lastSnapshotAt), onSnapshot: () => void saveSnapshot(),
+            readOnly: !!readOnly, saving, status: project.dirtySince ? <ChangeCount n={project.changesSinceSnapshot} /> : ago(project.lastSnapshotAt), onSnapshot: () => void saveSnapshot(), onIntegrations: () => setIntegrations(true),
             onProject: () => go(`/p/${projectId}`), onProjects: () => go('/'), onAccount, onLogout })}>
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
           </MenuButton>
@@ -362,14 +364,17 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
         {saved && <span className="muted">{saved}</span>}
         <span className="muted small">{project.dirtySince ? 'Unsaved changes' : `Snapshot ${ago(project.lastSnapshotAt)}`}{readOnly && ' · view only'}</span>
         <MenuButton className="m-menu" title="Menu" items={[
-          ...(readOnly ? [] : [{ label: saving ? 'Saving…' : 'Save snapshot', hint: project.dirtySince ? 'unsaved' : ago(project.lastSnapshotAt), disabled: saving, onClick: () => void saveSnapshot() } as MenuItem]),
           { label: 'Project properties', onClick: () => go(`/p/${projectId}`) },
           { label: 'All projects', onClick: () => go('/') },
+          'sep',
+          ...(readOnly ? [] : [{ label: saving ? 'Saving…' : 'Save snapshot', hint: project.dirtySince ? <ChangeCount n={project.changesSinceSnapshot} /> : ago(project.lastSnapshotAt), disabled: saving, onClick: () => void saveSnapshot() } as MenuItem]),
+          { label: 'Integrations', onClick: () => setIntegrations(true) },
           'sep', ...accountItems(onAccount, onLogout),
         ]}>
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
         </MenuButton>
       </header>)}
+      {integrations && <IntegrationsDialog projectId={projectId} onClose={() => setIntegrations(false)} />}
       {isMobile && (error || saved) && <div className={'m-banner ' + (error ? 'error' : 'muted')} onClick={() => { setError(''); setSaved(''); }}>{error || saved}</div>}
       <div className="script-body" data-mview={isMobile ? mview : undefined} style={{ '--lw': `${leftW}px`, '--rw': `${rightW}px` } as CSSProperties}>
         {!isMobile && <Splitter side="left" width={leftW} onChange={setLeftW} />}
@@ -429,14 +434,16 @@ const MOBILE_VIEWS: { id: MobileView; label: string }[] = [
 
 /** The phone's menu: which panel fills the screen, then the actions the desktop top bar has. */
 function mobileMenu(current: MobileView, show: (v: MobileView) => void, o: {
-  readOnly: boolean; saving: boolean; status: string; onSnapshot: () => void; onProject: () => void; onProjects: () => void; onAccount: () => void; onLogout: () => void;
+  readOnly: boolean; saving: boolean; status: ReactNode; onSnapshot: () => void; onIntegrations: () => void; onProject: () => void; onProjects: () => void; onAccount: () => void; onLogout: () => void;
 }): MenuItem[] {
   return [
     ...MOBILE_VIEWS.map((v): MenuItem => ({ label: v.label, checked: v.id === current, onClick: () => show(v.id) })),
     'sep',
-    ...(o.readOnly ? [] : [{ label: o.saving ? 'Saving…' : 'Save snapshot', hint: o.status, disabled: o.saving, onClick: o.onSnapshot } as MenuItem]),
     { label: 'Project properties', onClick: o.onProject },
     { label: 'All projects', onClick: o.onProjects },
+    'sep',
+    ...(o.readOnly ? [] : [{ label: o.saving ? 'Saving…' : 'Save snapshot', hint: o.status, disabled: o.saving, onClick: o.onSnapshot } as MenuItem]),
+    { label: 'Integrations', onClick: o.onIntegrations },
     'sep',
     ...accountItems(o.onAccount, o.onLogout),
   ];

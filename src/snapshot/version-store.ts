@@ -45,6 +45,17 @@ export class GitHubVersionStore implements VersionStore {
     return new GitHubVersionStore(m[1]!, m[2]!, c.token, c.branch ?? undefined);
   }
 
+  /** Where snapshots go, for showing in the app. */
+  get where(): { repo: string; branch: string | null } { return { repo: `${this.owner}/${this.repo}`, branch: this.branch ?? null }; }
+
+  /** The newest commit of the snapshot branch (any project's), with its time and address. */
+  async head(): Promise<{ branch: string; sha: string; date: string | null; message: string; url: string }> {
+    const { owner, repo } = this;
+    const branch = this.branch ?? (await this.octokit.rest.repos.get({ owner, repo })).data.default_branch;
+    const c = (await this.octokit.rest.repos.getBranch({ owner, repo, branch })).data.commit;
+    return { branch, sha: c.sha, date: c.commit.committer?.date ?? c.commit.author?.date ?? null, message: c.commit.message.split('\n')[0] ?? '', url: c.html_url };
+  }
+
   /** Checks that the token reaches the repository, can write to it, and that the branch exists. */
   async check(): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
     const { owner, repo } = this;

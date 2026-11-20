@@ -74,7 +74,7 @@ export const dropVariation = (id: string) => waiting.delete(id);
 /** Generates `count` variations, one API call each; the ones that fail are reported, the others wait to be kept. */
 export async function generateVariations(o: { cueId: string; projectId: string; userId: string; settings: SfxSettings; count: number }):
   Promise<{ variations: { id: string; contentType: string }[]; errors: string[] }> {
-  const { client, outputFormat } = await elevenLabs();
+  const { client, outputFormat } = await elevenLabs(o.projectId);
   const s = o.settings;
   const results = await Promise.allSettled(Array.from({ length: o.count }, () =>
     client.soundEffect({ text: s.prompt, durationSeconds: s.durationMs === null ? null : s.durationMs / 1000, loop: s.loop, promptInfluence: s.promptInfluence, modelId: s.model }, outputFormat)));

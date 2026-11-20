@@ -1,0 +1,2 @@
+ALTER TABLE `project` ADD `voice_model` varchar(64) character set ascii collate ascii_bin;--> statement-breakpoint
+ALTER TABLE `project` ADD `voice_output_format` varchar(40) character set ascii collate ascii_bin;

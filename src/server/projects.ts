@@ -60,7 +60,7 @@ async function cards(q: Q, userId: string, onlyProjectId?: string) {
     .where(inArray(chapter.projectId, ids))
     .groupBy(chapter.projectId);
   const lastSnaps = await q
-    .select({ projectId: snapshot.projectId, at: max(snapshot.createdAt) })
+    .select({ projectId: snapshot.projectId, at: max(snapshot.createdAt), rev: max(snapshot.revision) })
     .from(snapshot)
     .where(inArray(snapshot.projectId, ids))
     .groupBy(snapshot.projectId);
@@ -102,6 +102,8 @@ async function cards(q: Q, userId: string, onlyProjectId?: string) {
     createdAt: p.createdAt.toISOString(),
     lastEditedAt: p.lastEditedAt ? p.lastEditedAt.toISOString() : null,
     dirtySince: p.dirtySince ? p.dirtySince.toISOString() : null,
+    // Saves since the last snapshot (Bible, decision log 2026-11-20): the revision counter minus the one the last snapshot recorded.
+    changesSinceSnapshot: p.dirtySince ? Math.max(1, Number(p.revision) - Number(ls.get(p.id)?.rev ?? 0)) : 0,
     lastSnapshotAt: ls.get(p.id)?.at ? new Date(ls.get(p.id)!.at as Date).toISOString() : null,
     chapterCount: Number(cc.get(p.id)?.n ?? 0),
     sizeBytes: Number(sz.get(p.id)?.size ?? 0) + Number(sz.get(p.id)?.light ?? 0),
