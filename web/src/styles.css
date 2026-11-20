@@ -784,3 +784,13 @@ label.vs-check { display: flex; gap: 8px; align-items: center; margin: .5em 0; }
 .script.m-land.tl-on .script-body { flex: 0 0 0; overflow: hidden; visibility: hidden; }
 .script.m-land.tl-on .timeline { flex: 1 1 auto; height: auto !important; border-top: 0; }
 .script.m-land.tl-on .tl-divider { display: none; }
+
+/* A cue's level under the pointer (median in the middle, quietest and loudest relative to it at the sides). */
+.tl-level { position: absolute; left: 4px; right: 4px; bottom: 2px; display: none; align-items: center; justify-content: center; gap: 6px; pointer-events: none; font-size: .68rem; line-height: 1.2; font-variant-numeric: tabular-nums; color: var(--text); }
+.tl-level b { padding: 0 5px; border-radius: 4px; background: color-mix(in srgb, var(--bg, #0E0B10) 80%, transparent); font-weight: 600; }
+.tl-level .lo, .tl-level .hi { position: absolute; bottom: 0; padding: 0 3px; border-radius: 3px; background: color-mix(in srgb, var(--bg, #0E0B10) 70%, transparent); color: var(--muted); }
+.tl-level .lo { left: 0; } .tl-level .hi { right: 0; }
+.tl-cue:hover .tl-level { display: flex; }
+
+/* The value of an automation point under the pointer or being dragged. */
+.tl-envelope.edit .env-value { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; fill: var(--text); stroke: var(--bg, #0E0B10); stroke-width: 3px; paint-order: stroke; pointer-events: none; }
