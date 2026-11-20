@@ -22,6 +22,11 @@ export interface SharedVoiceItem {
   freeUsersAllowed: boolean | null; isAddedByUser: boolean | null;
 }
 
+export interface VoiceDetail {
+  voiceId: string; name: string; category: string | null; description: string | null; previewUrl: string | null;
+  samples: { sampleId: string; fileName: string; durationSecs: number | null; mimeType: string | null }[];
+}
+
 export interface Audio { data: Buffer; contentType: string; requestId: string | null; characterCost: number | null }
 
 interface CallOptions { query?: Record<string, string | number | boolean | undefined | null>; json?: unknown; form?: FormData; timeoutMs?: number }
@@ -137,6 +142,39 @@ export class ElevenLabs {
     const form = new FormData();
     form.set('name', name);
     await this.call('POST', `/v1/voices/${encodeURIComponent(voiceId)}/edit`, 'renaming a voice', { form });
+  }
+
+  /** One voice with its samples (a clone keeps the recordings it was made from). */
+  async voice(voiceId: string): Promise<VoiceDetail> {
+    const v = await this.json<Record<string, any>>('GET', `/v1/voices/${encodeURIComponent(voiceId)}`, 'reading a voice');
+    return {
+      voiceId: v.voice_id, name: v.name ?? '', category: v.category ?? null, description: v.description ?? null, previewUrl: v.preview_url ?? null,
+      samples: (v.samples ?? []).map((x: Record<string, any>) => ({ sampleId: x.sample_id, fileName: x.file_name ?? '', durationSecs: x.duration_secs ?? null, mimeType: x.mime_type ?? null })),
+    };
+  }
+
+  /** Renames a voice, changes its description and/or adds samples (the name is always sent; the API requires it). */
+  async edit(voiceId: string, o: { name: string; description?: string | null; files?: { name: string; data: Uint8Array; type: string }[]; removeNoise?: boolean }): Promise<void> {
+    const form = new FormData();
+    form.set('name', o.name);
+    if (o.description !== undefined) form.set('description', o.description ?? '');
+    for (const f of o.files ?? []) form.append('files', new Blob([new Uint8Array(f.data)], { type: f.type }), f.name);
+    if (o.removeNoise) form.set('remove_background_noise', 'true');
+    await this.call('POST', `/v1/voices/${encodeURIComponent(voiceId)}/edit`, 'editing a voice', { form, timeoutMs: 180_000 });
+  }
+
+  async deleteVoice(voiceId: string): Promise<void> {
+    await this.call('DELETE', `/v1/voices/${encodeURIComponent(voiceId)}`, 'removing a voice');
+  }
+
+  async deleteSample(voiceId: string, sampleId: string): Promise<void> {
+    await this.call('DELETE', `/v1/voices/${encodeURIComponent(voiceId)}/samples/${encodeURIComponent(sampleId)}`, 'removing a sample');
+  }
+
+  /** The audio of a sample (playing it costs nothing). */
+  async sampleAudio(voiceId: string, sampleId: string): Promise<{ data: Buffer; contentType: string }> {
+    const res = await this.call('GET', `/v1/voices/${encodeURIComponent(voiceId)}/samples/${encodeURIComponent(sampleId)}/audio`, 'reading a sample');
+    return { data: Buffer.from(await res.arrayBuffer()), contentType: res.headers.get('content-type') ?? 'audio/mpeg' };
   }
 
   /** Instant voice cloning. */

@@ -2,10 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import { and, eq, inArray } from 'drizzle-orm';
 import { inTransaction, withDb } from '../db/client.js';
 import { touchProject } from '../db/touch.js';
-import { asset, character, project } from '../db/schema.js';
+import { asset, character, membership, project } from '../db/schema.js';
 import { blobStore } from '../storage/blob-store.js';
 import { voiceSamplesFolder } from '../library/managed.js';
-import { elevenLabs } from '../voice/elevenlabs.js';
+import { elevenLabs, type ElevenLabs } from '../voice/elevenlabs.js';
 import { projectTitle, retireVoice, voiceName } from '../voice/character-voice.js';
 import { accessTo, accessToEntity, checkId } from './access.js';
 import { authenticate } from './auth-routes.js';
@@ -183,5 +183,115 @@ export function registerVoiceRoutes(app: FastifyInstance): void {
     });
     if (cur.voiceId && cur.voiceId !== made.voiceId) await withDb((db) => retireVoice(db, client, cur, request.log));
     return { ...characterView(row), requiresVerification: made.requiresVerification };
+  });
+
+  // ---- managing a cloned voice: rename, description, samples, remove ----------------------------------
+
+  /** The clone, or 400 when the voice is not one (built-in and library voices are not managed here). */
+  const cloneOf = async (client: ElevenLabs, voiceId: string) => {
+    if (!VOICE_ID.test(voiceId)) throw badRequest('invalid_voiceId');
+    const v = await client.voice(voiceId);
+    if (v.category !== 'cloned') throw new HttpError(400, 'not_a_clone', 'Only cloned voices can be renamed, edited or removed here.');
+    return v;
+  };
+  /** The characters that use a voice, in every project. Projects the user is not a member of are only counted. */
+  const usersOf = async (userId: string, voiceId: string) => withDb(async (db) => {
+    const rows = await db.select({ characterId: character.id, name: character.name, projectId: character.projectId, title: project.title })
+      .from(character).innerJoin(project, eq(project.id, character.projectId)).where(eq(character.voiceId, voiceId));
+    const mine = new Set((await db.select({ p: membership.projectId }).from(membership).where(eq(membership.userId, userId))).map((m) => m.p));
+    return {
+      characters: rows.filter((r) => mine.has(r.projectId)).map((r) => ({ characterId: r.characterId, name: r.name, projectId: r.projectId, project: r.title })),
+      elsewhere: rows.filter((r) => !mine.has(r.projectId)).length,
+      projectIds: [...new Set(rows.map((r) => r.projectId))],
+    };
+  });
+  const authorOf = (request: { account?: { id: string } }, projectId: string) => withDb((db) => accessTo(db, request.account!.id, projectId, { edit: true }));
+
+  app.get('/api/projects/:id/voices/clones/:voiceId', auth, async (request) => {
+    const { id, voiceId } = request.params as { id: string; voiceId: string };
+    await authorOf(request, checkId(id));
+    const { client } = await elevenLabs();
+    const v = await cloneOf(client, voiceId);
+    const used = await usersOf(request.account!.id, voiceId);
+    return { voiceId: v.voiceId, name: v.name, description: v.description, samples: v.samples, usedBy: used.characters, usedElsewhere: used.elsewhere };
+  });
+
+  /** Renames a clone and/or changes its description; the name is updated on every character that uses it. */
+  app.patch('/api/projects/:id/voices/clones/:voiceId', { ...auth, bodyLimit: 8192 }, async (request) => {
+    const { id, voiceId } = request.params as { id: string; voiceId: string };
+    await authorOf(request, checkId(id));
+    const b = asBody(request.body);
+    const { client } = await elevenLabs();
+    const v = await cloneOf(client, voiceId);
+    const name = 'name' in b ? reqString(b, 'name', 100) : v.name;
+    const description = 'description' in b ? (b.description === null ? null : typeof b.description === 'string' && b.description.length <= 500 ? b.description.trim() : (() => { throw badRequest('invalid_description'); })()) : undefined;
+    await client.edit(voiceId, { name, description });
+    if (name !== v.name) {
+      const used = await usersOf(request.account!.id, voiceId);
+      await inTransaction(async (tx) => {
+        await tx.update(character).set({ voiceName: name, updatedAt: new Date() }).where(eq(character.voiceId, voiceId));
+        for (const p of used.projectIds) await touchProject(tx, p, request.account!.id);
+      });
+    }
+    return { ok: true, name };
+  });
+
+  /** Adds samples from the project's library to a clone. */
+  app.post('/api/projects/:id/voices/clones/:voiceId/samples', { ...auth, bodyLimit: 8192 }, async (request) => {
+    const { id, voiceId } = request.params as { id: string; voiceId: string };
+    const projectId = checkId(id);
+    await authorOf(request, projectId);
+    const b = asBody(request.body);
+    if (b.consent !== true) throw new HttpError(400, 'consent_required', 'Confirm that you have the right and the consent to use these recordings of this voice.');
+    const ids = Array.isArray(b.assetIds) ? b.assetIds : [];
+    if (!ids.length || ids.length > 25 || !ids.every((x) => typeof x === 'string')) throw badRequest('invalid_assetIds', 'Choose from 1 to 25 audio files.');
+    ids.forEach(checkId);
+    const files = await withDb((db) => db.select().from(asset).where(and(eq(asset.projectId, projectId), inArray(asset.id, ids as string[]))));
+    if (files.length !== ids.length) throw badRequest('invalid_assetIds', 'Some files are not in this project.');
+    for (const f of files) {
+      if (f.mediaKind !== 'audio') throw badRequest('not_audio', `${f.path} is not audio.`);
+      if (f.status !== 'ready') throw new HttpError(409, 'not_ready', `${f.path} is still being processed.`);
+      if (durationOf(f) < MIN_SAMPLE_MS) throw badRequest('sample_too_short', `${f.path} is shorter than 5 seconds; every sample needs at least 5 seconds.`);
+    }
+    const { client } = await elevenLabs();
+    const v = await cloneOf(client, voiceId);
+    await client.edit(voiceId, { name: v.name, files: await Promise.all(files.map(assetAudio)), removeNoise: b.removeNoise === true });
+    return { samples: (await client.voice(voiceId)).samples };
+  });
+
+  app.delete('/api/projects/:id/voices/clones/:voiceId/samples/:sampleId', auth, async (request) => {
+    const { id, voiceId, sampleId } = request.params as { id: string; voiceId: string; sampleId: string };
+    await authorOf(request, checkId(id));
+    if (!VOICE_ID.test(sampleId)) throw badRequest('invalid_sampleId');
+    const { client } = await elevenLabs();
+    const v = await cloneOf(client, voiceId);
+    if (v.samples.length <= 1) throw new HttpError(409, 'last_sample', 'A clone needs at least one sample: add another before removing this one.');
+    await client.deleteSample(voiceId, sampleId);
+    return { samples: (await client.voice(voiceId)).samples };
+  });
+
+  /** Plays a sample through the server, which holds the key. */
+  app.get('/api/projects/:id/voices/clones/:voiceId/samples/:sampleId/audio', auth, async (request, reply) => {
+    const { id, voiceId, sampleId } = request.params as { id: string; voiceId: string; sampleId: string };
+    await authorOf(request, checkId(id));
+    if (!VOICE_ID.test(voiceId) || !VOICE_ID.test(sampleId)) throw badRequest('invalid_request');
+    const { client } = await elevenLabs();
+    const a = await client.sampleAudio(voiceId, sampleId);
+    return reply.header('content-type', a.contentType).header('cache-control', 'private, max-age=300').send(a.data);
+  });
+
+  /** Removes a clone from the ElevenLabs account; every character that used it, in any project, loses its voice. Takes stay. */
+  app.delete('/api/projects/:id/voices/clones/:voiceId', auth, async (request) => {
+    const { id, voiceId } = request.params as { id: string; voiceId: string };
+    await authorOf(request, checkId(id));
+    const { client } = await elevenLabs();
+    await cloneOf(client, voiceId);
+    const used = await usersOf(request.account!.id, voiceId);
+    await client.deleteVoice(voiceId);
+    await inTransaction(async (tx) => {
+      await tx.update(character).set({ voiceId: null, voiceName: null, voiceSource: null, updatedAt: new Date() }).where(eq(character.voiceId, voiceId));
+      for (const p of used.projectIds) await touchProject(tx, p, request.account!.id);
+    });
+    return { ok: true, charactersCleared: used.characters.length + used.elsewhere };
   });
 }

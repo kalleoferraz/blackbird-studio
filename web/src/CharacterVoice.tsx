@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api, uploadFile } from './api.ts';
 import type { Character, LibFile, LibListing, VoiceSettings } from './types.ts';
-import { Dialog, errorText } from './ui.tsx';
+import { Confirm, Dialog, errorText } from './ui.tsx';
 import { useVoiceStatus } from './voiceStatus.ts';
 import { VOICE_LANGUAGES } from '../../src/shared/voice.ts';
 import { MicRecorder, encodeWav, type Take } from './recorder.ts';
@@ -16,6 +16,7 @@ export function CharacterVoice({ projectId, character, readOnly, onSaved }: {
   const status = useVoiceStatus();
   const [picker, setPicker] = useState(false);
   const [clone, setClone] = useState(false);
+  const [manage, setManage] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [direction, setDirection] = useState(character.voiceDirection ?? '');
@@ -41,6 +42,7 @@ export function CharacterVoice({ projectId, character, readOnly, onSaved }: {
       {!readOnly && <div className="row voice-actions">
         <button type="button" disabled={!canEdit || busy} onClick={() => setPicker(true)}>{v ? 'Change voice…' : 'Choose voice…'}</button>
         <button type="button" disabled={!canEdit || busy || !character.folder} onClick={() => setClone(true)}>Clone voice…</button>
+        {v?.source === 'clone' && <button type="button" disabled={!canEdit || busy} onClick={() => setManage(true)}>Manage clone…</button>}
         {v && <button type="button" disabled={!canEdit || busy} onClick={() => void run(() => api<Character>('DELETE', `/api/characters/${character.id}/voice`))}>Remove voice</button>}
       </div>}
       <label>Voice Settings (directions)
@@ -49,8 +51,10 @@ export function CharacterVoice({ projectId, character, readOnly, onSaved }: {
       <VoiceSliders value={settings} disabled={readOnly} onChange={setSettings} />
       {!readOnly && <div className="row end"><button type="button" className="primary" disabled={busy || !changed} onClick={() => void saveSettings()}>Save voice settings</button></div>}
       {error && <p className="error">{error}</p>}
-      {picker && <VoicePicker projectId={projectId} character={character} onClose={() => setPicker(false)} onSaved={(c) => { setPicker(false); onSaved(c); }} />}
+      {picker && <VoicePicker projectId={projectId} character={character} onClose={() => setPicker(false)} onSaved={(c) => { setPicker(false); onSaved(c); }} onCharacterChanged={onSaved} />}
       {clone && character.folder && <CloneDialog projectId={projectId} character={character} onClose={() => setClone(false)} onSaved={(c) => { setClone(false); onSaved(c); }} />}
+      {manage && v && <ManageClone projectId={projectId} voiceId={v.id} character={character} onClose={() => setManage(false)}
+        onChanged={(ch) => onSaved(ch === 'removed' ? { ...character, voice: null } : { ...character, voice: { ...v, name: ch.name } })} />}
     </section>
   );
 }
@@ -89,10 +93,14 @@ export function VoiceSliders({ value, disabled, onChange }: { value: VoiceSettin
     </div>);
 }
 
-interface VoiceRow { voiceId: string; name: string; previewUrl: string | null; info: string; publicOwnerId?: string; note?: string; characters?: string[] }
+interface VoiceRow { voiceId: string; name: string; previewUrl: string | null; info: string; publicOwnerId?: string; note?: string; characters?: string[]; cloned?: boolean }
 type Tab = 'project' | 'account' | 'public';
 
-function VoicePicker({ projectId, character, onClose, onSaved }: { projectId: string; character: Character; onClose: () => void; onSaved: (c: Character) => void }) {
+function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChanged }: {
+  projectId: string; character: Character; onClose: () => void; onSaved: (c: Character) => void;
+  /** The character's voice was renamed or removed while managing a clone (the picker stays open). */
+  onCharacterChanged: (c: Character) => void;
+}) {
   const [tab, setTab] = useState<Tab>('project');
   const [search, setSearch] = useState('');
   const [rows, setRows] = useState<VoiceRow[]>([]);
@@ -105,6 +113,7 @@ function VoicePicker({ projectId, character, onClose, onSaved }: { projectId: st
   const [busy, setBusy] = useState(false);
   const audio = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState<string | null>(null);
+  const [managing, setManaging] = useState<VoiceRow | null>(null);
   useEffect(() => () => { audio.current?.pause(); }, []);
 
   const load = async (append: boolean) => {
@@ -122,7 +131,7 @@ function VoicePicker({ projectId, character, onClose, onSaved }: { projectId: st
       } else if (tab === 'account') {
         const r = await api<{ projectLanguage: string | null; voices: { voiceId: string; name: string; previewUrl: string | null; category: string | null; labels: Record<string, string> }[]; nextPageToken: string | null }>('GET', `/api/projects/${projectId}/voices/account?${q}`);
         setProjectLanguage(r.projectLanguage);
-        got = r.voices.map((x) => ({ voiceId: x.voiceId, name: x.name, previewUrl: x.previewUrl, info: [x.category, ...Object.values(x.labels ?? {})].filter(Boolean).join(' · ') }));
+        got = r.voices.map((x) => ({ voiceId: x.voiceId, name: x.name, previewUrl: x.previewUrl, cloned: x.category === 'cloned', info: [x.category, ...Object.values(x.labels ?? {})].filter(Boolean).join(' · ') }));
         next = r.nextPageToken ? { token: r.nextPageToken } : null;
       } else {
         const page = append ? more?.page ?? 0 : 0;
@@ -180,6 +189,7 @@ function VoicePicker({ projectId, character, onClose, onSaved }: { projectId: st
           <li key={r.publicOwnerId ? r.publicOwnerId + '/' + r.voiceId : r.voiceId} className={r.voiceId === character.voice?.id ? 'current' : ''}>
             <button type="button" className="voice-play" disabled={!r.previewUrl} title={r.previewUrl ? 'Listen' : 'No preview'} onClick={() => play(r)}>{playing === r.voiceId ? '■' : '▶'}</button>
             <div className="grow"><b>{r.name}</b><div className="muted small">{r.info}{r.note ? <> · <span className="voice-note">{r.note}</span></> : null}</div></div>
+            {r.cloned && <button type="button" disabled={busy} onClick={() => setManaging(r)}>Manage</button>}
             <button type="button" disabled={busy || r.voiceId === character.voice?.id} onClick={() => void use(r)}>{r.voiceId === character.voice?.id ? 'In use' : tab === 'public' ? 'Add and use' : 'Use'}</button>
           </li>))}
       </ul>
@@ -188,12 +198,18 @@ function VoicePicker({ projectId, character, onClose, onSaved }: { projectId: st
       {more && !loading && <button type="button" onClick={() => void load(true)}>Load more</button>}
       {error && <p className="error">{error}</p>}
       <div className="row end"><button type="button" onClick={onClose}>Close</button></div>
+      {managing && <ManageClone projectId={projectId} voiceId={managing.voiceId} character={character} onClose={() => { setManaging(null); void load(false); }}
+        onChanged={(ch) => { if (managing.voiceId === character.voice?.id) onCharacterChanged(ch === 'removed' ? { ...character, voice: null } : { ...character, voice: { ...character.voice!, name: ch.name } }); }} />}
     </Dialog>);
 }
 
 const secs = (ms: number | null) => (ms === null ? '?' : `${(ms / 1000).toFixed(1)} s`);
 
-function CloneDialog({ projectId, character, onClose, onSaved }: { projectId: string; character: Character; onClose: () => void; onSaved: (c: Character) => void }) {
+function CloneDialog({ projectId, character, onClose, onSaved, addTo, onAdded }: {
+  projectId: string; character: Character; onClose: () => void; onSaved?: (c: Character) => void;
+  /** Adds the chosen samples to an existing clone instead of making a new one. */
+  addTo?: { voiceId: string; name: string }; onAdded?: () => void;
+}) {
   const folder = `Characters/${character.folder}/Voice Samples`;
   const [files, setFiles] = useState<LibFile[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -238,12 +254,17 @@ function CloneDialog({ projectId, character, onClose, onSaved }: { projectId: st
   const ready = chosen.length > 0 && chosen.every((f) => f.status === 'ready');
   const go = async () => {
     setBusy(true); setError('');
-    try { onSaved(await api<Character>('POST', `/api/characters/${character.id}/voice/clone`, { assetIds: chosen.map((f) => f.id), consent, removeNoise: noise })); }
+    try {
+      if (addTo) {
+        await api('POST', `/api/projects/${projectId}/voices/clones/${addTo.voiceId}/samples`, { assetIds: chosen.map((f) => f.id), consent, removeNoise: noise });
+        onAdded?.();
+      } else onSaved?.(await api<Character>('POST', `/api/characters/${character.id}/voice/clone`, { assetIds: chosen.map((f) => f.id), consent, removeNoise: noise }));
+    }
     catch (e) { setError(errorText(e)); }
     setBusy(false);
   };
   return (
-    <Dialog title={`Clone a voice for ${character.name}`} wide onClose={onClose}>
+    <Dialog title={addTo ? `Add samples to ${addTo.name}` : `Clone a voice for ${character.name}`} wide onClose={onClose}>
       <p className="muted small">Choose clean recordings of one speaker, without music, reverb or noise: each at least 5 seconds, 1 to 2 minutes in all. Files uploaded here are kept in {folder}.</p>
       <ul className="voice-list">
         {all.map((f) => (
@@ -265,7 +286,7 @@ function CloneDialog({ projectId, character, onClose, onSaved }: { projectId: st
       <label className="vs-check"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /> I have the right and the consent of the speaker to clone this voice.</label>
       {error && <p className="error">{error}</p>}
       <div className="row end"><button type="button" onClick={onClose}>Cancel</button>
-        <button type="button" className="primary" disabled={busy || !consent || !ready || total < 10_000} onClick={() => void go()}>{busy ? 'Working…' : 'Clone voice'}</button></div>
+        <button type="button" className="primary" disabled={busy || !consent || !ready || (!addTo && total < 10_000)} onClick={() => void go()}>{busy ? 'Working…' : addTo ? 'Add samples' : 'Clone voice'}</button></div>
     </Dialog>);
 }
 
@@ -337,4 +358,70 @@ function SampleRecorder({ characterName, onSave, onCancel }: { characterName: st
       )}
       {error && <p className="error">{error}</p>}
     </div>);
+}
+
+interface CloneDetail {
+  voiceId: string; name: string; description: string | null;
+  samples: { sampleId: string; fileName: string; durationSecs: number | null }[];
+  usedBy: { characterId: string; name: string; projectId: string; project: string }[]; usedElsewhere: number;
+}
+
+/** Rename a cloned voice, change its description, listen to, add and remove its samples, or remove the voice. */
+function ManageClone({ projectId, voiceId, character, onClose, onChanged }: {
+  projectId: string; voiceId: string; character: Character; onClose: () => void; onChanged: (c: { name: string } | 'removed') => void;
+}) {
+  const base = `/api/projects/${projectId}/voices/clones/${voiceId}`;
+  const [d, setD] = useState<CloneDetail | null>(null);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [askRemove, setAskRemove] = useState(false);
+  const [askSample, setAskSample] = useState<string | null>(null);
+  const load = async () => {
+    try { const r = await api<CloneDetail>('GET', base); setD(r); setName(r.name); setDescription(r.description ?? ''); } catch (e) { setError(errorText(e)); }
+  };
+  useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const run = async (fn: () => Promise<void>) => { setBusy(true); setError(''); try { await fn(); } catch (e) { setError(errorText(e)); } setBusy(false); };
+  const save = () => run(async () => {
+    const r = await api<{ name: string }>('PATCH', base, { name: name.trim(), description: description.trim() || null });
+    onChanged({ name: r.name }); await load();
+  });
+  const changed = !!d && (name.trim() !== d.name || (description.trim() || null) !== (d.description || null));
+  const users = d ? [...d.usedBy.map((u) => `${u.name} (${u.project})`), ...(d.usedElsewhere ? [`${d.usedElsewhere} character${d.usedElsewhere === 1 ? '' : 's'} in projects you are not a member of`] : [])] : [];
+  return (
+    <Dialog title="Manage cloned voice" wide onClose={() => { if (!busy) onClose(); }}>
+      {!d && !error && <p className="muted">Loading…</p>}
+      {d && <>
+        <label>Name in the ElevenLabs account<input value={name} maxLength={100} onChange={(e) => setName(e.target.value)} /></label>
+        <label>Description<textarea rows={2} maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} /></label>
+        <div className="row end"><button type="button" className="primary" disabled={busy || !changed || !name.trim()} onClick={() => void save()}>Save</button></div>
+        <h3 className="voice-sub">Samples</h3>
+        <ul className="voice-list">
+          {d.samples.map((x) => (
+            <li key={x.sampleId}>
+              <div className="grow">{x.fileName || x.sampleId}<div className="muted small">{x.durationSecs ? `${x.durationSecs.toFixed(1)} s` : ''}</div></div>
+              <audio controls preload="none" src={`${base}/samples/${x.sampleId}/audio`} className="sample-mini" />
+              <button type="button" disabled={busy || d.samples.length <= 1} title={d.samples.length <= 1 ? 'A clone needs at least one sample' : 'Remove this sample'} onClick={() => setAskSample(x.sampleId)}>Remove</button>
+            </li>))}
+        </ul>
+        {!d.samples.length && <p className="muted small">ElevenLabs lists no samples for this voice.</p>}
+        <div className="row"><button type="button" disabled={busy || !character.folder} onClick={() => setAdding(true)}>Add samples…</button></div>
+        <h3 className="voice-sub">Used by</h3>
+        <p className="muted small">{users.length ? users.join(', ') : 'No character uses this voice.'}</p>
+      </>}
+      {error && <p className="error">{error}</p>}
+      <div className="row end">
+        {d && <button type="button" className="danger" disabled={busy} onClick={() => setAskRemove(true)}>Remove voice…</button>}
+        <span className="grow" />
+        <button type="button" disabled={busy} onClick={onClose}>Close</button>
+      </div>
+      {adding && d && <CloneDialog projectId={projectId} character={character} addTo={{ voiceId, name: d.name }} onClose={() => setAdding(false)} onAdded={() => { setAdding(false); void load(); }} />}
+      {askSample && <Confirm title="Remove sample" danger confirmLabel="Remove" message="Remove this sample from the cloned voice in ElevenLabs? The file in the library stays."
+        onConfirm={async () => { const id = askSample; setAskSample(null); await run(async () => { await api('DELETE', `${base}/samples/${id}`); await load(); }); }} onClose={() => setAskSample(null)} />}
+      {askRemove && d && <Confirm title="Remove cloned voice" danger confirmLabel="Remove voice"
+        message={`Remove "${d.name}" from the ElevenLabs account? This cannot be undone.${users.length ? ` These characters lose their voice: ${users.join(', ')}.` : ''} Takes already generated stay, and the sample files in the library stay.`}
+        onConfirm={async () => { setAskRemove(false); await run(async () => { await api('DELETE', base); onChanged('removed'); onClose(); }); }} onClose={() => setAskRemove(false)} />}
+    </Dialog>);
 }

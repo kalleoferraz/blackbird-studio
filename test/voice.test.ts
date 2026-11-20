@@ -119,6 +119,26 @@ describe('ElevenLabs client', () => {
     assert.match(seen.at(-1)!.body, /eleven_multilingual_sts_v2/);
   });
 
+  it('reads, edits and removes a cloned voice and its samples', async () => {
+    next = { status: 200, body: { voice_id: 'c1', name: 'Marta (Enredo)', category: 'cloned', samples: [{ sample_id: 's1', file_name: 'a.mp3', duration_secs: 12.5 }] } };
+    const v = await client().voice('c1');
+    assert.equal(seen.at(-1)!.url, '/v1/voices/c1');
+    assert.deepEqual([v.category, v.samples[0]!.sampleId, v.samples[0]!.durationSecs], ['cloned', 's1', 12.5]);
+    next = { status: 200, body: { status: 'ok' } };
+    await client().edit('c1', { name: 'Marta', description: 'warm', files: [{ name: 'b.mp3', data: new Uint8Array([9]), type: 'audio/mpeg' }] });
+    assert.equal(seen.at(-1)!.url, '/v1/voices/c1/edit');
+    assert.match(seen.at(-1)!.body, /name="name"\r\n\r\nMarta\r\n/);
+    assert.match(seen.at(-1)!.body, /name="files"; filename="b.mp3"/);
+    await client().deleteSample('c1', 's1');
+    assert.deepEqual([seen.at(-1)!.method, seen.at(-1)!.url], ['DELETE', '/v1/voices/c1/samples/s1']);
+    await client().deleteVoice('c1');
+    assert.deepEqual([seen.at(-1)!.method, seen.at(-1)!.url], ['DELETE', '/v1/voices/c1']);
+    next = { status: 200, body: Buffer.from('mp3') };
+    const a = await client().sampleAudio('c1', 's2');
+    assert.equal(seen.at(-1)!.url, '/v1/voices/c1/samples/s2/audio');
+    assert.equal(a.data.toString(), 'mp3');
+  });
+
   it('turns ElevenLabs errors into clear messages', async () => {
     next = { status: 401, body: { detail: { status: 'quota_exceeded', message: 'This request exceeds your quota of 10000.' } } };
     await assert.rejects(client().subscription(), (e: HttpError) => e.code === 'voice_quota_exceeded' && e.status === 402 && /quota of 10000/.test(e.message));

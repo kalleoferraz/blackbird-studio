@@ -741,3 +741,4 @@ label.vs-check { display: flex; gap: 8px; align-items: center; margin: .5em 0; }
 .sample-rec { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0; background: var(--panel2); }
 .rec-clock { font-variant-numeric: tabular-nums; color: var(--muted); } .rec-clock.on { color: var(--danger); font-weight: 600; }
 .sample-audio { width: 100%; margin: 4px 0; }
+.voice-sub { font-size: .9rem; margin: 14px 0 4px; } .sample-mini { height: 30px; max-width: 220px; }
