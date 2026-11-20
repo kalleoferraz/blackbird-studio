@@ -7,14 +7,14 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Point
 import { api } from './api.ts';
 import { GenerateDialog, type GeneratePreset } from './GenerateAudio.tsx';
 import { useVoiceStatus } from './voiceStatus.ts';
-import type { Character, Cue, Lane, SegmentContent } from './types.ts';
+import type { Character, Clip, Cue, Lane, SegmentContent } from './types.ts';
 import { useNav, useStoreValue } from './playback.ts';
 import { loadPeaks, type Peaks } from './peaks.ts';
 import { Menu, errorText, useLocalState } from './ui.tsx';
 import { AudioPicker } from './AudioPicker.tsx';
 import { audioMenuItems } from './audioMenu.ts';
 import { plainMd } from './md.tsx';
-import { ENVELOPE_RANGE, LEVEL_MAX_DB, LEVEL_MIN_DB, MAX_VOLUME_POINTS, VOLUME_MAX_DB, VOLUME_MIN_DB, sourceAt, type EnvelopeKind } from '../../src/shared/audio-settings.ts';
+import { ENVELOPE_RANGE, LEVEL_MAX_DB, LEVEL_MIN_DB, MAX_VOLUME_POINTS, VOLUME_MAX_DB, VOLUME_MIN_DB, envelopeValue, sourceAt, type EnvelopeKind } from '../../src/shared/audio-settings.ts';
 import { AudioSliders, ENVELOPE_NAME, type AudioEdit } from './AudioSettings.tsx';
 import { RemoveAudioDialog } from './RemoveAudio.tsx';
 
@@ -90,6 +90,58 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
   }, [multi.length]);
+
+  // Ctrl (or Cmd) with Up/Down or +/-: the level of the selected cue's take (or the one playing) in 0.5 dB steps; with Shift
+  // also, a point of its volume envelope at the playhead. Presses are applied one after another, each on the latest content.
+  const keyState = useRef({ content, scene, selId, curCue, readOnly });
+  keyState.current = { content, scene, selId, curCue, readOnly };
+  const keyQueue = useRef<Promise<void>>(Promise.resolve());
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      const up = e.key === 'ArrowUp' || e.key === '+' || e.key === '=' || e.code === 'NumpadAdd' || (e.code === 'BracketRight' && e.key === '*'); // * : Shift with the + key of a German keyboard
+      const down = e.key === 'ArrowDown' || e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract';
+      if (!up && !down) return;
+      const k = keyState.current;
+      if (k.readOnly) return;
+      const cueOf = (c: SegmentContent) => c.scenes.flatMap((s) => s.cues).find((q) => q.id === (k.selId ?? k.curCue)) ?? null;
+      const first = cueOf(k.content);
+      if (!first?.clipId) return;
+      e.preventDefault(); // not the browser's zoom
+      const step = up ? 0.5 : -0.5, envelope = e.shiftKey;
+      keyQueue.current = keyQueue.current.then(async () => {
+        const cue = cueOf(keyState.current.content);
+        const clip = cue?.clips.find((q) => q.id === cue.clipId);
+        if (!cue || !clip) return;
+        let body: Record<string, unknown>;
+        if (!envelope) {
+          const v = Math.max(LEVEL_MIN_DB, Math.min(LEVEL_MAX_DB, Math.round((clip.gainDb + step) * 2) / 2));
+          if (v === clip.gainDb) return;
+          body = { gainDb: v };
+        } else {
+          const pos = store?.pos, sc = keyState.current.content.scenes.find((s) => s.cues.some((q) => q.id === cue.id));
+          const t = pos && sc && store?.currentSceneId() === sc.id ? pos.ms - cue.startMs : -1;
+          if (t < 0 || t > cue.lengthMs) { onError('Move the playhead into the cue to add a level point there.'); return; }
+          const pts: [number, number][] = [...(clip.volumePoints ?? [])];
+          const near = pts.findIndex(([ms]) => Math.abs(ms - t) <= 100);
+          const v = Math.max(VOLUME_MIN_DB, Math.min(VOLUME_MAX_DB, Math.round((envelopeValue(pts, t, 'level') + step) * 2) / 2));
+          if (near >= 0) pts[near] = [pts[near]![0], v];
+          else if (pts.length >= MAX_VOLUME_POINTS) { onError(`An envelope has at most ${MAX_VOLUME_POINTS} points.`); return; }
+          else pts.push([Math.round(t), v]);
+          body = { volumePoints: pts.sort((a, b) => a[0] - b[0]) };
+        }
+        try {
+          const next = await api<SegmentContent>('PATCH', `/api/clips/${clip.id}`, body);
+          keyState.current = { ...keyState.current, content: next };
+          onContent(next);
+        } catch (err) { onError(errorText(err)); }
+      });
+    };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, [store, onContent, onError]);
 
   const generic = `Scene ${scene.position}`;
   const sceneTitle = scene.label && scene.label !== generic ? `${generic} · ${scene.label}` : generic;
@@ -476,7 +528,7 @@ export function Timeline({ content, readOnly, onContent, onError, audioEdit, onA
         <b>Timeline</b>
         <span className="muted">{sceneTitle} · {clock(scene.lengthMs)}</span>
         <span className="grow" />
-        <span className="muted small tl-hint">{readOnly ? 'View only' : 'Drag a cue to move it (Ctrl: no magnet) · Shift: select several · drag its right edge to resize'}</span>
+        <span className="muted small tl-hint">{readOnly ? 'View only' : 'Drag a cue to move it (Ctrl: no magnet) · Shift: select several · drag its right edge to resize · Ctrl+↑/↓: level (with Shift: a point at the playhead)'}</span>
         <button className="tl-rec" disabled={!canRecord} data-testid="timeline-record" onClick={() => target && nav?.record(target.id)}
           title={canRecord ? 'Record a take for the selected cue' : 'Select a speech cue to record it'}><i />Record</button>
         <button className="tl-zoom" onClick={() => zoomBy(1 / 1.5)} title="Zoom out">−</button>
@@ -676,6 +728,39 @@ function AudioPanel({ children, ...rest }: { children: ReactNode } & React.HTMLA
   return createPortal(<div ref={el} className="tl-audio-panel" style={{ visibility: 'hidden' }} {...rest}>{children}</div>, document.body);
 }
 
+/**
+ * How loud a cue plays, from the peaks of its take (the loudest sample of every 100 ms, in dBFS) plus its level and its
+ * volume envelope: the median, the quietest and the loudest 100 ms. Silent stretches (-60 dB and below) are left out.
+ */
+export function cueLevelStats(peaks: Peaks, clip: Clip, playedMs: number): { median: number; min: number; max: number } | null {
+  const out: number[] = [];
+  for (let t = 0; t < playedMs; t += peaks.step) {
+    const a = Math.floor((clip.offsetMs + sourceAt(clip.speed, clip.speedPoints, t)) / peaks.step);
+    const b = Math.max(a + 1, Math.floor((clip.offsetMs + sourceAt(clip.speed, clip.speedPoints, Math.min(playedMs, t + peaks.step))) / peaks.step));
+    let m = 0;
+    for (let i = a; i < b && i < peaks.data.length; i++) m = Math.max(m, peaks.data[i]!);
+    if (m === 0) continue;
+    out.push((m / 255) * 60 - 60 + clip.gainDb + envelopeValue(clip.volumePoints, t, 'level'));
+  }
+  if (!out.length) return null;
+  out.sort((x, y) => x - y);
+  const n = out.length, median = n % 2 ? out[(n - 1) / 2]! : (out[n / 2 - 1]! + out[n / 2]!) / 2;
+  return { median, min: out[0]!, max: out[n - 1]! };
+}
+
+/** Shown at the bottom of a cue under the pointer: the median level in the middle, how far the quietest and loudest parts are from it at the left and right. */
+function CueLevel({ stats, width }: { stats: { median: number; min: number; max: number }; width: number }) {
+  const d = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : '±'}${Math.abs(v).toFixed(1)}`;
+  const wide = width >= 120;
+  return (
+    <div className="tl-level" title={`Median ${stats.median.toFixed(1)} dB · quietest ${stats.min.toFixed(1)} dB · loudest ${stats.max.toFixed(1)} dB (peaks, with the level and envelope)`}>
+      {wide && <span className="lo">{d(stats.min - stats.median)}</span>}
+      <b>{d(stats.median).replace('±', '')} dB</b>
+      {wide && <span className="hi">{d(stats.max - stats.median)}</span>}
+    </div>
+  );
+}
+
 const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top, h, now, sel, dragging, multi, readOnly, editing, onEditAudio, onEnvelope, onSeekIn, onMove, onResize, onMenu }: {
   cue: Cue; lane: Lane; left: number; width: number; lengthMs: number; top: number; h: number; now: boolean; sel: boolean; dragging: boolean; multi: boolean; readOnly: boolean;
   editing: EnvelopeKind | null; onEditAudio: () => void; onEnvelope: (points: [number, number][] | null) => void; onSeekIn: (ms: number) => void;
@@ -696,6 +781,7 @@ const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top,
     void loadPeaks(clip.assetId).then((p) => live && setPeaks(p));
     return () => { live = false; };
   }, [clip?.assetId, clip?.hasPeaks, clip?.status]);
+  const stats = useMemo(() => (clip && peaks ? cueLevelStats(peaks, clip, Math.min(lengthMs, clipMs)) : null), [peaks, clip, lengthMs, clipMs]);
   return (
     <div className={'tl-cue' + (now ? ' now' : '') + (sel ? ' sel' : '') + (multi ? ' multi' : '') + (past ? ' past' : '') + (dragging ? ' dragging' : '') + (clip ? '' : ' empty') + (cue.muted ? ' muted' : '') + (editing ? ' audio-edit' : '')} data-cue-id={cue.id}
       style={{ left, width, top: top + 3, height: h, '--c': colour } as React.CSSProperties}
@@ -705,6 +791,7 @@ const CueBlock = memo(function CueBlock({ cue, lane, left, width, lengthMs, top,
       {clip && editing && !readOnly ? <EnvelopeEditor key={editing} kind={editing} points={clip[ENVELOPE_KEY[editing]]} lengthMs={lengthMs} width={width} height={h} onChange={onEnvelope} onSeek={(ms) => onSeekIn(ms)} />
         : clip && Array.isArray(clip.volumePoints) && clip.volumePoints.length > 0 && <EnvelopeLine points={clip.volumePoints} lengthMs={lengthMs} width={width} height={h} />}
       <span className="tl-text">{plainMd(cue.text) || (cue.type === 'speech' ? '' : cue.type)}</span>
+      {stats && !editing && width >= 56 && <CueLevel stats={stats} width={width} />}
       {!readOnly && <div className="tl-grip" onPointerDown={onResize} />}
     </div>
   );
@@ -733,6 +820,8 @@ export const ENVELOPE_KEY = { level: 'volumePoints', pitch: 'pitchPoints', speed
 export function EnvelopeEditor({ kind, points, lengthMs, width, height, onChange, onSeek }: { kind: EnvelopeKind; points: [number, number][] | null; lengthMs: number; width: number; height: number; onChange: (p: [number, number][] | null) => void; /** A single click: the playing time (ms from the start of the take) to move the playhead to. */ onSeek: (ms: number) => void }) {
   const [pts, setPts] = useState<[number, number][]>(Array.isArray(points) ? points : []);
   const dragging = useRef<number | null>(null);
+  const [hover, setHover] = useState<number | null>(null);
+  const [held, setHeld] = useState<number | null>(null); // the point being dragged (state, so its value label follows it)
   const moved = useRef(false);
   const lastTap = useRef<{ i: number | null; t: number; x: number; y: number } | null>(null);
   useEffect(() => { if (dragging.current === null) setPts(Array.isArray(points) ? points : []); }, [points]);
@@ -753,23 +842,31 @@ export function EnvelopeEditor({ kind, points, lengthMs, width, height, onChange
     const svg = e.currentTarget.closest('svg') as Element;
     if (i !== null) {
       if (dbl) { const next = pts.filter((_, k) => k !== i); setPts(next); commit(next); return; }
-      moved.current = false; dragging.current = i; svg.setPointerCapture(e.pointerId);
+      moved.current = false; dragging.current = i; setHeld(i); svg.setPointerCapture(e.pointerId);
       return;
     }
     if (!dbl) { onSeek(at(e)[0]); return; } // a single click puts the playhead there
     if (pts.length >= MAX_VOLUME_POINTS) return;
     const next = [...pts, at(e)];
-    setPts(next); moved.current = true; dragging.current = next.length - 1; svg.setPointerCapture(e.pointerId);
+    setPts(next); moved.current = true; dragging.current = next.length - 1; setHeld(next.length - 1); svg.setPointerCapture(e.pointerId);
   };
   const move = (e: React.PointerEvent) => { const i = dragging.current; if (i === null) return; moved.current = true; const v = at(e); setPts((p) => p.map((q, k) => (k === i ? v : q))); };
-  const end = () => { if (dragging.current === null) return; dragging.current = null; if (moved.current) commit(pts); };
+  const end = () => { if (dragging.current === null) return; dragging.current = null; setHeld(null); if (moved.current) commit(pts); };
   const sorted = [...pts].sort((a, b) => a[0] - b[0]);
   const d = sorted.length ? `M0,${y(sorted[0]![1])} ${sorted.map(([ms, db]) => `L${px(ms)},${y(db)}`).join(' ')} L${width},${y(sorted[sorted.length - 1]![1])}` : `M0,${y(ENVELOPE_RANGE[kind].neutral)} L${width},${y(ENVELOPE_RANGE[kind].neutral)}`;
   return (
     <svg className={'tl-envelope edit k-' + kind} width={width} height={height} onPointerDown={start(null)} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
       <line x1={0} x2={width} y1={y(ENVELOPE_RANGE[kind].neutral)} y2={y(ENVELOPE_RANGE[kind].neutral)} className="zero" />
       <path d={d} className={sorted.length ? '' : 'flat'} />
-      {pts.map(([ms, db], i) => <g key={i} onPointerDown={start(i)}><circle className="hit" cx={px(ms)} cy={y(db)} r={16} /><circle className="dot" cx={px(ms)} cy={y(db)} r={5} /><title>{`${(ms / 1000).toFixed(2)} s · ${envText(kind, db)}`}</title></g>)}
+      {pts.map(([ms, db], i) => <g key={i} onPointerDown={start(i)} onPointerEnter={() => setHover(i)} onPointerLeave={() => setHover((h) => (h === i ? null : h))}><circle className="hit" cx={px(ms)} cy={y(db)} r={16} /><circle className="dot" cx={px(ms)} cy={y(db)} r={5} /></g>)}
+      {(() => {
+        // The value of the point under the pointer or being dragged, beside it (to its left near the right edge).
+        const i = held ?? hover, p = i !== null ? pts[i] : undefined;
+        if (!p) return null;
+        const cx = px(p[0]), right = cx < width - 70;
+        const py = y(p[1]), cy = py - 9 >= 11 ? py - 9 : Math.min(height - 3, py + 18); // above the point, off the line; below it near the top
+        return <text className="env-value" x={right ? cx + 10 : cx - 10} y={cy} textAnchor={right ? 'start' : 'end'}>{envText(kind, p[1])}</text>;
+      })()}
     </svg>
   );
 }
