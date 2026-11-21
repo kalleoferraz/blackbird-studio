@@ -25,6 +25,7 @@ import { AudioPlayer } from './audio-playback.ts';
 import { LibPlayContext, LibraryPlayer, type LibTrack } from './libplayer.ts';
 import { FileInfoPanel } from './Library.tsx';
 import { IntegrationsDialog } from './Integrations.tsx';
+import { ContentSink } from './contentSink.ts';
 
 export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { me: Me; projectId: string; segmentId?: string; onAccount: () => void; onLogout: () => void }) {
   const [project, setProject] = useState<ProjectCard | null>(null);
@@ -347,6 +348,7 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
 
   return (
     <NavContext.Provider value={nav}>
+    <ContentSink.Provider value={(c) => { if (content && c.segment.id === content.segment.id) onContent(c); else refreshAfterEdit(); }}>
     <LibPlayContext.Provider value={playLib}>
     <NotesContext.Provider value={notesInfo}>
     <PlaceholderContext.Provider value={placeholder}>
@@ -430,6 +432,7 @@ export function ScriptView({ me, projectId, segmentId, onAccount, onLogout }: { 
     </PlaceholderContext.Provider>
     </NotesContext.Provider>
     </LibPlayContext.Provider>
+    </ContentSink.Provider>
     </NavContext.Provider>
   );
 }

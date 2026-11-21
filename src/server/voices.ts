@@ -29,6 +29,14 @@ export function firstSeconds(text: string, max = 90): string {
   return (space > 20 ? cut.slice(0, space) : cut).replace(/[,;:]$/, '') + '…';
 }
 
+/** Voice Design previews waiting to be chosen: generated voice ID → audio, for 30 minutes. */
+const previews = new Map<string, { userId: string; characterId: string; audio: Buffer; mediaType: string; expires: number }>();
+function sweepPreviews() {
+  const now = Date.now();
+  for (const [k, v] of previews) if (v.expires < now) previews.delete(k);
+  while (previews.size > 60) previews.delete(previews.keys().next().value!);
+}
+
 /** Samples already heard, so listening again costs nothing: key → audio. Kept in memory, the newest 60. */
 const sampleCache = new Map<string, Buffer>();
 const remember = (k: string, v: Buffer) => { sampleCache.delete(k); sampleCache.set(k, v); while (sampleCache.size > 60) sampleCache.delete(sampleCache.keys().next().value!); };
@@ -305,11 +313,15 @@ export function registerVoiceRoutes(app: FastifyInstance): void {
 
   // ---- managing a cloned voice: rename, description, samples, remove ----------------------------------
 
-  /** The clone, or 400 when the voice is not one (built-in and library voices are not managed here). */
-  const cloneOf = async (client: ElevenLabs, voiceId: string) => {
+  /**
+   * A voice made in the account (cloned, or designed: category `generated`), or 400 otherwise (built-in and library
+   * voices are not managed here).
+   */
+  const cloneOf = async (client: ElevenLabs, voiceId: string, needSamples = false) => {
     if (!VOICE_ID.test(voiceId)) throw badRequest('invalid_voiceId');
     const v = await client.voice(voiceId);
-    if (v.category !== 'cloned') throw new HttpError(400, 'not_a_clone', 'Only cloned voices can be renamed, edited or removed here.');
+    if (v.category !== 'cloned' && v.category !== 'generated') throw new HttpError(400, 'not_managed', 'Only cloned and designed voices can be renamed, edited or removed here.');
+    if (needSamples && v.category !== 'cloned') throw new HttpError(400, 'no_samples', 'A designed voice has no samples: only cloned voices do.');
     return v;
   };
   /** The characters that use a voice, in every project. Projects the user is not a member of are only counted. */
@@ -331,7 +343,7 @@ export function registerVoiceRoutes(app: FastifyInstance): void {
     const { client } = await elevenLabs();
     const v = await cloneOf(client, voiceId);
     const used = await usersOf(request.account!.id, voiceId);
-    return { voiceId: v.voiceId, name: v.name, description: v.description, samples: v.samples, usedBy: used.characters, usedElsewhere: used.elsewhere };
+    return { voiceId: v.voiceId, name: v.name, category: v.category, description: v.description, samples: v.samples, usedBy: used.characters, usedElsewhere: used.elsewhere };
   });
 
   /** Renames a clone and/or changes its description; the name is updated on every character that uses it. */
@@ -372,7 +384,7 @@ export function registerVoiceRoutes(app: FastifyInstance): void {
       if (durationOf(f) < MIN_SAMPLE_MS) throw badRequest('sample_too_short', `${f.path} is shorter than 5 seconds; every sample needs at least 5 seconds.`);
     }
     const { client } = await elevenLabs();
-    const v = await cloneOf(client, voiceId);
+    const v = await cloneOf(client, voiceId, true);
     await client.edit(voiceId, { name: v.name, files: await Promise.all(files.map(assetAudio)), removeNoise: b.removeNoise === true });
     return { samples: (await client.voice(voiceId)).samples };
   });
@@ -382,7 +394,7 @@ export function registerVoiceRoutes(app: FastifyInstance): void {
     await authorOf(request, checkId(id));
     if (!VOICE_ID.test(sampleId)) throw badRequest('invalid_sampleId');
     const { client } = await elevenLabs();
-    const v = await cloneOf(client, voiceId);
+    const v = await cloneOf(client, voiceId, true);
     if (v.samples.length <= 1) throw new HttpError(409, 'last_sample', 'A clone needs at least one sample: add another before removing this one.');
     await client.deleteSample(voiceId, sampleId);
     return { samples: (await client.voice(voiceId)).samples };
@@ -495,5 +507,85 @@ export function registerVoiceRoutes(app: FastifyInstance): void {
       await touchProject(tx, projectId, request.account!.id);
     });
     return projectVoiceSettings(projectId);
+  });
+
+  // ---- Voice Design: a voice made from a description, saved as the character's voice (Bible, decision log 2026-11-21) ----
+
+  /**
+   * Previews of a designed voice. Their audio waits in memory (30 minutes, for this user) and is played through
+   * `/api/voice-previews/:id`; nothing is stored until one is chosen. Optional reference audio is a library file.
+   */
+  app.post('/api/characters/:id/voice/design', { ...auth, bodyLimit: 16384 }, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    const b = asBody(request.body);
+    const description = reqString(b, 'description', 1000);
+    const text = typeof b.text === 'string' && b.text.trim() ? b.text.trim() : null;
+    if (text !== null && (text.length < 100 || text.length > 1000)) throw badRequest('invalid_text', 'The sample text needs 100 to 1000 characters, or let it be written for you.');
+    const model = b.model === 'eleven_ttv_v3' ? 'eleven_ttv_v3' : 'eleven_multilingual_ttv_v2';
+    const num = (k: string, lo: number, hi: number, def: number) => {
+      const v = b[k];
+      if (v === undefined || v === null) return def;
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < lo || v > hi) throw badRequest(`invalid_${k}`, `${k} must be from ${lo} to ${hi}.`);
+      return v;
+    };
+    const loudness = num('loudness', -1, 1, 0.5), guidanceScale = num('guidanceScale', 0, 100, 5);
+    const seed = b.seed === undefined || b.seed === null ? null : num('seed', 0, 4294967295, 0);
+    if (seed !== null && !Number.isInteger(seed)) throw badRequest('invalid_seed');
+    const refId = typeof b.referenceAssetId === 'string' ? checkId(b.referenceAssetId) : null;
+    if (refId && model !== 'eleven_ttv_v3') throw badRequest('reference_needs_v3', 'Reference audio works with the v3 design model only.');
+    const promptStrength = refId && b.promptStrength !== undefined && b.promptStrength !== null ? num('promptStrength', 0, 1, 0.5) : null;
+    const { cur, ref } = await withDb(async (db) => {
+      await accessToEntity(db, request.account!.id, 'character', id, { edit: true });
+      const cur = (await db.select().from(character).where(eq(character.id, id)).limit(1))[0]!;
+      const ref = refId ? (await db.select().from(asset).where(and(eq(asset.id, refId), eq(asset.projectId, cur.projectId))).limit(1))[0] : null;
+      return { cur, ref };
+    });
+    if (refId && (!ref || ref.mediaKind !== 'audio' || ref.status !== 'ready')) throw badRequest('invalid_reference', 'The reference must be a ready audio file of this project.');
+    let referenceAudioBase64: string | null = null;
+    if (ref) {
+      const a = await assetAudio(ref);
+      if (a.data.length > 15 * 1024 * 1024) throw badRequest('reference_too_large', 'The reference audio is too large (15 MB at most); choose a shorter file.');
+      referenceAudioBase64 = a.data.toString('base64');
+    }
+    const { client } = await elevenLabs(cur.projectId);
+    const r = await client.design({ description, model, text, loudness, guidanceScale, enhance: b.enhance === true, seed, referenceAudioBase64, promptStrength });
+    sweepPreviews();
+    for (const p of r.previews) previews.set(p.generatedVoiceId, { userId: request.account!.id, characterId: id, audio: p.audio, mediaType: p.mediaType, expires: Date.now() + 30 * 60_000 });
+    return {
+      text: r.text,
+      previews: r.previews.map((p) => ({ generatedVoiceId: p.generatedVoiceId, durationSecs: p.durationSecs, language: p.language, mediaType: p.mediaType })),
+    };
+  });
+
+  app.get('/api/voice-previews/:gid', auth, async (request, reply) => {
+    const gid = (request.params as { gid: string }).gid;
+    sweepPreviews();
+    const p = VOICE_ID.test(gid) ? previews.get(gid) : undefined;
+    if (!p || p.userId !== request.account!.id) throw new HttpError(404, 'preview_gone', 'This preview is no longer available (previews are kept for 30 minutes): create again.');
+    return reply.header('content-type', p.mediaType).header('cache-control', 'private, no-store').send(p.audio);
+  });
+
+  /** Saves the chosen preview as a voice named "Character (Project)" and gives it to the character. */
+  app.post('/api/characters/:id/voice/design/save', { ...auth, bodyLimit: 8192 }, async (request) => {
+    const id = checkId((request.params as { id: string }).id);
+    const b = asBody(request.body);
+    const gid = reqString(b, 'generatedVoiceId', 64);
+    if (!VOICE_ID.test(gid)) throw badRequest('invalid_generatedVoiceId');
+    const description = reqString(b, 'description', 1000);
+    const played = Array.isArray(b.played) ? (b.played as unknown[]).filter((x): x is string => typeof x === 'string' && VOICE_ID.test(x) && x !== gid).slice(0, 20) : [];
+    const cur = await withDb(async (db) => {
+      await accessToEntity(db, request.account!.id, 'character', id, { edit: true });
+      return (await db.select().from(character).where(eq(character.id, id)).limit(1))[0]!;
+    });
+    const { client } = await elevenLabs(cur.projectId);
+    const name = voiceName(cur.name, await withDb((db) => projectTitle(db, cur.projectId)));
+    const voiceId = await client.createDesigned({ name, description, generatedVoiceId: gid, playedNotSelected: played });
+    const row = await inTransaction(async (tx) => {
+      await tx.update(character).set({ voiceId, voiceName: name, voiceSource: 'designed', updatedAt: new Date() }).where(eq(character.id, id));
+      await touchProject(tx, cur.projectId, request.account!.id);
+      return (await tx.select().from(character).where(eq(character.id, id)).limit(1))[0]!;
+    });
+    if (cur.voiceId && cur.voiceId !== voiceId) await withDb((db) => retireVoice(db, client, cur, request.log));
+    return characterView(row);
   });
 }

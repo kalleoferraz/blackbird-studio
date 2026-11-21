@@ -1,8 +1,9 @@
 // A character's voice (Bible, decision log 2026-11-20): choose one (this project, the account, the public library),
 // clone one from the Voice Samples folder, and the "Voice Settings": directions as text plus sliders.
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { ContentSink } from './contentSink.ts';
 import { ApiError, api, uploadFile } from './api.ts';
-import type { Character, LibFile, LibListing, VoiceSettings } from './types.ts';
+import type { Character, LibFile, LibListing, SegmentContent, VoiceSettings } from './types.ts';
 import { Confirm, Dialog, errorText, useLocalState } from './ui.tsx';
 import { useVoiceStatus } from './voiceStatus.ts';
 import { useNav, useStoreValue } from './playback.ts';
@@ -58,20 +59,41 @@ function useSampleText() {
   return { text, setText, found };
 }
 
-const SOURCE_LABEL = { account: 'from the account', public: 'from the public library', clone: 'cloned' } as const;
+const SOURCE_LABEL = { account: 'from the account', public: 'from the public library', clone: 'cloned', designed: 'designed' } as const;
+
+const HEAD_ICON = {
+  // A list with a play mark: choose from the existing voices.
+  choose: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M4 11h10M4 16h6" /><path d="M15 13.5v6l5-3z" /></svg>,
+  // A wand with a spark: create a voice from a description.
+  create: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20L15 9" /><path d="M13.5 7.5l3 3" /><path d="M18.5 2.5l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z" /><path d="M7 3.5v3M5.5 5h3" /></svg>,
+  // Two heads, one behind the other: clone a voice from recordings.
+  clone: <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2" /><path d="M3 19.5c.6-3.2 3-5 6-5s5.4 1.8 6 5" /><path d="M14.2 5.2a3.2 3.2 0 1 1 1.6 6" /><path d="M17.5 14.7c1.8.6 3.1 2.2 3.5 4.8" /></svg>,
+};
 
 export function CharacterVoice({ projectId, character, readOnly, onSaved }: {
   projectId: string; character: Character; readOnly: boolean; onSaved: (c: Character) => void;
 }) {
   const status = useVoiceStatus();
+  const nav = useNav();
+  const cueId = useStoreValue(nav?.store, (st) => st.currentCueId(), '');
+  const sink = useContext(ContentSink);
+  const [context] = useLocalState('rs.genContext', true);
   const [picker, setPicker] = useState(false);
   const [clone, setClone] = useState(false);
+  const [design, setDesign] = useState(false);
   const [manage, setManage] = useState(false);
   const [error, setError] = useState('');
+  const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [direction, setDirection] = useState(character.voiceDirection ?? '');
   const [settings, setSettings] = useState<VoiceSettings>(character.voiceSettings ?? {});
+  // A take tried with the panel's settings, waiting for ✓ (keep) or × (drop).
+  const [pending, setPending] = useState<{ id: string; cueId: string } | null>(null);
+  const [trying, setTrying] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const audio = useRef<HTMLAudioElement | null>(null);
   useEffect(() => { setDirection(character.voiceDirection ?? ''); setSettings(character.voiceSettings ?? {}); }, [character.id, character.voiceDirection, character.voiceSettings]);
+  useEffect(() => () => { audio.current?.pause(); }, []);
   const off = !status?.enabled;
   const canEdit = !readOnly && !off;
   const changed = direction.trim() !== (character.voiceDirection ?? '') || JSON.stringify(clean(settings)) !== JSON.stringify(clean(character.voiceSettings ?? {}));
@@ -82,26 +104,86 @@ export function CharacterVoice({ projectId, character, readOnly, onSaved }: {
   };
   const saveSettings = () => run(() => api<Character>('PATCH', `/api/characters/${character.id}`, { voiceDirection: direction.trim() || null, voiceSettings: clean(settings) }));
   const v = character.voice;
+
+  const playPending = (id: string) => {
+    audio.current?.pause();
+    const a = new Audio(`/api/pending-takes/${id}`);
+    a.onended = () => setPlaying(false);
+    audio.current = a; setPlaying(true);
+    void a.play().catch(() => setPlaying(false));
+  };
+  /** Keeps the waiting take as the cue's next take; `choose` makes the cue play it. */
+  const keep = async (choose: boolean) => {
+    const p = pending;
+    if (!p) return;
+    setPending(null); audio.current?.pause(); setPlaying(false);
+    try {
+      const c = await api<SegmentContent>('POST', `/api/pending-takes/${p.id}/keep`, { choose });
+      sink?.(c);
+      setNote(choose ? 'The take is saved and chosen for the cue.' : 'The take is saved as an alternative of the cue.');
+    } catch (e) { setError(errorText(e)); }
+  };
+  const drop = async () => {
+    const p = pending;
+    setPending(null); audio.current?.pause(); setPlaying(false); setNote('');
+    if (p) await api('DELETE', `/api/pending-takes/${p.id}`).catch(() => undefined);
+  };
+  /** The selected cue spoken by this voice with the panel's settings (saved or not); replays a waiting take. */
+  const tryIt = async () => {
+    if (playing) { audio.current?.pause(); setPlaying(false); return; }
+    if (pending) { playPending(pending.id); return; }
+    if (!cueId) return;
+    setTrying(true); setError(''); setNote('');
+    try {
+      const r = await api<{ pendingId: string }>('POST', `/api/cues/${cueId}/generate/try`, {
+        characterId: character.id, voiceDirection: direction.trim() || null, voiceSettings: clean(settings), context,
+      });
+      setPending({ id: r.pendingId, cueId });
+      playPending(r.pendingId);
+    } catch (e) { setError(errorText(e)); }
+    setTrying(false);
+  };
+  /** A change of settings while a take waits keeps that take (as an alternative); the settings themselves are not saved. */
+  const changing = <T,>(set: (v: T) => void) => (val: T) => { if (pending) void keep(false); set(val); };
+
   return (
     <section className="card voice-card">
-      <h2 className="card-head">Voice</h2>
+      <h2 className="card-head">
+        <span>Voice</span>
+        {!readOnly && <span className="head-actions">
+          <button type="button" title={v ? 'Change voice' : 'Choose voice'} aria-label={v ? 'Change voice' : 'Choose voice'} disabled={!canEdit || busy} onClick={() => setPicker(true)}>{HEAD_ICON.choose}</button>
+          <button type="button" title="Create voice from a description" aria-label="Create voice" disabled={!canEdit || busy} onClick={() => setDesign(true)}>{HEAD_ICON.create}</button>
+          <button type="button" title="Clone voice from recordings" aria-label="Clone voice" disabled={!canEdit || busy || !character.folder} onClick={() => setClone(true)}>{HEAD_ICON.clone}</button>
+        </span>}
+      </h2>
       {status && off && <p className="muted small">Voice options are off: {status.reason}</p>}
       <div className="voice-current">
         {v ? <><b>{v.name}</b> <span className="muted small">{v.source ? SOURCE_LABEL[v.source] : ''}</span></> : <span className="muted">No voice chosen.</span>}
       </div>
-      {!readOnly && <div className="row voice-actions">
-        <button type="button" disabled={!canEdit || busy} onClick={() => setPicker(true)}>{v ? 'Change voice…' : 'Choose voice…'}</button>
-        <button type="button" disabled={!canEdit || busy || !character.folder} onClick={() => setClone(true)}>Clone voice…</button>
-        {v?.source === 'clone' && <button type="button" disabled={!canEdit || busy} onClick={() => setManage(true)}>Manage clone…</button>}
-        {v && <button type="button" disabled={!canEdit || busy} onClick={() => void run(() => api<Character>('DELETE', `/api/characters/${character.id}/voice`))}>Remove voice</button>}
+      {!readOnly && v && <div className="row voice-actions">
+        {(v.source === 'clone' || v.source === 'designed') && <button type="button" disabled={!canEdit || busy} onClick={() => setManage(true)}>Manage voice…</button>}
+        <button type="button" disabled={!canEdit || busy} onClick={() => void run(() => api<Character>('DELETE', `/api/characters/${character.id}/voice`))}>Remove voice</button>
       </div>}
       <label>Voice Settings (directions)
-        <textarea rows={2} placeholder="for example: calm, warm, slightly tired" value={direction} disabled={readOnly} onChange={(e) => setDirection(e.target.value)} />
+        <textarea rows={2} placeholder="for example: calm, warm, slightly tired" value={direction} disabled={readOnly} onChange={(e) => changing(setDirection)(e.target.value)} />
         <span className="muted small">Added to every take generated for this character as audio tags, such as [calm] [warm].</span></label>
-      <VoiceSliders value={settings} disabled={readOnly} onChange={setSettings} />
-      {!readOnly && <div className="row end"><button type="button" className="primary" disabled={busy || !changed} onClick={() => void saveSettings()}>Save voice settings</button></div>}
+      <VoiceSliders value={settings} disabled={readOnly} onChange={changing(setSettings)} />
+      {!readOnly && <div className="row voice-foot">
+        <button type="button" className="voice-ic voice-try" disabled={!canEdit || !v || (!cueId && !pending) || trying}
+          title={!v ? 'Choose a voice first' : playing ? 'Stop' : pending ? 'Play the take again' : cueId ? 'Play the selected cue in this voice with these settings (uses credits)' : 'Select a cue in the script'}
+          aria-label="Play the selected cue in this voice" onClick={() => void tryIt()}>
+          {trying ? <span className="ic-wait">…</span> : playing ? ICON.stop : ICON.sample}</button>
+        {pending && <>
+          <button type="button" className="voice-ic keep-yes" title="Save this take for the cue" aria-label="Save the take" onClick={() => void keep(true)}>{ICON.check}</button>
+          <button type="button" className="voice-ic keep-no" title="Ignore this take" aria-label="Ignore the take" onClick={() => void drop()}>{ICON.exclude}</button>
+        </>}
+        <span className="grow" />
+        <button type="button" className="primary" disabled={busy || !changed} onClick={() => void saveSettings()}>Save settings</button>
+      </div>}
+      {note && <p className="muted small">{note}</p>}
       {error && <p className="error">{error}</p>}
       {picker && <VoicePicker projectId={projectId} character={character} onClose={() => setPicker(false)} onSaved={(c) => { setPicker(false); onSaved(c); }} onCharacterChanged={onSaved} />}
+      {design && <DesignDialog projectId={projectId} character={character} onClose={() => setDesign(false)} onSaved={(c) => { setDesign(false); onSaved(c); }} />}
       {clone && character.folder && <CloneDialog projectId={projectId} character={character} onClose={() => setClone(false)} onSaved={(c) => { setClone(false); onSaved(c); }} />}
       {manage && v && <ManageClone projectId={projectId} voiceId={v.id} character={character} onClose={() => setManage(false)}
         onChanged={(ch) => onSaved(ch === 'removed' ? { ...character, voice: null } : { ...character, voice: { ...v, name: ch.name } })} />}
@@ -213,7 +295,7 @@ function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChange
       } else if (tab === 'account') {
         const r = await api<{ projectLanguage: string | null; voices: { voiceId: string; name: string; previewUrl: string | null; category: string | null; labels: Record<string, string> }[]; nextPageToken: string | null }>('GET', `/api/projects/${projectId}/voices/account?${q}`);
         setProjectLanguage(r.projectLanguage);
-        got = r.voices.map((x) => ({ voiceId: x.voiceId, name: x.name, previewUrl: x.previewUrl, cloned: x.category === 'cloned', info: [x.category, ...Object.values(x.labels ?? {})].filter(Boolean).join(' · ') }));
+        got = r.voices.map((x) => ({ voiceId: x.voiceId, name: x.name, previewUrl: x.previewUrl, cloned: x.category === 'cloned' || x.category === 'generated', info: [x.category, ...Object.values(x.labels ?? {})].filter(Boolean).join(' · ') }));
         next = r.nextPageToken ? { token: r.nextPageToken } : null;
       } else {
         const page = append ? more?.page ?? 0 : 0;
@@ -331,7 +413,7 @@ function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChange
                 {sample.playing === r.voiceId ? ICON.stop : sample.loading === r.voiceId ? <span className="ic-wait">…</span> : ICON.sample}</IconButton>
               {tab === 'public' && <IconButton title={added.has(r.voiceId) || r.added ? 'Already in your account' : 'Add to your account (without using it)'}
                 disabled={busy || added.has(r.voiceId) || !!r.added} onClick={() => void addToAccount(r)}>{added.has(r.voiceId) || r.added ? ICON.check : ICON.plus}</IconButton>}
-              {r.cloned && <IconButton title="Manage this cloned voice" disabled={busy} onClick={() => setManaging(r)}>{ICON.manage}</IconButton>}
+              {r.cloned && <IconButton title="Manage this voice (cloned or designed)" disabled={busy} onClick={() => setManaging(r)}>{ICON.manage}</IconButton>}
               <IconButton className={r.voiceId === character.voice?.id ? 'in-use' : ''} disabled={busy || r.voiceId === character.voice?.id}
                 title={r.voiceId === character.voice?.id ? `${character.name}'s voice` : tab === 'public' ? `Use for ${character.name} (adds it to your account)` : `Use for ${character.name}`}
                 onClick={() => void use(r)}>{ICON.use}</IconButton>
@@ -509,7 +591,7 @@ function SampleRecorder({ characterName, onSave, onCancel }: { characterName: st
 }
 
 interface CloneDetail {
-  voiceId: string; name: string; description: string | null;
+  voiceId: string; name: string; category: string | null; description: string | null;
   samples: { sampleId: string; fileName: string; durationSecs: number | null }[];
   usedBy: { characterId: string; name: string; projectId: string; project: string }[]; usedElsewhere: number;
 }
@@ -539,12 +621,13 @@ function ManageClone({ projectId, voiceId, character, onClose, onChanged }: {
   const changed = !!d && (name.trim() !== d.name || (description.trim() || null) !== (d.description || null));
   const users = d ? [...d.usedBy.map((u) => `${u.name} (${u.project})`), ...(d.usedElsewhere ? [`${d.usedElsewhere} character${d.usedElsewhere === 1 ? '' : 's'} in projects you are not a member of`] : [])] : [];
   return (
-    <Dialog title="Manage cloned voice" wide onClose={() => { if (!busy) onClose(); }}>
+    <Dialog title={d?.category === 'generated' ? 'Manage designed voice' : 'Manage cloned voice'} wide onClose={() => { if (!busy) onClose(); }}>
       {!d && !error && <p className="muted">Loading…</p>}
       {d && <>
         <label>Name in the ElevenLabs account<input value={name} maxLength={100} onChange={(e) => setName(e.target.value)} /></label>
         <label>Description<textarea rows={2} maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} /></label>
         <div className="row end"><button type="button" className="primary" disabled={busy || !changed || !name.trim()} onClick={() => void save()}>Save</button></div>
+        {d.category !== 'generated' && <>
         <h3 className="voice-sub">Samples</h3>
         <ul className="voice-list fill">
           {d.samples.map((x) => (
@@ -556,6 +639,7 @@ function ManageClone({ projectId, voiceId, character, onClose, onChanged }: {
         </ul>
         {!d.samples.length && <p className="muted small">ElevenLabs lists no samples for this voice.</p>}
         <div className="row"><button type="button" disabled={busy || !character.folder} onClick={() => setAdding(true)}>Add samples…</button></div>
+        </>}
         <h3 className="voice-sub">Used by</h3>
         <p className="muted small">{users.length ? users.join(', ') : 'No character uses this voice.'}</p>
       </>}
@@ -571,5 +655,112 @@ function ManageClone({ projectId, voiceId, character, onClose, onChanged }: {
       {askRemove && d && <Confirm title="Remove cloned voice" danger confirmLabel="Remove voice"
         message={`Remove "${d.name}" from the ElevenLabs account? This cannot be undone.${users.length ? ` These characters lose their voice: ${users.join(', ')}.` : ''} Takes already generated stay, and the sample files in the library stay.`}
         onConfirm={async () => { setAskRemove(false); await run(async () => { await api('DELETE', base); onChanged('removed'); onClose(); }); }} onClose={() => setAskRemove(false)} />}
+    </Dialog>);
+}
+
+interface DesignPreview { generatedVoiceId: string; durationSecs: number | null; language: string | null; n: number }
+
+/**
+ * Voice Design: a voice made from a description (and, with the v3 model, a reference recording from the library).
+ * The alternatives are heard here; the chosen one is saved as "Character (Project)" and becomes the character's voice,
+ * or none is kept.
+ */
+function DesignDialog({ projectId, character, onClose, onSaved }: { projectId: string; character: Character; onClose: () => void; onSaved: (c: Character) => void }) {
+  const sampleCue = useSampleText();
+  const [description, setDescription] = useState((character.description ?? '').replace(/\s+/g, ' ').trim().slice(0, 1000));
+  const [ownText, setOwnText] = useState(false);
+  const [text, setText] = useState('');
+  const [model, setModel] = useState<'eleven_multilingual_ttv_v2' | 'eleven_ttv_v3'>('eleven_multilingual_ttv_v2');
+  const [loudness, setLoudness] = useState(0.5);
+  const [guidance, setGuidance] = useState(5);
+  const [enhance, setEnhance] = useState(false);
+  const [seed, setSeed] = useState('');
+  const [refId, setRefId] = useState('');
+  const [strength, setStrength] = useState(0.5);
+  const [files, setFiles] = useState<LibFile[]>([]);
+  const [list, setList] = useState<DesignPreview[]>([]);
+  const [chosen, setChosen] = useState<string | null>(null);
+  const [played, setPlayed] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<'' | 'gen' | 'save'>('');
+  const [error, setError] = useState('');
+  const n = useRef(0);
+  // Reference recordings: the audio files in the character's library folder and its Voice Samples.
+  useEffect(() => {
+    if (!character.folder) return;
+    const base = `Characters/${character.folder}`;
+    void Promise.all([base, `${base}/Voice Samples`].map((f) => api<LibListing>('GET', `/api/projects/${projectId}/library?folder=${encodeURIComponent(f)}`).catch(() => null)))
+      .then((ls) => setFiles(ls.flatMap((l) => (l?.files ?? []).filter((f) => f.kind === 'audio' && f.status === 'ready'))));
+  }, [projectId, character.folder]);
+  useEffect(() => { if (!text && sampleCue.text) setText(sampleCue.text); }, [sampleCue.text]); // eslint-disable-line react-hooks/exhaustive-deps
+  const textOk = !ownText || (text.trim().length >= 100 && text.trim().length <= 1000);
+  const create = async () => {
+    setBusy('gen'); setError('');
+    try {
+      const r = await api<{ text: string; previews: Omit<DesignPreview, 'n'>[] }>('POST', `/api/characters/${character.id}/voice/design`, {
+        description: description.trim(), model, text: ownText ? text.trim() : null, loudness, guidanceScale: guidance, enhance,
+        seed: seed.trim() ? Number(seed) : null, ...(model === 'eleven_ttv_v3' && refId ? { referenceAssetId: refId, promptStrength: strength } : {}),
+      });
+      setList((old) => [...old, ...r.previews.map((p) => ({ ...p, n: ++n.current }))]);
+      if (!ownText && r.text) setText(r.text);
+    } catch (e) { setError(errorText(e)); }
+    setBusy('');
+  };
+  const save = async () => {
+    if (!chosen) return;
+    setBusy('save'); setError('');
+    try { onSaved(await api<Character>('POST', `/api/characters/${character.id}/voice/design/save`, { generatedVoiceId: chosen, description: description.trim(), played: [...played] })); }
+    catch (e) { setError(errorText(e)); setBusy(''); }
+  };
+  return (
+    <Dialog title={`Create a voice for ${character.name}`} wide onClose={() => { if (!busy) onClose(); }}>
+      <label>Description of the voice <span className="muted small">({description.length}/1000)</span>
+        <textarea rows={3} maxLength={1000} value={description} disabled={!!busy} placeholder="For example: a warm, slightly hoarse Brazilian man in his sixties, calm and kind, speaking slowly"
+          onChange={(e) => setDescription(e.target.value)} /></label>
+      <div className="design-grid">
+        <label>Model<select value={model} disabled={!!busy} onChange={(e) => setModel(e.target.value as typeof model)}>
+          <option value="eleven_multilingual_ttv_v2">Voice design v2 (multilingual)</option><option value="eleven_ttv_v3">Voice design v3 (reference audio)</option></select></label>
+        <label>Seed <span className="muted small">(optional: same seed, same voice)</span><input type="number" min={0} max={4294967295} value={seed} disabled={!!busy} onChange={(e) => setSeed(e.target.value)} /></label>
+      </div>
+      <div className="vs-row design-slider" title="From -1 (quietest) to 1 (loudest); 0 is about -24 LUFS">
+        <span>Loudness</span><input type="range" min={-1} max={1} step={0.05} value={loudness} disabled={!!busy} onChange={(e) => setLoudness(Number(e.target.value))} /><span className="vs-val">{loudness.toFixed(2)}</span>
+      </div>
+      <div className="vs-row design-slider" title="Higher follows the description more strictly but can sound robotic; detailed descriptions work better lower">
+        <span>Guidance</span><input type="range" min={0} max={10} step={0.5} value={guidance} disabled={!!busy} onChange={(e) => setGuidance(Number(e.target.value))} /><span className="vs-val">{guidance.toFixed(1)}</span>
+      </div>
+      <label className="vs-check"><input type="checkbox" checked={enhance} disabled={!!busy} onChange={(e) => setEnhance(e.target.checked)} /> Let ElevenLabs expand the description with more detail</label>
+      {model === 'eleven_ttv_v3' && (files.length
+        ? <>
+          <label>Reference recording <span className="muted small">(optional, from {character.name}'s library)</span><select value={refId} disabled={!!busy} onChange={(e) => setRefId(e.target.value)}>
+            <option value="">None</option>{files.map((f) => <option key={f.id} value={f.id}>{f.path.replace(`Characters/${character.folder}/`, '')}</option>)}</select></label>
+          {refId && <div className="vs-row design-slider" title="0: mostly the recording; 1: mostly the description">
+            <span>Prompt strength</span><input type="range" min={0} max={1} step={0.05} value={strength} disabled={!!busy} onChange={(e) => setStrength(Number(e.target.value))} /><span className="vs-val">{strength.toFixed(2)}</span>
+          </div>}
+        </>
+        : <p className="muted small">No audio in {character.name}'s library yet to use as a reference.</p>)}
+      <label className="vs-check"><input type="checkbox" checked={ownText} disabled={!!busy} onChange={(e) => setOwnText(e.target.checked)} /> Use my own sample text <span className="muted small">(otherwise one is written to fit the description)</span></label>
+      {ownText && <label>Sample text <span className={'small ' + (textOk ? 'muted' : 'error')}>({text.trim().length}; 100 to 1000 characters)</span>
+        <textarea rows={3} maxLength={1000} value={text} disabled={!!busy} onChange={(e) => setText(e.target.value)} /></label>}
+      <div className="row">
+        <span className="muted small grow">Each creation makes a few alternatives and uses credits.</span>
+        <button type="button" className="primary" disabled={!!busy || !description.trim() || !textOk} onClick={() => void create()}>{busy === 'gen' ? 'Creating…' : list.length ? 'Create more' : 'Create'}</button>
+      </div>
+      {list.length > 0 && <>
+        <h3 className="voice-sub">Alternatives <span className="muted small">(kept for 30 minutes; choose one to be {character.name}'s voice, or none)</span></h3>
+        <ul className="voice-list">
+          {list.map((p) => (
+            <li key={p.generatedVoiceId}>
+              <input type="radio" name="design-chosen" checked={chosen === p.generatedVoiceId} disabled={!!busy} onChange={() => setChosen(p.generatedVoiceId)} aria-label={`Alternative ${p.n}`} />
+              <span className="sfx-n">{p.n}</span>
+              <audio controls preload="auto" src={`/api/voice-previews/${p.generatedVoiceId}`} className="sample-audio grow"
+                onPlay={() => setPlayed((s) => new Set(s).add(p.generatedVoiceId))} />
+              <span className="muted small">{[p.language, p.durationSecs ? `${p.durationSecs.toFixed(1)} s` : ''].filter(Boolean).join(' · ')}</span>
+            </li>))}
+        </ul>
+      </>}
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="row end">
+        <button type="button" disabled={!!busy} onClick={onClose}>{list.length ? 'None, close' : 'Close'}</button>
+        <button type="button" className="primary" disabled={!!busy || !chosen} onClick={() => void save()}>{busy === 'save' ? 'Saving…' : `Use for ${character.name}`}</button>
+      </div>
     </Dialog>);
 }

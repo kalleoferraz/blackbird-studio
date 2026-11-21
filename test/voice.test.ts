@@ -167,6 +167,17 @@ describe('ElevenLabs client', () => {
     assert.equal(a.data.toString(), 'mp3');
   });
 
+  it('designs a voice and saves the chosen preview', async () => {
+    next = { status: 200, body: { text: 'auto text', previews: [{ generated_voice_id: 'g1', audio_base_64: Buffer.from('mp3').toString('base64'), media_type: 'audio/mpeg', duration_secs: 6.2, language: 'pt' }] } };
+    const r = await client().design({ description: 'warm old man', model: 'eleven_ttv_v3', text: null, loudness: 0.5, guidanceScale: 5, enhance: true, seed: 7, referenceAudioBase64: 'AAA', promptStrength: 0.4 });
+    assert.equal(seen.at(-1)!.url, '/v1/text-to-voice/design');
+    assert.deepEqual(JSON.parse(seen.at(-1)!.body), { voice_description: 'warm old man', model_id: 'eleven_ttv_v3', auto_generate_text: true, loudness: 0.5, guidance_scale: 5, should_enhance: true, seed: 7, reference_audio_base64: 'AAA', prompt_strength: 0.4 });
+    assert.deepEqual([r.text, r.previews[0]!.generatedVoiceId, r.previews[0]!.audio.toString(), r.previews[0]!.language], ['auto text', 'g1', 'mp3', 'pt']);
+    next = { status: 200, body: { voice_id: 'v9' } };
+    assert.equal(await client().createDesigned({ name: 'Sabiá (Enredo)', description: 'warm old man', generatedVoiceId: 'g1', playedNotSelected: ['g2'] }), 'v9');
+    assert.deepEqual(JSON.parse(seen.at(-1)!.body), { voice_name: 'Sabiá (Enredo)', voice_description: 'warm old man', generated_voice_id: 'g1', played_not_selected_voice_ids: ['g2'] });
+  });
+
   it('turns ElevenLabs errors into clear messages', async () => {
     next = { status: 401, body: { detail: { status: 'quota_exceeded', message: 'This request exceeds your quota of 10000.' } } };
     await assert.rejects(client().subscription(), (e: HttpError) => e.code === 'voice_quota_exceeded' && e.status === 402 && /quota of 10000/.test(e.message));

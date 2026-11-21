@@ -844,3 +844,16 @@ label.vs-check { display: flex; gap: 8px; align-items: center; margin: .5em 0; }
 /* The filter bar's Clear: as tall as the filter icons */
 .vf-clear { height: 32px; min-height: 0; padding: 0 10px; font-size: .86rem; line-height: 1; display: inline-flex; align-items: center; }
 @media (max-width: 720px), (max-height: 500px) and (pointer: coarse) { .vf-clear { height: 36px; } }
+/* Voice Design dialog */
+.design-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; } .design-grid label { margin: .5em 0; }
+.design-slider { grid-template-columns: 110px 1fr 50px; margin: 4px 0; }
+/* Voice card: header icons like the library's; the foot with the sample and its ✓ / × */
+.voice-card .head-actions button:disabled { opacity: .4; }
+.voice-foot { align-items: center; gap: 6px; margin-top: 8px; }
+.voice-card .voice-ic { width: 34px; height: 34px; min-height: 0; aspect-ratio: 1; padding: 0; border-radius: 50%; display: grid; place-items: center; flex: none; }
+.voice-card .voice-ic.keep-yes { color: var(--green); border-color: var(--green); } .voice-card .voice-ic.keep-yes:hover { background: var(--green); color: var(--on-primary); }
+.voice-card .voice-ic.keep-no { color: var(--danger); border-color: var(--danger); } .voice-card .voice-ic.keep-no:hover { background: var(--danger); color: var(--on-primary); }
+.voice-card .voice-try:hover:not(:disabled) { color: var(--primary); border-color: var(--primary); }
+/* Lists with radio buttons (Voice Design alternatives): the radio keeps its own size and the player gets room */
+.voice-list li input[type=radio] { width: auto; flex: none; margin: 0; }
+.voice-list li audio.sample-audio { min-width: 180px; flex: 1 1 auto; }

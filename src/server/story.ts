@@ -4,8 +4,9 @@ import { inTransaction, withDb, type Q, type Tx } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { closeGap, openGap, parkRow } from '../db/positions.js';
 import { touchProject } from '../db/touch.js';
-import { asset, chapter, clip, cue, generation, lane, project, segment, scene } from '../db/schema.js';
-import { generateForCue } from '../voice/generate.js';
+import { asset, chapter, character, clip, cue, generation, lane, project, segment, scene } from '../db/schema.js';
+import { dropTake, generateForCue, holdTake, pendingTake, type Generated } from '../voice/generate.js';
+import { parseVoiceSettings } from '../voice/character-voice.js';
 import { MAX_VARIATIONS, dropVariation, generateVariations, parseSfxSettings, saveSfxSettings, sfxSettings, variation } from '../voice/sfx.js';
 import { kickAudioJobs } from '../audio/jobs.js';
 import { MAX_UPLOAD, removeFiles, storeFile, type AssetRow } from '../library/files.js';
@@ -539,6 +540,74 @@ export function registerStoryRoutes(app: FastifyInstance): void {
     return reply.code(201).send(result);
   });
 
+  /** Stores a generated take under Storyline as the cue's next take (chosen or not), with its generation record. */
+  async function storeGenerated(request: { account?: { id: string }; log: { error(o: unknown): void } }, id: string, projectId: string, made: Generated, choose: boolean) {
+    const { folder, name } = await withDb(async (db) => {
+      const where = await storylineName(db, id, takeKind(made.origin));
+      return { folder: where.folder, name: `${where.base}.${made.ext}` };
+    });
+    const loudness = await measureBytes(made.data);
+    const stored = await withDb((db) => storeFile(db, { projectId, folder, name, data: made.data, only: ['audio'], maxBytes: MAX_UPLOAD }));
+    if (loudness) await saveLoudness(stored.asset.id, loudness);
+    if (stored.asset.status === 'pending') kickAudioJobs(request.log as Parameters<typeof kickAudioJobs>[0]);
+    const level = await autoLevel(projectId, id, loudness);
+    return segmentWrite(request, 'cue', id, async (tx) => {
+      const created = await addClip(tx, id, { assetId: stored.asset.id, keepCueLength: !choose, choose, origin: made.origin, level });
+      await tx.insert(generation).values({ id: newUlid(), projectId, clipId: created, ...made.record, createdByUserId: userId(request), createdAt: new Date() });
+      return { created, path: stored.asset.path, characterCost: made.record.characterCost };
+    });
+  }
+
+  /**
+   * The Voice panel's sample: the cue spoken by a character's voice with the panel's settings, saved or not
+   * (Bible, decision log 2026-11-21). The take waits in memory until it is kept (✓) or dropped (×).
+   */
+  app.post('/api/cues/:id/generate/try', { onRequest: authenticate(), bodyLimit: 8192 }, async (request, reply) => {
+    const id = checkId((request.params as { id: string }).id);
+    const b = asBody(request.body);
+    const characterId = checkId(b.characterId);
+    const direction = optString(b, 'voiceDirection', 2000, { allowNull: true }) ?? null;
+    const settings = 'voiceSettings' in b ? parseVoiceSettings(b.voiceSettings) : null;
+    const { projectId, voiceId } = await withDb(async (db) => {
+      const access = await accessToEntity(db, userId(request), 'cue', id, { edit: true });
+      const ch = (await db.select({ voiceId: character.voiceId, projectId: character.projectId }).from(character).where(eq(character.id, characterId)).limit(1))[0];
+      if (!ch || ch.projectId !== access.projectId) throw badRequest('invalid_characterId');
+      if (!ch.voiceId) throw new HttpError(409, 'no_voice', 'Choose, create or clone a voice first.');
+      const c = (await db.select({ type: cue.type }).from(cue).where(eq(cue.id, id)).limit(1))[0];
+      if (c?.type !== 'speech') throw badRequest('speech_only', 'Select a speech cue in the script to hear it in this voice.');
+      return { projectId: access.projectId, voiceId: ch.voiceId };
+    });
+    const made = await withDb((db) => generateForCue(db, id, {
+      mode: 'text', direction: null, context: b.context === true, sourceClipId: null, removeNoise: false, override: { voiceId, direction, settings },
+    }));
+    const pid = newUlid();
+    holdTake({ id: pid, userId: userId(request), cueId: id, projectId, made, contentType: made.ext === 'wav' ? 'audio/wav' : 'audio/mpeg' });
+    return reply.code(201).send({ pendingId: pid });
+  });
+
+  app.get('/api/pending-takes/:pid', auth, async (request, reply) => {
+    const t = pendingTake(checkId((request.params as { pid: string }).pid), userId(request));
+    return reply.header('content-type', t.contentType).header('cache-control', 'private, no-store').send(t.made.data);
+  });
+
+  app.delete('/api/pending-takes/:pid', auth, async (request) => {
+    const pid = checkId((request.params as { pid: string }).pid);
+    pendingTake(pid, userId(request));
+    dropTake(pid);
+    return { ok: true };
+  });
+
+  /** Keeps a tried take as the cue's next take; `choose` makes the cue play it. */
+  app.post('/api/pending-takes/:pid/keep', small, async (request, reply) => {
+    const pid = checkId((request.params as { pid: string }).pid);
+    const t = pendingTake(pid, userId(request));
+    const choose = asBody(request.body).choose !== false;
+    await withDb((db) => accessToEntity(db, userId(request), 'cue', t.cueId, { edit: true }));
+    const result = await storeGenerated(request, t.cueId, t.projectId, t.made, choose);
+    dropTake(pid);
+    return reply.code(201).send(result);
+  });
+
   /**
    * Generate audio (Bible, decision log 2026-11-20): `mode: text` makes speech, a sound effect or music from the cue's text
    * (with optional `direction` and, for speech, `context`); `mode: take` runs the voice changer on one of the cue's takes
@@ -554,20 +623,7 @@ export function registerStoryRoutes(app: FastifyInstance): void {
     const input = { mode, direction: direction || null, context: body.context === true, sourceClipId, removeNoise: body.removeNoise === true } as const;
     const projectId = await withDb(async (db) => (await accessToEntity(db, userId(request), 'cue', id, { edit: true })).projectId);
     const made = await withDb((db) => generateForCue(db, id, input));
-    const { folder, name } = await withDb(async (db) => {
-      const where = await storylineName(db, id, takeKind(made.origin));
-      return { folder: where.folder, name: `${where.base}.${made.ext}` };
-    });
-    const loudness = await measureBytes(made.data);
-    const stored = await withDb((db) => storeFile(db, { projectId, folder, name, data: made.data, only: ['audio'], maxBytes: MAX_UPLOAD }));
-    if (loudness) await saveLoudness(stored.asset.id, loudness);
-    if (stored.asset.status === 'pending') kickAudioJobs(request.log);
-    const level = await autoLevel(projectId, id, loudness);
-    const result = await segmentWrite(request, 'cue', id, async (tx) => {
-      const created = await addClip(tx, id, { assetId: stored.asset.id, keepCueLength: false, choose: true, origin: made.origin, level });
-      await tx.insert(generation).values({ id: newUlid(), projectId, clipId: created, ...made.record, createdByUserId: userId(request), createdAt: new Date() });
-      return { created, path: stored.asset.path, characterCost: made.record.characterCost };
-    });
+    const result = await storeGenerated(request, id, projectId, made, true);
     return reply.code(201).send(result);
   });
 

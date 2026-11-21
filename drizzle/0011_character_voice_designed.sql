@@ -1,0 +1,1 @@
+ALTER TABLE `character` MODIFY COLUMN `voice_source` enum('account','public','clone','designed');

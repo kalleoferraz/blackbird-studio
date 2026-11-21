@@ -225,12 +225,12 @@ export function cleanFolder(raw: string): string | null {
 
 /** A character's voice in a file (optional: older files have none). */
 function parseCharacterVoice(o: Json, w: string) {
-  let voice: { id: string; name: string | null; source: 'account' | 'public' | 'clone' | null } | null = null;
+  let voice: { id: string; name: string | null; source: 'account' | 'public' | 'clone' | 'designed' | null } | null = null;
   if (o.voice !== undefined && o.voice !== null) {
     const v = obj(o.voice, `${w}.voice`);
     const id = str(v.id, `${w}.voice.id`, 64);
     if (!/^[A-Za-z0-9_-]+$/.test(id)) fail(`${w}.voice.id`, 'expected a voice ID');
-    voice = { id, name: optStr(v.name, `${w}.voice.name`, 100), source: v.source === null || v.source === undefined ? null : oneOf(v.source, `${w}.voice.source`, ['account', 'public', 'clone'] as const) };
+    voice = { id, name: optStr(v.name, `${w}.voice.name`, 100), source: v.source === null || v.source === undefined ? null : oneOf(v.source, `${w}.voice.source`, ['account', 'public', 'clone', 'designed'] as const) };
   }
   let voiceSettings: VoiceSettings | null = null;
   if (o.voiceSettings !== undefined && o.voiceSettings !== null) {

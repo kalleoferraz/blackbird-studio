@@ -231,7 +231,7 @@ export const character = mysqlTable(
     // The character's ElevenLabs voice (Bible, decision log 2026-11-20); all null until one is chosen.
     voiceId: asciiVarchar('voice_id', { length: 64 }),
     voiceName: varchar('voice_name', { length: 100 }), // the name shown in the app, as it was when chosen
-    voiceSource: mysqlEnum('voice_source', ['account', 'public', 'clone']),
+    voiceSource: mysqlEnum('voice_source', ['account', 'public', 'clone', 'designed']), // designed: made by Voice Design (2026-11-21)
     voiceDirection: text('voice_direction'), // "Voice Settings": directions added to every generation as audio tags
     voiceSettings: json('voice_settings'), // { stability, similarity, style, speed, speakerBoost }, each optional
     createdAt: createdAt(),

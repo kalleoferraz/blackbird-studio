@@ -78,6 +78,13 @@
       "when": 1795217539317,
       "tag": "0010_voice_exclusion",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1795220719251,
+      "tag": "0011_character_voice_designed",
+      "breakpoints": true
     }
   ]
 }

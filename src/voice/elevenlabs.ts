@@ -32,6 +32,12 @@ export interface VoiceDetail {
 /** Filters passed on to the voice lists, by the API's own parameter names (checked by `parseVoiceFilters`). */
 export type VoiceFilters = Record<string, string | number | boolean | string[]>;
 
+export interface DesignRequest {
+  description: string; model: 'eleven_multilingual_ttv_v2' | 'eleven_ttv_v3'; text: string | null; loudness: number; guidanceScale: number;
+  enhance: boolean; seed: number | null; referenceAudioBase64: string | null; promptStrength: number | null;
+}
+export interface DesignPreview { generatedVoiceId: string; audio: Buffer; mediaType: string; durationSecs: number | null; language: string | null }
+
 export interface Audio { data: Buffer; contentType: string; requestId: string | null; characterCost: number | null }
 
 interface CallOptions { query?: Record<string, string | number | boolean | string[] | undefined | null>; json?: unknown; form?: FormData; timeoutMs?: number }
@@ -183,6 +189,35 @@ export class ElevenLabs {
   async sampleAudio(voiceId: string, sampleId: string): Promise<{ data: Buffer; contentType: string }> {
     const res = await this.call('GET', `/v1/voices/${encodeURIComponent(voiceId)}/samples/${encodeURIComponent(sampleId)}/audio`, 'reading a sample');
     return { data: Buffer.from(await res.arrayBuffer()), contentType: res.headers.get('content-type') ?? 'audio/mpeg' };
+  }
+
+  /** Voice Design: previews of a voice made from a description (each with an ID to save it, and its audio). */
+  async design(body: DesignRequest): Promise<{ previews: DesignPreview[]; text: string }> {
+    const r = await this.json<Record<string, any>>('POST', '/v1/text-to-voice/design', 'designing a voice', {
+      json: {
+        voice_description: body.description, model_id: body.model,
+        ...(body.text ? { text: body.text } : { auto_generate_text: true }),
+        loudness: body.loudness, guidance_scale: body.guidanceScale, should_enhance: body.enhance,
+        ...(body.seed !== null ? { seed: body.seed } : {}),
+        ...(body.referenceAudioBase64 ? { reference_audio_base64: body.referenceAudioBase64, ...(body.promptStrength !== null ? { prompt_strength: body.promptStrength } : {}) } : {}),
+      },
+      timeoutMs: 180_000,
+    });
+    return {
+      text: String(r.text ?? ''),
+      previews: (r.previews ?? []).map((p: Record<string, any>): DesignPreview => ({
+        generatedVoiceId: String(p.generated_voice_id), audio: Buffer.from(String(p.audio_base_64 ?? ''), 'base64'),
+        mediaType: p.media_type ?? 'audio/mpeg', durationSecs: p.duration_secs ?? null, language: p.language ?? null,
+      })),
+    };
+  }
+
+  /** Saves a designed preview as a voice in the account; returns its voice ID. */
+  async createDesigned(o: { name: string; description: string; generatedVoiceId: string; playedNotSelected: string[] }): Promise<string> {
+    const r = await this.json<{ voice_id: string }>('POST', '/v1/text-to-voice', 'saving a designed voice', {
+      json: { voice_name: o.name, voice_description: o.description, generated_voice_id: o.generatedVoiceId, ...(o.playedNotSelected.length ? { played_not_selected_voice_ids: o.playedNotSelected } : {}) },
+    });
+    return r.voice_id;
   }
 
   /** Instant voice cloning. */

@@ -12,7 +12,11 @@ import { MUSIC_MAX_MS, MUSIC_MIN_MS, SFX_MAX_MS, SFX_MIN_MS, type VoiceSettings 
 import { assetAudio } from '../server/voices.js';
 import { elevenLabs, type Audio } from './elevenlabs.js';
 
-export interface GenerateInput { mode: 'text' | 'take'; direction: string | null; context: boolean; sourceClipId: string | null; removeNoise: boolean }
+export interface GenerateInput {
+  mode: 'text' | 'take'; direction: string | null; context: boolean; sourceClipId: string | null; removeNoise: boolean;
+  /** Try another voice or settings than the cue's character has saved (the Voice panel's sample): speech only. */
+  override?: { voiceId: string; direction: string | null; settings: VoiceSettings | null };
+}
 
 export interface Generated {
   data: Buffer; ext: 'wav' | 'mp3'; origin: 'generated' | 'voice-converted';
@@ -76,7 +80,7 @@ export async function generateForCue(q: Q, cueId: string, input: GenerateInput):
   const c = row.c;
   const ch = c.characterId ? (await q.select().from(character).where(eq(character.id, c.characterId)).limit(1))[0] ?? null : null;
   const { client, outputFormat, model } = await elevenLabs(row.projectId);
-  const settings = (ch?.voiceSettings ?? null) as VoiceSettings | null;
+  const settings = input.override ? input.override.settings : (ch?.voiceSettings ?? null) as VoiceSettings | null;
   const needVoice = () => {
     if (!ch) throw new HttpError(409, 'no_character', 'This cue has no character, so there is no voice to speak it. Choose a character for the cue first.');
     if (!ch.voiceId) throw new HttpError(409, 'no_voice', `${ch.name} has no voice yet. Choose or clone one in the character's view.`);
@@ -104,8 +108,8 @@ export async function generateForCue(q: Q, cueId: string, input: GenerateInput):
   if (!text) throw badRequest('no_text', c.type === 'speech' ? 'The cue has no text to speak.' : 'The cue has no description to generate from.');
 
   if (c.type === 'speech') {
-    const voiceId = needVoice();
-    const tags = audioTags(ch!.voiceDirection, input.direction);
+    const voiceId = input.override?.voiceId ?? needVoice();
+    const tags = audioTags(input.override ? input.override.direction : ch!.voiceDirection, input.direction);
     const sent = tags ? `${tags} ${text}` : text;
     const ctx = input.context ? await neighbours(q, cueId, row.segmentId) : { previous: null, next: null };
     const languageCode = row.language.split('-')[0]!.toLowerCase();
@@ -145,3 +149,21 @@ export async function generateForCue(q: Q, cueId: string, input: GenerateInput):
       sourceClipId: null, outputFormat: musicFormat, context: false, requestId: audio.requestId, characterCost: audio.characterCost },
   };
 }
+
+// ---- takes tried in the Voice panel, waiting for ✓ (keep) or × (drop) -------------------------------------------
+
+export interface PendingTake { id: string; userId: string; cueId: string; projectId: string; made: Generated; contentType: string; expires: number }
+const pending = new Map<string, PendingTake>();
+function sweep() {
+  const now = Date.now();
+  for (const [k, v] of pending) if (v.expires < now) pending.delete(k);
+  while (pending.size > 40) pending.delete(pending.keys().next().value!);
+}
+export function holdTake(t: Omit<PendingTake, 'expires'>): void { sweep(); pending.set(t.id, { ...t, expires: Date.now() + 30 * 60_000 }); }
+export function pendingTake(id: string, userId: string): PendingTake {
+  sweep();
+  const t = pending.get(id);
+  if (!t || t.userId !== userId) throw new HttpError(404, 'take_gone', 'This take is no longer waiting (takes wait 30 minutes): play the sample again.');
+  return t;
+}
+export const dropTake = (id: string) => pending.delete(id);

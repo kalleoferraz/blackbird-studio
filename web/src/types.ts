@@ -59,7 +59,7 @@ export interface Character {
   id: string; name: string; isNarrator: boolean; colour: string; description: string | null;
   folder: string | null; pictureAssetId: string | null; cueCount?: number;
   /** The ElevenLabs voice (Bible, decision log 2026-11-20). */
-  voice?: { id: string; name: string; source: 'account' | 'public' | 'clone' | null } | null;
+  voice?: { id: string; name: string; source: 'account' | 'public' | 'clone' | 'designed' | null } | null;
   /** "Voice Settings": directions added to every generation as audio tags. */
   voiceDirection?: string | null;
   voiceSettings?: VoiceSettings | null;
