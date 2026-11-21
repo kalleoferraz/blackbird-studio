@@ -491,3 +491,23 @@ export const cueSfx = mysqlTable('cue_sfx', {
   model: asciiVarchar('model', { length: 64 }).notNull().default('eleven_text_to_sound_v3'),
   updatedAt: updatedAt(),
 });
+
+// ---- voices excluded from a project's voice searches (Bible, decision log 2026-11-21) -------------------------
+
+export const voiceExclusion = mysqlTable(
+  'voice_exclusion',
+  {
+    projectId: ulid('project_id')
+      .notNull()
+      .references(() => project.id, { onDelete: 'cascade' }),
+    voiceId: asciiVarchar('voice_id', { length: 64 }).notNull(),
+    source: mysqlEnum('source', ['account', 'public']).notNull(),
+    name: varchar('name', { length: 100 }).notNull(), // as shown when it was excluded
+    info: varchar('info', { length: 300 }), // the line under the name (traits, category)
+    publicOwnerId: asciiVarchar('public_owner_id', { length: 100 }), // a library voice: to add it later
+    previewUrl: varchar('preview_url', { length: 2048 }),
+    createdByUserId: ulid('created_by_user_id').references(() => user.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.voiceId] })],
+);

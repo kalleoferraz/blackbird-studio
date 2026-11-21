@@ -17,6 +17,8 @@ export interface Rows {
   generations?: Record<string, unknown>[];
   /** Sound-effect cues' generation settings. */
   sfx?: Record<string, unknown>[];
+  /** Voices excluded from the project's voice searches. */
+  voiceExclusions?: Record<string, unknown>[];
   assets: Record<string, unknown>[];
 }
 
@@ -95,6 +97,7 @@ export function buildProjectJson(rows: Rows): string {
     chapters: tree,
     notes: [...(rows.notes as Obj[])].sort((a, b) => a.id.localeCompare(b.id)).map((n) => omit(n, ['projectId'])),
     assets: [...(rows.assets as Obj[])].sort((a, b) => a.path.localeCompare(b.path)).map((a) => omit(a, ['projectId', 'claimedBy', 'claimedAt', 'attempts'])),
+    ...(rows.voiceExclusions?.length ? { voiceExclusions: [...(rows.voiceExclusions as Obj[])].sort((a, b) => a.voiceId.localeCompare(b.voiceId)).map((x) => omit(x, ['projectId', 'createdByUserId'])) } : {}),
   });
 }
 

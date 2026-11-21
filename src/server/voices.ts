@@ -2,13 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { and, eq, inArray } from 'drizzle-orm';
 import { inTransaction, withDb } from '../db/client.js';
 import { touchProject } from '../db/touch.js';
-import { asset, character, cue, membership, project } from '../db/schema.js';
+import { asset, character, cue, membership, project, voiceExclusion } from '../db/schema.js';
 import { audioTags, spokenText } from '../voice/generate.js';
 import { projectVoiceSettings } from '../voice/settings.js';
-import { DEFAULT_OUTPUT_FORMAT, DEFAULT_SPEECH_MODEL, OUTPUT_FORMATS, SPEECH_MODELS, isOutputFormat } from '../shared/voice.js';
+import { ACCOUNT_FILTERS, DEFAULT_OUTPUT_FORMAT, DEFAULT_SPEECH_MODEL, OUTPUT_FORMATS, PUBLIC_FILTERS, SPEECH_MODELS, isOutputFormat, type FilterDef } from '../shared/voice.js';
 import { blobStore } from '../storage/blob-store.js';
 import { voiceSamplesFolder } from '../library/managed.js';
-import { elevenLabs, type ElevenLabs } from '../voice/elevenlabs.js';
+import { elevenLabs, type ElevenLabs, type VoiceFilters } from '../voice/elevenlabs.js';
 import { projectTitle, retireVoice, voiceName } from '../voice/character-voice.js';
 import { accessTo, accessToEntity, checkId } from './access.js';
 import { authenticate } from './auth-routes.js';
@@ -32,6 +32,34 @@ export function firstSeconds(text: string, max = 90): string {
 /** Samples already heard, so listening again costs nothing: key → audio. Kept in memory, the newest 60. */
 const sampleCache = new Map<string, Buffer>();
 const remember = (k: string, v: Buffer) => { sampleCache.delete(k); sampleCache.set(k, v); while (sampleCache.size > 60) sampleCache.delete(sampleCache.keys().next().value!); };
+
+/**
+ * The list filters from `?f=<json>`, checked against the documented ones (`defs`); unknown keys are refused.
+ * Exported for tests.
+ */
+export function parseVoiceFilters(raw: string | undefined, defs: FilterDef[]): VoiceFilters {
+  if (!raw) return {};
+  let o: unknown;
+  try { o = JSON.parse(raw); } catch { throw badRequest('invalid_filters', 'The filters are not valid JSON.'); }
+  if (typeof o !== 'object' || o === null || Array.isArray(o)) throw badRequest('invalid_filters');
+  const out: VoiceFilters = {};
+  for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
+    const d = defs.find((x) => x.key === k);
+    if (!d) throw badRequest('invalid_filters', `Unknown filter: ${k}.`);
+    if (v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length)) continue;
+    const bad = () => badRequest('invalid_filters', `The filter "${d.label}" has a value that is not allowed.`);
+    if (d.kind === 'bool') { if (typeof v !== 'boolean') throw bad(); out[k] = v; }
+    else if (d.kind === 'int') { if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > (d.max ?? 1e6)) throw bad(); out[k] = v; }
+    else if (d.kind === 'enum') { if (typeof v !== 'string' || !d.values!.includes(v)) throw bad(); out[k] = v; }
+    else if (d.kind === 'text') { if (typeof v !== 'string' || v.length > 100) throw bad(); out[k] = v.trim(); }
+    else {
+      if (!Array.isArray(v) || v.length > 10 || !v.every((x) => typeof x === 'string' && x.length <= 50)) throw bad();
+      if (d.kind === 'enum-list' && !v.every((x) => d.values!.includes(x as string))) throw bad();
+      out[k] = (v as string[]).map((x) => x.trim()).filter(Boolean);
+    }
+  }
+  return out;
+}
 
 export async function readAll(projectId: string, path: string): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -93,14 +121,74 @@ export function registerVoiceRoutes(app: FastifyInstance): void {
     return { language: own, projectLanguage: own };
   };
 
+  const excludedIds = async (projectId: string) =>
+    new Set((await withDb((db) => db.select({ v: voiceExclusion.voiceId }).from(voiceExclusion).where(eq(voiceExclusion.projectId, projectId)))).map((r) => r.v));
+
+  // ---- voices excluded from this project's searches (Bible, decision log 2026-11-21) -----------------------
+
+  app.get('/api/projects/:id/voices/excluded', auth, async (request) => {
+    const projectId = checkId((request.params as { id: string }).id);
+    return withDb(async (db) => {
+      await accessTo(db, request.account!.id, projectId, { edit: true });
+      const rows = await db.select().from(voiceExclusion).where(eq(voiceExclusion.projectId, projectId)).orderBy(voiceExclusion.name);
+      return { voices: rows.map((r) => ({ voiceId: r.voiceId, source: r.source, name: r.name, info: r.info, publicOwnerId: r.publicOwnerId, previewUrl: r.previewUrl, createdAt: r.createdAt.toISOString() })) };
+    });
+  });
+
+  /** Excludes a voice from this project's account and library searches (kept until it is included again). */
+  app.post('/api/projects/:id/voices/excluded', { ...auth, bodyLimit: 4096 }, async (request, reply) => {
+    const projectId = checkId((request.params as { id: string }).id);
+    const b = asBody(request.body);
+    const voiceId = reqString(b, 'voiceId', 64);
+    if (!VOICE_ID.test(voiceId)) throw badRequest('invalid_voiceId');
+    if (b.source !== 'account' && b.source !== 'public') throw badRequest('invalid_source');
+    const str = (k: string, max: number) => (typeof b[k] === 'string' && (b[k] as string).trim() ? (b[k] as string).trim().slice(0, max) : null);
+    const preview = str('previewUrl', 2048);
+    const row = {
+      projectId, voiceId, source: b.source, name: str('name', 100) ?? voiceId, info: str('info', 300), publicOwnerId: str('publicOwnerId', 100),
+      previewUrl: preview && /^https:\/\//.test(preview) ? preview : null, createdByUserId: request.account!.id, createdAt: new Date(),
+    } as const;
+    await inTransaction(async (tx) => {
+      await accessTo(tx, request.account!.id, projectId, { edit: true });
+      await tx.insert(voiceExclusion).values(row).onDuplicateKeyUpdate({ set: { name: row.name, info: row.info } });
+      await touchProject(tx, projectId, request.account!.id);
+    });
+    return reply.code(201).send({ ok: true });
+  });
+
+  app.delete('/api/projects/:id/voices/excluded/:voiceId', auth, async (request) => {
+    const { id, voiceId } = request.params as { id: string; voiceId: string };
+    const projectId = checkId(id);
+    if (!VOICE_ID.test(voiceId)) throw badRequest('invalid_voiceId');
+    await inTransaction(async (tx) => {
+      await accessTo(tx, request.account!.id, projectId, { edit: true });
+      await tx.delete(voiceExclusion).where(and(eq(voiceExclusion.projectId, projectId), eq(voiceExclusion.voiceId, voiceId)));
+      await touchProject(tx, projectId, request.account!.id);
+    });
+    return { ok: true };
+  });
+
+  /** Adds a public library voice to the ElevenLabs account under its own name, without giving it to a character. */
+  app.post('/api/projects/:id/voices/add', { ...auth, bodyLimit: 4096 }, async (request, reply) => {
+    const projectId = checkId((request.params as { id: string }).id);
+    const b = asBody(request.body);
+    const voiceId = reqString(b, 'voiceId', 64), owner = reqString(b, 'publicOwnerId', 100), name = reqString(b, 'name', 100);
+    if (!VOICE_ID.test(voiceId)) throw badRequest('invalid_voiceId');
+    await withDb((db) => accessTo(db, request.account!.id, projectId, { edit: true }));
+    const { client } = await elevenLabs(projectId);
+    return reply.code(201).send({ voiceId: await client.addShared(owner, voiceId, name) });
+  });
+
   /** The account's voices: built-in and cloned ones, and those added from the library. */
   app.get('/api/projects/:id/voices/account', auth, async (request) => {
     const projectId = checkId((request.params as { id: string }).id);
     const q = request.query as Record<string, string | undefined>;
     const l = await languageFor(request.account!.id, projectId, q.language);
     const { client } = await elevenLabs();
-    const r = await client.voices({ search: q.search?.slice(0, 100) || undefined, language: l.language ?? undefined, nextPageToken: q.pageToken?.slice(0, 500) || undefined, pageSize: 50 });
-    return { ...l, ...r };
+    const filters = parseVoiceFilters(q.f, ACCOUNT_FILTERS);
+    const r = await client.voices({ search: q.search?.slice(0, 100) || undefined, language: l.language ?? undefined, nextPageToken: q.pageToken?.slice(0, 500) || undefined, pageSize: 50, filters });
+    const out = await excludedIds(projectId);
+    return { ...l, ...r, voices: r.voices.filter((v) => !out.has(v.voiceId)) };
   });
 
   /** The public Voice Library, for the project's language unless another is asked for. */
@@ -110,7 +198,20 @@ export function registerVoiceRoutes(app: FastifyInstance): void {
     const l = await languageFor(request.account!.id, projectId, q.language);
     const page = Math.max(0, Math.min(1000, Number(q.page ?? 0) || 0));
     const { client } = await elevenLabs();
-    return { ...l, ...(await client.sharedVoices({ language: l.language ?? undefined, search: q.search?.slice(0, 100) || undefined, page, pageSize: 30 })) };
+    const filters = parseVoiceFilters(q.f, PUBLIC_FILTERS);
+    const out = await excludedIds(projectId);
+    // The library's language filter also returns voices only verified in that language (English voices that can
+    // speak Portuguese, say). Only voices whose own language is the chosen one are kept; to fill a page, up to six
+    // pages of the library are read. `nextPage` is where the next search continues.
+    const own = (v: { language: string | null }) => !l.language || (v.language ?? '').toLowerCase().split(/[-_]/)[0] === l.language;
+    const voices: Awaited<ReturnType<typeof client.sharedVoices>>['voices'] = [];
+    let at = page, hasMore = true;
+    for (let read = 0; read < (l.language ? 6 : 1) && hasMore && voices.length < 30; read++, at++) {
+      const r = await client.sharedVoices({ language: l.language ?? undefined, search: q.search?.slice(0, 100) || undefined, page: at, pageSize: 30, filters });
+      voices.push(...r.voices.filter((v) => own(v) && !out.has(v.voiceId)));
+      hasMore = r.hasMore;
+    }
+    return { ...l, voices, hasMore, nextPage: at };
   });
 
   /**

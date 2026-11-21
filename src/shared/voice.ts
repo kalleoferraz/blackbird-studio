@@ -37,3 +37,54 @@ export const VOICE_LANGUAGES: { code: string; name: string }[] = [
   ['de', 'German'], ['el', 'Greek'], ['hi', 'Hindi'], ['hu', 'Hungarian'], ['id', 'Indonesian'], ['it', 'Italian'], ['ja', 'Japanese'], ['ko', 'Korean'],
   ['no', 'Norwegian'], ['pl', 'Polish'], ['pt', 'Portuguese'], ['ro', 'Romanian'], ['ru', 'Russian'], ['es', 'Spanish'], ['sv', 'Swedish'], ['tr', 'Turkish'], ['uk', 'Ukrainian'],
 ].map(([code, name]) => ({ code: code!, name: name! }));
+
+/**
+ * The filters of the two voice lists, by the API's parameter names (ElevenLabs docs, Nov 2026). `values` are the
+ * documented choices; for traits the docs give no list, `suggest` offers common values and any text is allowed.
+ */
+export type FilterKind = 'enum' | 'enum-list' | 'text' | 'text-list' | 'bool' | 'int';
+export interface FilterDef { key: string; label: string; kind: FilterKind; values?: string[]; suggest?: string[]; group: 'quality' | 'voice' | 'use' | 'sort' | 'more'; max?: number }
+
+const TRAITS: FilterDef[] = [
+  { key: 'gender', label: 'Gender', kind: 'text', suggest: ['male', 'female', 'neutral'], group: 'voice' },
+  { key: 'age', label: 'Age', kind: 'text', suggest: ['young', 'middle_aged', 'old'], group: 'voice' },
+  { key: 'accent', label: 'Accent', kind: 'text', suggest: ['american', 'british', 'australian', 'brazilian', 'portuguese', 'german', 'spanish', 'mexican'], group: 'voice' },
+];
+const USE_CASES = ['narrative_story', 'conversational', 'characters_animation', 'social_media', 'entertainment_tv', 'advertisement', 'informative_educational'];
+
+export const ACCOUNT_FILTERS: FilterDef[] = [
+  { key: 'high_quality', label: 'Studio quality only', kind: 'bool', group: 'quality' },
+  ...TRAITS,
+  { key: 'use_cases', label: 'Use cases', kind: 'text-list', suggest: USE_CASES, group: 'use' },
+  { key: 'sort', label: 'Sort by', kind: 'enum', values: ['name', 'created_at_unix'], group: 'sort' },
+  { key: 'sort_direction', label: 'Direction', kind: 'enum', values: ['asc', 'desc'], group: 'sort' },
+  { key: 'voice_type', label: 'Voice type', kind: 'enum', values: ['personal', 'community', 'default', 'workspace', 'non-default', 'non-community', 'saved'], group: 'more' },
+  { key: 'category', label: 'Category', kind: 'enum', values: ['premade', 'cloned', 'generated', 'professional'], group: 'more' },
+  { key: 'fine_tuning_state', label: 'Fine-tuning (professional clones)', kind: 'enum', values: ['draft', 'not_verified', 'not_started', 'queued', 'fine_tuning', 'fine_tuned', 'failed', 'delayed'], group: 'more' },
+  { key: 'min_notice_period_days', label: 'Minimum notice period (days)', kind: 'int', max: 3650, group: 'more' },
+  { key: 'include_custom_rates', label: 'Include voices with custom rates', kind: 'bool', group: 'more' },
+  { key: 'include_live_moderated', label: 'Include live-moderated voices', kind: 'bool', group: 'more' },
+];
+
+export const PUBLIC_FILTERS: FilterDef[] = [
+  { key: 'category', label: 'Quality', kind: 'enum', values: ['high_quality', 'professional', 'famous'], group: 'quality' },
+  { key: 'featured', label: 'Featured only', kind: 'bool', group: 'quality' },
+  ...TRAITS,
+  { key: 'locale', label: 'Locale', kind: 'text', suggest: ['pt-BR', 'pt-PT', 'en-US', 'en-GB', 'de-DE', 'es-ES', 'es-MX'], group: 'voice' },
+  { key: 'descriptives', label: 'Descriptions', kind: 'text-list', suggest: ['calm', 'warm', 'deep', 'raspy', 'soft', 'confident', 'upbeat', 'professional'], group: 'voice' },
+  { key: 'use_cases', label: 'Use cases', kind: 'text-list', suggest: USE_CASES, group: 'use' },
+  { key: 'sort', label: 'Sort by', kind: 'enum', values: ['created_date', 'usage_character_count_1y', 'trending', 'cloned_by_count'], group: 'sort' },
+  { key: 'reader_app_enabled', label: 'Enabled in the Reader app', kind: 'bool', group: 'more' },
+  { key: 'min_notice_period_days', label: 'Minimum notice period (days)', kind: 'int', max: 3650, group: 'more' },
+  { key: 'owner_id', label: 'Owner ID', kind: 'text', group: 'more' },
+  { key: 'include_custom_rates', label: 'Include voices with custom rates', kind: 'bool', group: 'more' },
+  { key: 'include_live_moderated', label: 'Include live-moderated voices', kind: 'bool', group: 'more' },
+];
+
+/** Readable names for the API's values. */
+export const FILTER_VALUE_LABEL: Record<string, string> = {
+  name: 'Name', created_at_unix: 'Newest', asc: 'Ascending', desc: 'Descending', created_date: 'Newest', usage_character_count_1y: 'Most used (1 year)',
+  trending: 'Trending', cloned_by_count: 'Most cloned', high_quality: 'High quality', professional: 'Professional', famous: 'Famous',
+  premade: 'Built-in', cloned: 'Cloned', generated: 'Designed', personal: 'Mine', community: 'Community', default: 'Default', workspace: 'Workspace',
+  'non-default': 'Not built-in', 'non-community': 'Not community', saved: 'Saved', middle_aged: 'middle aged',
+};

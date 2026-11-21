@@ -19,8 +19,9 @@ export interface VoiceItem {
 
 export interface SharedVoiceItem {
   voiceId: string; publicOwnerId: string; name: string; category: string | null; previewUrl: string | null;
-  language: string | null; accent: string | null; gender: string | null; age: string | null; description: string | null;
+  language: string | null; locale: string | null; accent: string | null; gender: string | null; age: string | null; description: string | null;
   freeUsersAllowed: boolean | null; isAddedByUser: boolean | null;
+  useCase: string | null; descriptive: string | null; featured: boolean | null; clonedByCount: number | null;
 }
 
 export interface VoiceDetail {
@@ -28,9 +29,12 @@ export interface VoiceDetail {
   samples: { sampleId: string; fileName: string; durationSecs: number | null; mimeType: string | null }[];
 }
 
+/** Filters passed on to the voice lists, by the API's own parameter names (checked by `parseVoiceFilters`). */
+export type VoiceFilters = Record<string, string | number | boolean | string[]>;
+
 export interface Audio { data: Buffer; contentType: string; requestId: string | null; characterCost: number | null }
 
-interface CallOptions { query?: Record<string, string | number | boolean | undefined | null>; json?: unknown; form?: FormData; timeoutMs?: number }
+interface CallOptions { query?: Record<string, string | number | boolean | string[] | undefined | null>; json?: unknown; form?: FormData; timeoutMs?: number }
 
 /** ElevenLabs answers errors as `{ detail: { status, message } }` or a validation list `{ detail: [{ msg }] }`. */
 function errorOf(status: number, body: unknown, what: string): HttpError {
@@ -58,7 +62,10 @@ export class ElevenLabs {
 
   private async call(method: string, path: string, what: string, o: CallOptions = {}): Promise<Response> {
     const url = new URL(this.apiUrl + path);
-    for (const [k, v] of Object.entries(o.query ?? {})) if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
+    for (const [k, v] of Object.entries(o.query ?? {})) {
+      if (Array.isArray(v)) { for (const x of v) if (x) url.searchParams.append(k, x); }
+      else if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
+    }
     let res: Response;
     try {
       res = await fetch(url, {
@@ -104,10 +111,9 @@ export class ElevenLabs {
   }
 
   /** The account's voices (built-in, cloned, added from the library). */
-  async voices(o: { search?: string; language?: string; voiceIds?: string[]; pageSize?: number; nextPageToken?: string } = {}): Promise<{ voices: VoiceItem[]; nextPageToken: string | null }> {
-    const url = '/v2/voices' + (o.voiceIds?.length ? '?' + o.voiceIds.map((v) => 'voice_ids=' + encodeURIComponent(v)).join('&') : '');
-    const r = await this.json<Record<string, any>>('GET', url, 'listing voices', {
-      query: { search: o.search, language: o.language, page_size: o.pageSize ?? 100, next_page_token: o.nextPageToken, include_total_count: false },
+  async voices(o: { search?: string; language?: string; voiceIds?: string[]; pageSize?: number; nextPageToken?: string; filters?: VoiceFilters } = {}): Promise<{ voices: VoiceItem[]; nextPageToken: string | null }> {
+    const r = await this.json<Record<string, any>>('GET', '/v2/voices', 'listing voices', {
+      query: { ...(o.filters ?? {}), voice_ids: o.voiceIds, search: o.search, language: o.language ? [o.language] : undefined, page_size: o.pageSize ?? 100, next_page_token: o.nextPageToken, include_total_count: false },
     });
     return {
       voices: (r.voices ?? []).map((v: Record<string, any>): VoiceItem => ({
@@ -119,15 +125,16 @@ export class ElevenLabs {
   }
 
   /** The public Voice Library. */
-  async sharedVoices(o: { language?: string; search?: string; page?: number; pageSize?: number }): Promise<{ voices: SharedVoiceItem[]; hasMore: boolean }> {
+  async sharedVoices(o: { language?: string; search?: string; page?: number; pageSize?: number; filters?: VoiceFilters }): Promise<{ voices: SharedVoiceItem[]; hasMore: boolean }> {
     const r = await this.json<Record<string, any>>('GET', '/v1/shared-voices', 'searching the Voice Library', {
-      query: { language: o.language, search: o.search, page: o.page ?? 0, page_size: o.pageSize ?? 30 },
+      query: { ...(o.filters ?? {}), language: o.language, search: o.search, page: o.page ?? 0, page_size: o.pageSize ?? 30 },
     });
     return {
       voices: (r.voices ?? []).map((v: Record<string, any>): SharedVoiceItem => ({
         voiceId: v.voice_id, publicOwnerId: v.public_owner_id, name: v.name ?? '', category: v.category ?? null, previewUrl: v.preview_url ?? null,
-        language: v.language ?? null, accent: v.accent ?? null, gender: v.gender ?? null, age: v.age ?? null, description: v.description ?? null,
+        language: v.language ?? null, locale: v.locale ?? null, accent: v.accent ?? null, gender: v.gender ?? null, age: v.age ?? null, description: v.description ?? null,
         freeUsersAllowed: v.free_users_allowed ?? null, isAddedByUser: v.is_added_by_user ?? null,
+        useCase: v.use_case ?? null, descriptive: v.descriptive ?? null, featured: v.featured ?? null, clonedByCount: v.cloned_by_count ?? null,
       })),
       hasMore: !!r.has_more,
     };

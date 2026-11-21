@@ -6,7 +6,8 @@ import { after, before, describe, it } from 'node:test';
 import { audioTags, pcmToWav, spokenText } from '../src/voice/generate.js';
 import { parseVoiceSettings, voiceName } from '../src/voice/character-voice.js';
 import { ElevenLabs } from '../src/voice/elevenlabs.js';
-import { firstSeconds } from '../src/server/voices.js';
+import { firstSeconds, parseVoiceFilters } from '../src/server/voices.js';
+import { ACCOUNT_FILTERS, PUBLIC_FILTERS } from '../src/shared/voice.js';
 import { parseSfxSettings } from '../src/voice/sfx.js';
 import { parseWav } from '../src/audio/wav.js';
 import { HttpError } from '../src/server/http.js';
@@ -96,8 +97,8 @@ describe('ElevenLabs client', () => {
 
   it('lists the account voices from /v2/voices', async () => {
     next = { status: 200, body: { voices: [{ voice_id: 'v1', name: 'Ana', category: 'premade', preview_url: 'https://x/p.mp3', labels: { accent: 'br' } }], has_more: false } };
-    const r = await client().voices({ voiceIds: ['v1', 'v2'], search: 'an' });
-    assert.match(seen.at(-1)!.url, /^\/v2\/voices\?voice_ids=v1&voice_ids=v2&search=an/);
+    const r = await client().voices({ voiceIds: ['v1', 'v2'], search: 'an', filters: { high_quality: true, use_cases: ['a', 'b'] } });
+    assert.match(seen.at(-1)!.url, /^\/v2\/voices\?high_quality=true&use_cases=a&use_cases=b&voice_ids=v1&voice_ids=v2&search=an/);
     assert.equal(r.voices[0]!.name, 'Ana');
     assert.equal(r.nextPageToken, null);
   });
@@ -188,5 +189,19 @@ describe('take file names', () => {
     assert.equal(sanitizePart('Era uma vez uma menina que morava perto do rio', TEXT_PART_MAX), 'Era uma vez uma menina que mor');
     assert.equal(sanitizePart('Marta Albuquerque'), 'Marta Albu');
     assert.deepEqual(['human-recorded', 'generated', 'voice-converted'].map(takeKind), ['R', 'G', 'G']);
+  });
+});
+
+describe('voice list filters', () => {
+  it('passes documented filters on and refuses the rest', () => {
+    assert.deepEqual(parseVoiceFilters(JSON.stringify({ high_quality: true, gender: ' female ', use_cases: ['narrative_story', ''], sort: 'name', category: null }), ACCOUNT_FILTERS),
+      { high_quality: true, gender: 'female', use_cases: ['narrative_story'], sort: 'name' });
+    assert.deepEqual(parseVoiceFilters(JSON.stringify({ category: 'high_quality', featured: true, sort: 'cloned_by_count', min_notice_period_days: 7 }), PUBLIC_FILTERS),
+      { category: 'high_quality', featured: true, sort: 'cloned_by_count', min_notice_period_days: 7 });
+    assert.deepEqual(parseVoiceFilters(undefined, ACCOUNT_FILTERS), {});
+    assert.throws(() => parseVoiceFilters(JSON.stringify({ high_quality: 'yes' }), ACCOUNT_FILTERS), HttpError);
+    assert.throws(() => parseVoiceFilters(JSON.stringify({ sort: 'trending' }), ACCOUNT_FILTERS), HttpError); // a public-library sort
+    assert.throws(() => parseVoiceFilters(JSON.stringify({ voice_type: 'saved' }), PUBLIC_FILTERS), HttpError); // an account-only filter
+    assert.throws(() => parseVoiceFilters('{', PUBLIC_FILTERS), HttpError);
   });
 });

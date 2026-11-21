@@ -794,3 +794,50 @@ label.vs-check { display: flex; gap: 8px; align-items: center; margin: .5em 0; }
 
 /* The value of an automation point under the pointer or being dragged. */
 .tl-envelope.edit .env-value { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; fill: var(--text); stroke: var(--bg, #0E0B10); stroke-width: 3px; paint-order: stroke; pointer-events: none; }
+/* Voice picker filters: one icon per group with its own panel */
+.vf-bar { display: flex; gap: 4px; align-items: center; flex: none; }
+.vf-btn { position: relative; width: 32px; height: 32px; padding: 0; display: grid; place-items: center; border-radius: 6px; color: var(--muted); }
+.vf-btn.on { color: var(--primary); border-color: var(--primary); } .vf-btn.open { background: var(--line); }
+.vf-n { position: absolute; top: -5px; right: -5px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: var(--primary); color: var(--on-primary); font-size: .62rem; font-weight: 700; display: grid; place-items: center; }
+.vf-clear { padding: 3px 8px; font-size: .78rem; }
+.vf-pop { position: fixed; z-index: 70; width: 290px; max-height: 70vh; overflow: auto; background: var(--panel2); border: 1px solid #4a3c3e; border-radius: 8px; padding: 10px 12px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.vf-pop label { margin: .5em 0; } .vf-pop select { width: 100%; } .vf-title { font-weight: 600; color: var(--primary); margin-bottom: 4px; } .vf-actions { margin-top: 8px; }
+.vf-list { margin: .6em 0; } .vf-list-label { color: var(--muted); font-size: .85rem; margin-bottom: 4px; }
+.vf-chips { display: flex; flex-wrap: wrap; gap: 4px; } .vf-chip { padding: 2px 8px; font-size: .78rem; border-radius: 12px; } .vf-chip.on { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+.vf-add { margin-top: 6px; } .vf-add input { padding: 3px 7px; }
+.voice-search { flex-wrap: wrap; }
+.voice-x { width: 24px; height: 24px; padding: 0; border-radius: 50%; display: grid; place-items: center; color: var(--muted); flex: none; } .voice-x:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+/* Dialogs with a list of voices: the dialog fits the window and only the list scrolls */
+.dialog:has(> .voice-list.fill) { display: flex; flex-direction: column; max-height: 90vh; overflow: hidden; }
+.dialog:has(> .voice-list.fill) > * { flex: none; }
+.dialog > .voice-list.fill { flex: 1 1 auto; min-height: 60px; max-height: none; overflow: auto; }
+.voice-x svg { display: block; }
+/* Voice picker: search field with its magnifier; language and filters on one row */
+.voice-search { display: grid; gap: 6px; margin-bottom: 6px; }
+.vs-field { position: relative; } .vs-field input { padding-right: 38px; }
+.vs-go { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; padding: 0; border: 0; background: none; display: grid; place-items: center; color: var(--muted); }
+.vs-go:hover:not(:disabled) { color: var(--primary); }
+.vs-filters { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; min-width: 0; } .vs-filters select { min-width: 0; flex: 0 1 auto; max-width: 48%; }
+.voice-acts { display: flex; gap: 8px; align-items: center; flex: none; }
+/* Round buttons stay round (the phone layout gives dialog buttons a minimum height) */
+.dialog .voice-play, .dialog .voice-x, .dialog .vs-go { min-height: 0; aspect-ratio: 1; border-radius: 50%; flex: none; padding: 0; display: grid; place-items: center; }
+.dialog .voice-play { width: 34px; height: 34px; } .dialog .voice-x { width: 28px; height: 28px; }
+@media (max-width: 720px), (max-height: 500px) and (pointer: coarse) {
+  /* Tabs on one row; each voice: play, name and ×, with its buttons on a row below */
+  .voice-tabs { flex-wrap: nowrap; gap: 4px; } .voice-tabs button { flex: 1 1 0; min-width: 0; padding: 6px 4px; font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .voice-list li { display: grid; grid-template-columns: auto 1fr auto; column-gap: 10px; row-gap: 6px; align-items: center; }
+  .voice-list li .voice-acts { grid-column: 1 / -1; grid-row: 2; justify-content: flex-end; flex-wrap: wrap; }
+  .voice-list li .voice-x { grid-column: 3; grid-row: 1; }
+  .voice-list li .voice-acts button { min-height: 34px; padding: 4px 12px; }
+  .vf-btn { width: 36px; height: 36px; }
+}
+/* Voice row icons */
+.dialog .voice-ic { width: 34px; height: 34px; min-height: 0; aspect-ratio: 1; padding: 0; border-radius: 50%; display: grid; place-items: center; flex: none; color: var(--text); }
+.dialog .voice-ic:hover:not(:disabled) { color: var(--primary); border-color: var(--primary); }
+.dialog .voice-ic.in-use, .dialog .voice-ic.in-use:disabled { background: var(--primary); border-color: var(--primary); color: var(--on-primary); opacity: 1; }
+.voice-ic svg, .voice-play svg { display: block; } .ic-wait { font-weight: 700; line-height: 1; }
+.voice-acts { gap: 6px; }
+@media (max-width: 720px), (max-height: 500px) and (pointer: coarse) {
+  .voice-list li .voice-acts button.voice-ic { min-height: 0; padding: 0; }
+}
+.sample-bar { margin: 4px 0 6px; }

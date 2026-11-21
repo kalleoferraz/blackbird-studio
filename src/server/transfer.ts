@@ -4,7 +4,7 @@ import { and, asc, eq, inArray, or } from 'drizzle-orm';
 import { inTransaction, withDb, type Q } from '../db/client.js';
 import { newUlid } from '../db/ids.js';
 import { touchProject } from '../db/touch.js';
-import { asset, assetPeaks, chapter, character, clip, cue, cueSfx, generation, lane, membership, note, project, scene, segment } from '../db/schema.js';
+import { asset, assetPeaks, chapter, character, clip, cue, cueSfx, generation, voiceExclusion, lane, membership, note, project, scene, segment } from '../db/schema.js';
 import { parseVoiceSettings } from '../voice/character-voice.js';
 import { isOutputFormat, type VoiceSettings } from '../shared/voice.js';
 import { PITCH_MAX_CENTS, SPEED_MAX, SPEED_MIN, cleanPoints, type VolumePoint } from '../shared/audio-settings.js';
@@ -63,6 +63,7 @@ export async function buildBundle(q: Q, projectId: string): Promise<Json> {
   const clipNumber = new Map(clips.map((k) => [k.id, k.number]));
   const sfxRows = cues.length ? await q.select().from(cueSfx).where(inArray(cueSfx.cueId, cues.map((c) => c.id))) : [];
   const sfxOf = new Map(sfxRows.map((x) => [x.cueId, x]));
+  const excluded = await q.select().from(voiceExclusion).where(eq(voiceExclusion.projectId, projectId));
 
   const iso = (d: Date | null) => (d ? d.toISOString() : null);
   const targets = new Map<string, { kind: string; path: number[] }>(); // entity id -> where it sits in the bundle
@@ -159,6 +160,7 @@ export async function buildBundle(q: Q, projectId: string): Promise<Json> {
       voice: c.voiceId ? { id: c.voiceId, name: c.voiceName, source: c.voiceSource } : null, voiceDirection: c.voiceDirection, voiceSettings: c.voiceSettings ?? null,
     })),
     chapters: chapterOut,
+    voiceExclusions: excluded.map((x) => ({ voiceId: x.voiceId, source: x.source, name: x.name, info: x.info, publicOwnerId: x.publicOwnerId, previewUrl: x.previewUrl })),
     notes: notes.map((n) => {
       const target =
         n.chapterId ?? n.segmentId ?? n.sceneId ?? n.cueId ?? n.assetId;
@@ -457,7 +459,16 @@ export function parseBundle(raw: unknown) {
     if (n.link !== null && !/^https?:\/\//i.test(n.link)) fail(`notes[${i}].link`, 'expected an http or https address');
   });
 
-  return { proj, assets, chars, chapters, notes, cueTotal };
+  // Optional (older files have none): voices excluded from the project's voice searches.
+  const voiceExclusions = (b.voiceExclusions === undefined || b.voiceExclusions === null ? [] : arr(b.voiceExclusions, 'voiceExclusions', 5000)).map((v, i) => {
+    const w = `voiceExclusions[${i}]`, o = obj(v, w);
+    const voiceId = str(o.voiceId, `${w}.voiceId`, 64);
+    if (!/^[A-Za-z0-9_-]+$/.test(voiceId)) fail(`${w}.voiceId`, 'expected a voice ID');
+    const preview = optStr(o.previewUrl, `${w}.previewUrl`, 2048);
+    return { voiceId, source: oneOf(o.source, `${w}.source`, ['account', 'public'] as const), name: str(o.name, `${w}.name`, 100), info: optStr(o.info, `${w}.info`, 300),
+      publicOwnerId: optStr(o.publicOwnerId, `${w}.publicOwnerId`, 100), previewUrl: preview && /^https:\/\//.test(preview) ? preview : null };
+  });
+  return { proj, assets, chars, chapters, notes, cueTotal, voiceExclusions };
 }
 
 // ---- writing it ----------------------------------------------------------------------------
@@ -588,6 +599,10 @@ export async function importBundle(userId: string, raw: unknown, folderOverride?
     }
     for (let i = 0; i < clipRows.length; i += 500) await tx.insert(clip).values(clipRows.slice(i, i + 500));
     for (let i = 0; i < sfxRows.length; i += 500) await tx.insert(cueSfx).values(sfxRows.slice(i, i + 500));
+    const seenVoices = new Set<string>();
+    const exclusionRows = parsed.voiceExclusions.filter((v) => !seenVoices.has(v.voiceId) && seenVoices.add(v.voiceId))
+      .map((v) => ({ projectId, ...v, createdByUserId: null, createdAt: now }));
+    for (let i = 0; i < exclusionRows.length; i += 500) await tx.insert(voiceExclusion).values(exclusionRows.slice(i, i + 500));
     if (gens.length) {
       const byCueNumber = new Map(clipRows.map((r) => [`${r.cueId}#${r.number}`, r.id!]));
       const rows = gens.map(({ g, clipId, cueId }) => ({

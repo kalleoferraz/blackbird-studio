@@ -1,12 +1,13 @@
 // A character's voice (Bible, decision log 2026-11-20): choose one (this project, the account, the public library),
 // clone one from the Voice Samples folder, and the "Voice Settings": directions as text plus sliders.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ApiError, api, uploadFile } from './api.ts';
 import type { Character, LibFile, LibListing, VoiceSettings } from './types.ts';
-import { Confirm, Dialog, errorText } from './ui.tsx';
+import { Confirm, Dialog, errorText, useLocalState } from './ui.tsx';
 import { useVoiceStatus } from './voiceStatus.ts';
 import { useNav, useStoreValue } from './playback.ts';
-import { VOICE_LANGUAGES } from '../../src/shared/voice.ts';
+import { ACCOUNT_FILTERS, PUBLIC_FILTERS, VOICE_LANGUAGES } from '../../src/shared/voice.ts';
+import { VoiceFilterBar, type FilterValues } from './VoiceFilters.tsx';
 import { MicRecorder, encodeWav, type Take } from './recorder.ts';
 
 /** About how many credits a sample costs: one per character on most models, half on Turbo and Flash (ElevenLabs API pricing, Nov 2026). */
@@ -142,8 +143,29 @@ export function VoiceSliders({ value, disabled, onChange }: { value: VoiceSettin
     </div>);
 }
 
-interface VoiceRow { voiceId: string; name: string; previewUrl: string | null; info: string; publicOwnerId?: string; note?: string; characters?: string[]; cloned?: boolean }
-type Tab = 'project' | 'account' | 'public';
+interface VoiceRow { voiceId: string; name: string; previewUrl: string | null; info: string; publicOwnerId?: string; note?: string; characters?: string[]; cloned?: boolean; source?: 'account' | 'public'; added?: boolean }
+
+const svg = (children: ReactNode, fill = false) => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill={fill ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>);
+/** The voice row's icons. */
+const ICON = {
+  // A play triangle with a small four-armed star: a new sample, generated now.
+  sample: svg(<><path d="M5 6.5v11l9-5.5z" fill="currentColor" /><path d="M19 2.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z" fill="currentColor" strokeWidth="1" /></>),
+  stop: svg(<rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" />),
+  plus: svg(<path d="M12 5v14M5 12h14" />),
+  check: svg(<path d="M5 12.5l4.5 4.5L19 7.5" />),
+  // A person speaking: use this voice for the character.
+  use: svg(<><circle cx="9" cy="8" r="3.3" /><path d="M2.8 20c.7-3.4 3.2-5.3 6.2-5.3s5.5 1.9 6.2 5.3" /><path d="M16.8 6.5c1.4 1.4 1.4 4.6 0 6M19.6 4c2.8 2.8 2.8 8.9 0 11.5" /></>),
+  manage: svg(<><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></>),
+  include: svg(<path d="M9 14l-5-5 5-5M4 9h10.5a5.5 5.5 0 010 11H11" />),
+  exclude: svg(<path d="M7 7l10 10M17 7L7 17" />),
+};
+
+/** A round icon button with its meaning in the tooltip and for screen readers. */
+function IconButton({ title, children, className = '', ...rest }: { title: string; children: ReactNode; className?: string; disabled?: boolean; onClick: () => void }) {
+  return <button type="button" className={'voice-ic ' + className} title={title} aria-label={title} {...rest}>{children}</button>;
+}
+type Tab = 'project' | 'account' | 'public' | 'excluded';
 
 function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChanged }: {
   projectId: string; character: Character; onClose: () => void; onSaved: (c: Character) => void;
@@ -156,6 +178,9 @@ function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChange
   const [more, setMore] = useState<{ token?: string; page?: number } | null>(null);
   // The language filter: '' = the project's language (the server's default), 'all' = every language, or a code.
   const [langPick, setLangPick] = useState('');
+  // The filters of each list, remembered in this browser.
+  const [filterSets, setFilterSets] = useLocalState<{ account: FilterValues; public: FilterValues }>('rs.voiceFilters', { account: {}, public: {} });
+  const filters = tab === 'account' || tab === 'public' ? (filterSets[tab] ?? {}) : {};
   const [projectLanguage, setProjectLanguage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -173,12 +198,16 @@ function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChange
     setLoading(true); setError('');
     try {
       const q = new URLSearchParams();
-      if (search.trim() && tab !== 'project') q.set('search', search.trim());
+      if (search.trim() && (tab === 'account' || tab === 'public')) q.set('search', search.trim());
       if (langPick) q.set('language', langPick);
+      if ((tab === 'account' || tab === 'public') && Object.keys(filters).length) q.set('f', JSON.stringify(filters));
       if (append && more?.token) q.set('pageToken', more.token);
       if (append && more?.page !== undefined) q.set('page', String(more.page));
       let got: VoiceRow[] = [], next: typeof more = null;
-      if (tab === 'project') {
+      if (tab === 'excluded') {
+        const r = await api<{ voices: { voiceId: string; source: 'account' | 'public'; name: string; info: string | null; publicOwnerId: string | null; previewUrl: string | null }[] }>('GET', `/api/projects/${projectId}/voices/excluded`);
+        got = r.voices.map((x) => ({ voiceId: x.voiceId, name: x.name, previewUrl: x.previewUrl, info: [x.source === 'public' ? 'public library' : 'account', x.info].filter(Boolean).join(' · '), source: x.source, publicOwnerId: x.publicOwnerId ?? undefined }));
+      } else if (tab === 'project') {
         const r = await api<{ voices: { voiceId: string; name: string; previewUrl: string | null; category: string | null; source: string | null; missing: boolean; characters: string[] }[] }>('GET', `/api/projects/${projectId}/voices/project`);
         got = r.voices.map((x) => ({ voiceId: x.voiceId, name: x.name, previewUrl: x.previewUrl, info: x.characters.join(', '), note: x.missing ? 'No longer in the ElevenLabs account' : undefined }));
       } else if (tab === 'account') {
@@ -189,18 +218,29 @@ function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChange
       } else {
         const page = append ? more?.page ?? 0 : 0;
         q.set('page', String(page));
-        const r = await api<{ projectLanguage: string | null; hasMore: boolean; voices: { voiceId: string; publicOwnerId: string; name: string; previewUrl: string | null; category: string | null; accent: string | null; gender: string | null; age: string | null; freeUsersAllowed: boolean | null; isAddedByUser: boolean | null }[] }>('GET', `/api/projects/${projectId}/voices/public?${q}`);
+        const r = await api<{ projectLanguage: string | null; hasMore: boolean; nextPage: number; voices: { voiceId: string; publicOwnerId: string; name: string; language: string | null; locale: string | null; previewUrl: string | null; category: string | null; accent: string | null; gender: string | null; age: string | null; freeUsersAllowed: boolean | null; isAddedByUser: boolean | null; useCase: string | null; descriptive: string | null; featured: boolean | null; clonedByCount: number | null }[] }>('GET', `/api/projects/${projectId}/voices/public?${q}`);
         setProjectLanguage(r.projectLanguage);
         got = r.voices.map((x) => ({ voiceId: x.voiceId, publicOwnerId: x.publicOwnerId, name: x.name, previewUrl: x.previewUrl,
-          info: [x.gender, x.age, x.accent, x.category].filter(Boolean).join(' · '),
+          info: [x.featured ? '★ featured' : '', x.locale ?? x.language, x.gender, x.age?.replace(/_/g, ' '), x.accent, x.descriptive, x.useCase?.replace(/_/g, ' '), x.category?.replace(/_/g, ' '),
+            x.clonedByCount ? `cloned ${x.clonedByCount.toLocaleString()}×` : ''].filter(Boolean).join(' · '),
+          added: !!x.isAddedByUser,
           note: [x.freeUsersAllowed === false ? 'not open to free plans' : '', x.isAddedByUser ? 'already in the account' : ''].filter(Boolean).join(' · ') || undefined }));
-        next = r.hasMore ? { page: page + 1 } : null;
+        next = r.hasMore ? { page: r.nextPage } : null;
       }
       setRows((old) => (append ? [...old, ...got] : got)); setMore(next);
     } catch (e) { setError(errorText(e)); }
     setLoading(false);
   };
-  useEffect(() => { setRows([]); setMore(null); void load(false); }, [tab, langPick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const filterKey = JSON.stringify(filters);
+  // Typing searches by itself, a moment after the last key (the magnifier or Enter search at once).
+  const typed = useRef(false);
+  useEffect(() => {
+    if (!typed.current) { typed.current = true; return; }
+    if (tab !== 'account' && tab !== 'public') return;
+    const t = setTimeout(() => { setRows([]); setMore(null); void load(false); }, 450);
+    return () => clearTimeout(t);
+  }, [search]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setRows([]); setMore(null); void load(false); }, [tab, langPick, filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const langName = (c: string | null) => VOICE_LANGUAGES.find((l) => l.code === c)?.name ?? c ?? '';
   const langOptions = projectLanguage && !VOICE_LANGUAGES.some((l) => l.code === projectLanguage) ? [{ code: projectLanguage, name: projectLanguage }, ...VOICE_LANGUAGES] : VOICE_LANGUAGES;
 
@@ -211,6 +251,31 @@ function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChange
     const a = new Audio(r.previewUrl);
     a.onended = () => setPlaying(null);
     audio.current = a; setPlaying(r.voiceId); void a.play().catch(() => setPlaying(null));
+  };
+  const [added, setAdded] = useState<Set<string>>(new Set());
+  /** Adds a library voice to the account under its own name, without giving it to the character. */
+  const addToAccount = async (r: VoiceRow) => {
+    setBusy(true); setError('');
+    try {
+      await api('POST', `/api/projects/${projectId}/voices/add`, { voiceId: r.voiceId, publicOwnerId: r.publicOwnerId, name: r.name.slice(0, 100) });
+      setAdded((s) => new Set(s).add(r.voiceId));
+    } catch (e) { setError(errorText(e)); }
+    setBusy(false);
+  };
+  /** Takes a voice out of this project's searches, now and later (kept in the app; ElevenLabs has no such list). */
+  const exclude = async (r: VoiceRow) => {
+    setBusy(true); setError('');
+    try {
+      await api('POST', `/api/projects/${projectId}/voices/excluded`, { voiceId: r.voiceId, source: tab === 'public' ? 'public' : 'account', name: r.name, info: r.info, publicOwnerId: r.publicOwnerId, previewUrl: r.previewUrl });
+      setRows((old) => old.filter((x) => x.voiceId !== r.voiceId));
+    } catch (e) { setError(errorText(e)); }
+    setBusy(false);
+  };
+  const include = async (r: VoiceRow) => {
+    setBusy(true); setError('');
+    try { await api('DELETE', `/api/projects/${projectId}/voices/excluded/${r.voiceId}`); setRows((old) => old.filter((x) => x.voiceId !== r.voiceId)); }
+    catch (e) { setError(errorText(e)); }
+    setBusy(false);
   };
   const use = async (r: VoiceRow) => {
     setBusy(true); setError('');
@@ -223,40 +288,61 @@ function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChange
   return (
     <Dialog title={`Voice for ${character.name}`} wide onClose={onClose}>
       <div className="row voice-tabs">
-        {(['project', 'account', 'public'] as const).map((t) => (
+        {(['project', 'account', 'public', 'excluded'] as const).map((t) => (
           <button key={t} type="button" className={tab === t ? 'primary' : ''} onClick={() => setTab(t)}>
-            {t === 'project' ? 'This project' : t === 'account' ? 'My account' : 'Public library'}</button>))}
+            {t === 'project' ? 'This project' : t === 'account' ? 'My account' : t === 'public' ? 'Public library' : 'Excluded'}</button>))}
       </div>
-      {tab !== 'project' && <form className="row voice-search" onSubmit={(e) => { e.preventDefault(); void load(false); }}>
-        <input placeholder="Search by name, accent, description…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      {(tab === 'account' || tab === 'public') && <form className="voice-search" onSubmit={(e) => { e.preventDefault(); void load(false); }}>
+        <div className="vs-field">
+          <input placeholder="Search by name, accent, description…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <button type="submit" className="vs-go" disabled={loading} title="Search" aria-label="Search">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" /><path d="M15 15l5 5" /></svg>
+          </button>
+        </div>
+        <div className="vs-filters">
         <select value={langPick} title="Voice language" onChange={(e) => setLangPick(e.target.value)}>
-          <option value="">{projectLanguage ? `${langName(projectLanguage)} (project)` : 'Project language'}</option>
           <option value="all">All languages</option>
-          {langOptions.filter((l) => l.code !== projectLanguage).map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
+          <option value="">{projectLanguage ? `${langName(projectLanguage)} (project)` : 'Project language'}</option>
+          {projectLanguage !== 'en' && <option value="en">English</option>}
+          {langOptions.filter((l) => l.code !== projectLanguage && l.code !== 'en').map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
         </select>
-        <button disabled={loading}>Search</button>
+        <VoiceFilterBar defs={tab === 'account' ? ACCOUNT_FILTERS : PUBLIC_FILTERS} value={filters}
+          onChange={(v) => setFilterSets({ ...filterSets, [tab]: v })} />
+        </div>
       </form>}
-      {tab === 'account' && langPick !== 'all' && <p className="muted small">Multilingual voices can speak other languages too; choose "All languages" to see every voice in the account.</p>}
       <div className="sample-bar">
-        <label>Sample text <span className="muted small">({sampleText.found ? 'the start of the selected cue' : 'select a cue in the script, or type a line'}; spoken in the project's language with {character.name}'s directions, about {sampleCredits(sampleText.text, model)} credits per voice, free to hear again)</span>
-          <input value={sampleText.text} maxLength={200} onChange={(e) => sampleText.setText(e.target.value)} placeholder="A line to hear each voice speak" /></label>
+        <input value={sampleText.text} maxLength={200} onChange={(e) => sampleText.setText(e.target.value)} aria-label="Sample text"
+          placeholder="Sample text: select a cue in the script, or type a line"
+          title={`Spoken by a voice's new-sample icon, in the project's language with ${character.name}'s directions: about ${sampleCredits(sampleText.text, model)} credits per voice, free to hear again`} />
       </div>
       {sample.error && <p className="error">{sample.error}</p>}
       {tab === 'public' && <p className="muted small">A public voice is added to the ElevenLabs account as "{character.name} (project title)".</p>}
-      <ul className="voice-list">
+      <ul className="voice-list fill">
         {rows.map((r) => (
           <li key={r.publicOwnerId ? r.publicOwnerId + '/' + r.voiceId : r.voiceId} className={r.voiceId === character.voice?.id ? 'current' : ''}>
-            <button type="button" className="voice-play" disabled={!r.previewUrl} title={r.previewUrl ? 'Listen' : 'No preview'} onClick={() => play(r)}>{playing === r.voiceId ? '■' : '▶'}</button>
+            <button type="button" className="voice-play" disabled={!r.previewUrl} title={r.previewUrl ? 'Listen to the preview (free)' : 'No preview'} aria-label="Preview" onClick={() => play(r)}>{playing === r.voiceId ? ICON.stop : svg(<path d="M8 5.5v13l10.5-6.5z" fill="currentColor" />)}</button>
             <div className="grow"><b>{r.name}</b><div className="muted small">{r.info}{r.note ? <> · <span className="voice-note">{r.note}</span></> : null}</div></div>
-            <button type="button" className="voice-sample" disabled={!sampleText.text.trim() || (sample.loading !== null && sample.loading !== r.voiceId)}
-              title={`Hear this voice speak the sample text (about ${sampleCredits(sampleText.text, model)} credits)`}
-              onClick={() => { audio.current?.pause(); setPlaying(null); void sample.play(r.voiceId, r.voiceId, sampleText.text.trim()); }}>
-              {sample.playing === r.voiceId ? '■ Sample' : sample.loading === r.voiceId ? '…' : '▶ Sample'}</button>
-            {r.cloned && <button type="button" disabled={busy} onClick={() => setManaging(r)}>Manage</button>}
-            <button type="button" disabled={busy || r.voiceId === character.voice?.id} onClick={() => void use(r)}>{r.voiceId === character.voice?.id ? 'In use' : tab === 'public' ? 'Add and use' : 'Use'}</button>
+            <div className="voice-acts">
+            {tab === 'excluded'
+              ? <IconButton title="Include again in this project's searches" onClick={() => void include(r)} disabled={busy}>{ICON.include}</IconButton>
+              : <>
+              <IconButton title={sample.playing === r.voiceId ? 'Stop the sample' : `New sample: this voice speaks the sample text (about ${sampleCredits(sampleText.text, model)} credits)`}
+                disabled={!sampleText.text.trim() || (sample.loading !== null && sample.loading !== r.voiceId)}
+                onClick={() => { audio.current?.pause(); setPlaying(null); void sample.play(r.voiceId, r.voiceId, sampleText.text.trim()); }}>
+                {sample.playing === r.voiceId ? ICON.stop : sample.loading === r.voiceId ? <span className="ic-wait">…</span> : ICON.sample}</IconButton>
+              {tab === 'public' && <IconButton title={added.has(r.voiceId) || r.added ? 'Already in your account' : 'Add to your account (without using it)'}
+                disabled={busy || added.has(r.voiceId) || !!r.added} onClick={() => void addToAccount(r)}>{added.has(r.voiceId) || r.added ? ICON.check : ICON.plus}</IconButton>}
+              {r.cloned && <IconButton title="Manage this cloned voice" disabled={busy} onClick={() => setManaging(r)}>{ICON.manage}</IconButton>}
+              <IconButton className={r.voiceId === character.voice?.id ? 'in-use' : ''} disabled={busy || r.voiceId === character.voice?.id}
+                title={r.voiceId === character.voice?.id ? `${character.name}'s voice` : tab === 'public' ? `Use for ${character.name} (adds it to your account)` : `Use for ${character.name}`}
+                onClick={() => void use(r)}>{ICON.use}</IconButton>
+              </>}
+            </div>
+            {(tab === 'account' || tab === 'public') && <button type="button" className="voice-x" disabled={busy} title="Exclude from this project's searches (see the Excluded tab)" aria-label={`Exclude ${r.name}`}
+              onClick={() => void exclude(r)}>{ICON.exclude}</button>}
           </li>))}
       </ul>
-      {!loading && !rows.length && !error && <p className="muted">{tab === 'project' ? 'No character of this project has a voice yet.' : 'No voices found.'}</p>}
+      {!loading && !rows.length && !error && <p className="muted">{tab === 'project' ? 'No character of this project has a voice yet.' : tab === 'excluded' ? 'No voice is excluded in this project.' : 'No voices found.'}</p>}
       {loading && <p className="muted">Loading…</p>}
       {more && !loading && <button type="button" onClick={() => void load(true)}>Load more</button>}
       {error && <p className="error">{error}</p>}
@@ -329,7 +415,7 @@ function CloneDialog({ projectId, character, onClose, onSaved, addTo, onAdded }:
   return (
     <Dialog title={addTo ? `Add samples to ${addTo.name}` : `Clone a voice for ${character.name}`} wide onClose={onClose}>
       <p className="muted small">Choose clean recordings of one speaker, without music, reverb or noise: each at least 5 seconds, 1 to 2 minutes in all. Files uploaded here are kept in {folder}.</p>
-      <ul className="voice-list">
+      <ul className="voice-list fill">
         {all.map((f) => (
           <li key={f.id}>
             <input type="checkbox" checked={picked.has(f.id)} disabled={f.status !== 'ready'} onChange={() => toggle(f.id)} />
@@ -461,7 +547,7 @@ function ManageClone({ projectId, voiceId, character, onClose, onChanged }: {
         <label>Description<textarea rows={2} maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} /></label>
         <div className="row end"><button type="button" className="primary" disabled={busy || !changed || !name.trim()} onClick={() => void save()}>Save</button></div>
         <h3 className="voice-sub">Samples</h3>
-        <ul className="voice-list">
+        <ul className="voice-list fill">
           {d.samples.map((x) => (
             <li key={x.sampleId}>
               <div className="grow">{x.fileName || x.sampleId}<div className="muted small">{x.durationSecs ? `${x.durationSecs.toFixed(1)} s` : ''}</div></div>
