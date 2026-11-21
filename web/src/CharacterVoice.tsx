@@ -316,7 +316,6 @@ function VoicePicker({ projectId, character, onClose, onSaved, onCharacterChange
           title={`Spoken by a voice's new-sample icon, in the project's language with ${character.name}'s directions: about ${sampleCredits(sampleText.text, model)} credits per voice, free to hear again`} />
       </div>
       {sample.error && <p className="error">{sample.error}</p>}
-      {tab === 'public' && <p className="muted small">A public voice is added to the ElevenLabs account as "{character.name} (project title)".</p>}
       <ul className="voice-list fill">
         {rows.map((r) => (
           <li key={r.publicOwnerId ? r.publicOwnerId + '/' + r.voiceId : r.voiceId} className={r.voiceId === character.voice?.id ? 'current' : ''}>

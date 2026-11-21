@@ -232,11 +232,10 @@ export function registerVoiceRoutes(app: FastifyInstance): void {
       await accessToEntity(db, request.account!.id, 'character', id, { edit: true });
       return (await db.select().from(character).where(eq(character.id, id)).limit(1))[0]!;
     });
-    let finalId = voiceId, finalName = shownName;
-    if (owner) {
-      finalName = voiceName(cur.name, await withDb((db) => projectTitle(db, cur.projectId)));
-      finalId = await client.addShared(owner, voiceId, finalName);
-    }
+    let finalId = voiceId;
+    const finalName = shownName;
+    // A library voice is added to the account just as it is, under its own name (decided 2026-11-21).
+    if (owner) finalId = await client.addShared(owner, voiceId, finalName);
     const row = await inTransaction(async (tx) => {
       await tx.update(character).set({ voiceId: finalId, voiceName: finalName.slice(0, 100), voiceSource: source, updatedAt: new Date() }).where(eq(character.id, id));
       await touchProject(tx, cur.projectId, request.account!.id);

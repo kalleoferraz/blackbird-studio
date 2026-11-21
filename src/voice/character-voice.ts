@@ -16,14 +16,14 @@ export async function projectTitle(q: Q, projectId: string): Promise<string> {
 }
 
 /**
- * A voice a character no longer uses stays in the account, renamed "Character (Project) · unused", when the app
- * created it (added from the library or cloned) and no other character uses it. A failure is only logged.
+ * A cloned voice a character no longer uses stays in the account, renamed "Character (Project) · unused", when no
+ * other character uses it. Library voices keep their own name (they are added as they are). A failure is only logged.
  */
 export async function retireVoice(
   q: Q, client: ElevenLabs, old: { id: string; voiceId: string | null; voiceSource: string | null; name: string; projectId: string },
   log?: { warn(o: unknown, m?: string): void },
 ): Promise<void> {
-  if (!old.voiceId || (old.voiceSource !== 'public' && old.voiceSource !== 'clone')) return;
+  if (!old.voiceId || old.voiceSource !== 'clone') return;
   const others = await q.select({ id: character.id }).from(character).where(and(eq(character.voiceId, old.voiceId), ne(character.id, old.id))).limit(1);
   if (others.length) return;
   try {
